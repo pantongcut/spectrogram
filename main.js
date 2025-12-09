@@ -741,7 +741,6 @@ const zoomControl = initZoomControls(
       currentFreqMax,
       getOverlapPercent(),
       () => {
-        renderAxes();
         restoreImageEnhancement(); //
       },
       currentFftSize,           // 維持 FFT 設定
