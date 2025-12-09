@@ -132,6 +132,64 @@ const expandBackBtn = document.getElementById('expandBackBtn');
 const expandBackCount = document.getElementById('expandBackCount');
 let ignoreNextPause = false;
 
+/**
+ * Debounce utility function to prevent expensive operations (like replacePlugin)
+ * from being called too frequently during zoom slider dragging.
+ * @param {Function} fn - The function to debounce
+ * @param {number} delayMs - Delay in milliseconds
+ * @returns {Function} Debounced function that tracks pending execution
+ */
+function createDebounce(fn, delayMs) {
+  let timeoutId = null;
+  let pendingCall = false;
+
+  const debounced = function(...args) {
+    pendingCall = true;
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      fn(...args);
+      pendingCall = false;
+    }, delayMs);
+  };
+
+  debounced.flush = function() {
+    clearTimeout(timeoutId);
+    pendingCall = false;
+  };
+
+  debounced.hasPending = function() {
+    return pendingCall;
+  };
+
+  return debounced;
+}
+
+/**
+ * Debounced handler for zoom-triggered plugin replacement.
+ * Re-evaluates auto FFT/Overlap settings based on new zoom level.
+ */
+const debouncedZoomPluginUpdate = createDebounce(() => {
+  const colorMap = getEffectiveColorMap();
+  replacePlugin(
+    colorMap,
+    spectrogramHeight,
+    currentFreqMin,
+    currentFreqMax,
+    getOverlapPercent(), // Re-evaluates 'auto' overlap based on new zoom/buffer
+    () => {
+      renderAxes();
+      freqHoverControl?.refreshHover();
+      autoIdControl?.updateMarkers();
+      updateSpectrogramSettingsText();
+      restoreImageEnhancement();
+    },
+    undefined,  // fftSamples (use default)
+    undefined,  // windowFunc (use default)
+    undefined,  // peakMode (use default)
+    undefined   // peakThreshold (use default)
+  );
+}, 250); // 250ms debounce to prevent freezing during slider drag
+
 const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 if (isMobileDevice) {
   [
@@ -734,6 +792,8 @@ const zoomControl = initZoomControls(
     freqHoverControl?.refreshHover();
     autoIdControl?.updateMarkers();
     updateSpectrogramSettingsText();
+    // Trigger debounced plugin update to recalculate 'auto' overlap based on new zoom level
+    debouncedZoomPluginUpdate();
   },
   () => selectionExpandMode,
   () => {
