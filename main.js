@@ -734,6 +734,25 @@ const zoomControl = initZoomControls(
     freqHoverControl?.refreshHover();
     autoIdControl?.updateMarkers();
     updateSpectrogramSettingsText();
+    replacePlugin(
+      getEffectiveColorMap(),   // 維持當前配色
+      spectrogramHeight,        // 維持高度
+      currentFreqMin,           // 維持頻率範圍
+      currentFreqMax,
+      getOverlapPercent(),      // <--- 核心：這裡會根據新的 Zoom 寬度立即重新計算 Auto 值
+      () => {
+        renderAxes();
+        freqHoverControl?.refreshHover();
+        autoIdControl?.updateMarkers();
+        updateSpectrogramSettingsText();
+        restoreImageEnhancement(); //
+      },
+      currentFftSize,           // 維持 FFT 設定
+      currentWindowType,
+      undefined,                // peakMode 使用內部狀態
+      undefined,                // peakThreshold 使用內部狀態
+      handleColorMapChange      // 維持配色變更事件
+    );
   },
   () => selectionExpandMode,
   () => {
