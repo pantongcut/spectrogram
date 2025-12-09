@@ -94,7 +94,8 @@ export function replacePlugin(
 
   currentFftSize = fftSamples;
   currentWindowType = windowFunc;
-  const noverlap = overlapPercent !== null
+  // If overlapPercent is undefined (auto mode), pass null to plugin so it dynamically calculates
+  const noverlap = (overlapPercent !== null && overlapPercent !== undefined)
     ? Math.floor(fftSamples * (overlapPercent / 100))
     : null;
 

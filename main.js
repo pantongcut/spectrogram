@@ -1150,7 +1150,11 @@ function updateSpectrogramSettingsText() {
 
 function getOverlapPercent() {
   if (currentOverlap === 'auto') {
-    return getAutoOverlapPercent(); 
+    // Return undefined to allow the plugin to dynamically calculate overlap
+    // based on the current canvas width (which changes during zoom).
+    // The plugin's getFrequencies() method will use this logic:
+    // if (!this.noverlap) { o = Math.max(0, Math.round(fftSamples - (bufferLength / canvasWidth))) }
+    return undefined;
   }
   const parsed = parseInt(currentOverlap, 10);
   return isNaN(parsed) ? null : parsed;
