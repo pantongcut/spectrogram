@@ -988,11 +988,29 @@ getWavesurfer().on('decode', () => {
   
   progressLineElem.style.display = 'none';
   updateProgressLine(0);
-  renderAxes();
-  freqHoverControl?.refreshHover();
-  autoIdControl?.updateMarkers();
-  updateSpectrogramSettingsText();
-  restoreImageEnhancement(); // Restore brightness/contrast/gain settings after decode
+
+  // FIX: Force plugin replacement to recalculate 'auto' overlap based on new buffer length
+  const colorMap = getEffectiveColorMap();
+  replacePlugin(
+    colorMap,
+    spectrogramHeight,
+    currentFreqMin,
+    currentFreqMax,
+    getOverlapPercent(), // This now calculates based on the NEW buffer length
+    () => {
+        // Callback after render
+        renderAxes();
+        freqHoverControl?.refreshHover();
+        autoIdControl?.updateMarkers();
+        updateSpectrogramSettingsText();
+        restoreImageEnhancement();
+    },
+    currentFftSize,
+    currentWindowType,
+    undefined,
+    undefined,
+    handleColorMapChange
+  );
 });
 
 document.body.addEventListener('touchstart', () => {
@@ -1678,4 +1696,3 @@ Object.defineProperty(window, '__currentFileName', {
   },
   configurable: true
 });
-
