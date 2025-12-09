@@ -734,21 +734,6 @@ const zoomControl = initZoomControls(
     freqHoverControl?.refreshHover();
     autoIdControl?.updateMarkers();
     updateSpectrogramSettingsText();
-    replacePlugin(
-      getEffectiveColorMap(),   // 維持當前配色
-      spectrogramHeight,        // 維持高度
-      currentFreqMin,           // 維持頻率範圍
-      currentFreqMax,
-      getOverlapPercent(),
-      () => {
-        restoreImageEnhancement(); //
-      },
-      currentFftSize,           // 維持 FFT 設定
-      currentWindowType,
-      undefined,                // peakMode 使用內部狀態
-      undefined,                // peakThreshold 使用內部狀態
-      handleColorMapChange      // 維持配色變更事件
-    );
   },
   () => selectionExpandMode,
   () => {
