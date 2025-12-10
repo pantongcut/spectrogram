@@ -1332,7 +1332,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
    * @param {number} callPeakPower_dB - Call peak power in dB (stable value)
    * @returns {Object} {threshold, lowFreq_Hz, lowFreq_kHz, endFreq_Hz, endFreq_kHz, warning}
    */
-  findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB) {
+findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB) {
     if (spectrogram.length === 0) return {
       threshold: -24,
       lowFreq_Hz: null,
@@ -1342,19 +1342,19 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       warning: false
     };
 
-    const lastFramePower = spectrogram[spectrogram.length - 1];
+    // CRITICAL FIX: Do NOT use static lastFramePower here.
+    // We must find the correct frame for each threshold inside the loop.
     
-    // CRITICAL FIX (2025): Use stable call.peakPower_dB instead of computing global peak
+    // CRITICAL: Use stable call.peakPower_dB
     const stablePeakPower_dB = callPeakPower_dB;
+    const numBins = spectrogram[0].length;
     
     // 測試閾值範圍：-24 到 -70 dB
     const thresholdRange = [];
-    for (let threshold = -24; threshold >= -70; threshold-= 0.5) {
+    for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
       thresholdRange.push(threshold);
     }
     
-    // 為每個閾值測量 Low Frequency 和 End Frequency
-    // CRITICAL: 使用與 measureFrequencyParameters 完全相同的計算方法
     const measurements = [];
     
     for (const testThreshold_dB of thresholdRange) {
@@ -1362,44 +1362,63 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       let endFreq_Hz = null;
       let foundBin = false;
       
-      // 使用穩定的 call peak power（不受 selection 大小影響）
       const lowFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
       
       // ============================================================
-      // 計算 LOW FREQUENCY（從低到高掃描，找最低頻率）
-      // 使用最後一幀的功率譜（代表信號末尾）
+      // 1. 動態尋找有效結束幀 (Dynamic End Frame Detection)
+      // 模擬 Manual Mode：找到最後一個能量超過閾值的幀
       // ============================================================
-      for (let binIdx = 0; binIdx < lastFramePower.length; binIdx++) {
-        if (lastFramePower[binIdx] > lowFreqThreshold_dB) {
-          lowFreq_Hz = freqBins[binIdx];
-          foundBin = true;
-          
-          // 嘗試線性插值以獲得更高精度
-          if (binIdx > 0) {
-            const thisPower = lastFramePower[binIdx];
-            const prevPower = lastFramePower[binIdx - 1];
-            
-            if (prevPower < lowFreqThreshold_dB && thisPower > lowFreqThreshold_dB) {
-              const powerRatio = (thisPower - lowFreqThreshold_dB) / (thisPower - prevPower);
-              const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
-              lowFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
-            }
+      let activeEndFrameIdx = -1;
+      
+      // 從後往前掃描，找到第一個含有 > threshold 的幀
+      for (let f = spectrogram.length - 1; f >= 0; f--) {
+        const frame = spectrogram[f];
+        let frameHasSignal = false;
+        // 快速檢查該幀是否有任何 bin 超過閾值
+        for (let b = 0; b < numBins; b++) {
+          if (frame[b] > lowFreqThreshold_dB) {
+            frameHasSignal = true;
+            break;
           }
+        }
+        if (frameHasSignal) {
+          activeEndFrameIdx = f;
           break;
         }
       }
       
-      // ============================================================
-      // 計算 END FREQUENCY（從低到高掃描，找最低頻率）
-      // 與 Low Frequency 相同（都是最後一幀的最低頻率）
-      // 這與 High Frequency / Start Frequency 的關係相同
-      // ============================================================
-      if (foundBin) {
-        endFreq_Hz = lowFreq_Hz;  // End frequency = low frequency from last frame
+      // 如果找不到任何有效幀（整個選區都低於閾值），則此閾值無效
+      if (activeEndFrameIdx !== -1) {
+        const targetFramePower = spectrogram[activeEndFrameIdx];
+        
+        // ============================================================
+        // 2. 計算 LOW FREQUENCY（使用找到的 activeEndFrameIdx）
+        // ============================================================
+        for (let binIdx = 0; binIdx < targetFramePower.length; binIdx++) {
+          if (targetFramePower[binIdx] > lowFreqThreshold_dB) {
+            lowFreq_Hz = freqBins[binIdx];
+            foundBin = true;
+            
+            // 嘗試線性插值
+            if (binIdx > 0) {
+              const thisPower = targetFramePower[binIdx];
+              const prevPower = targetFramePower[binIdx - 1];
+              
+              if (prevPower < lowFreqThreshold_dB && thisPower > lowFreqThreshold_dB) {
+                const powerRatio = (thisPower - lowFreqThreshold_dB) / (thisPower - prevPower);
+                const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
+                lowFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
+              }
+            }
+            break;
+          }
+        }
       }
       
-      // 如果沒有找到超過閾值的 bin，則無法測量此閾值
-      if (!foundBin) {
+      // End Frequency = Low Frequency (from last frame)
+      if (foundBin) {
+        endFreq_Hz = lowFreq_Hz;
+      } else {
         lowFreq_Hz = null;
         endFreq_Hz = null;
       }
@@ -1430,35 +1449,24 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       };
     }
     
-    // ============================================================
-    // 新規則 2025：Low Frequency 需應用防呆機制
-    // 找出第一個 <= Peak Frequency 且 foundBin=true 的 Low Frequency
-    // 低頻應該低於峰值頻率，這是 FM 掃頻信號的特性
-    // 決定最終使用的閾值 + End Frequency
-    // ============================================================
-    let optimalThreshold = -24;  // 默認使用最保守的設定
-    let optimalMeasurement = validMeasurements[0];  // 預設為第一個有效測量
+    // ... (後續 Anomaly Detection 邏輯保持不變) ...
     
-    // 追蹤異常檢測狀態
-    let lastValidThreshold = validMeasurements[0].threshold;  // 最後一個有效測量（無異常的）
+    // ============================================================
+    // Low Frequency 需應用防呆機制 (邏輯與之前保持一致)
+    // ============================================================
+    let optimalThreshold = -24;
+    let optimalMeasurement = validMeasurements[0];
+    let lastValidThreshold = validMeasurements[0].threshold;
     let lastValidMeasurement = validMeasurements[0];
-    let recordedEarlyAnomaly = null;  // 早期記錄的異常前閾值（可能被忽略）
-    let firstAnomalyIndex = -1;       // 第一個異常發生的索引位置
-    let majorJumpIndex = -1;          // Major jump 發生的索引位置
-    let majorJumpThreshold = null;    // Major jump 前的閾值
+    let recordedEarlyAnomaly = null;
+    let firstAnomalyIndex = -1;
     
-    // 從第二個有效測量開始，比較與前一個測量的差異
     for (let i = 1; i < validMeasurements.length; i++) {
       const prevFreq_kHz = validMeasurements[i - 1].lowFreq_kHz;
       const currFreq_kHz = validMeasurements[i].lowFreq_kHz;
       const freqDifference = Math.abs(currFreq_kHz - prevFreq_kHz);
       
-      // ============================================================
-      // 優化 2025：超大幅頻率跳變 (>2 kHz)
-      // ============================================================
       if (freqDifference > 2.0) {
-        // 超大幅異常 >2.0 kHz，立即停止測試
-        // 選擇這個超大幅異常前的閾值
         optimalThreshold = validMeasurements[i - 1].threshold;
         optimalMeasurement = validMeasurements[i - 1];
         break;
@@ -1467,25 +1475,16 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       const isAnomaly = freqDifference > 1.5;
       
       if (isAnomaly) {
-        // 發現大幅異常 (>1.5 kHz)
-        
-        // 如果還沒有記錄早期異常，現在記錄
         if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
-          firstAnomalyIndex = i;  // 記錄異常發生的索引
-          recordedEarlyAnomaly = validMeasurements[i - 1].threshold;  // 異常前的閾值
+          firstAnomalyIndex = i;
+          recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
           lastValidThreshold = validMeasurements[i - 1].threshold;
           lastValidMeasurement = validMeasurements[i - 1];
         }
       } else {
-        // 正常值：沒有大幅跳變
-        
-        // 如果有記錄的早期異常，檢查異常後是否緊接著有 3 個正常值
         if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
-          // 計算從異常發生後緊接著的 3 個索引
           const afterAnomalyStart = firstAnomalyIndex + 1;
           const afterAnomalyEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
-          
-          // 檢查異常後的 3 個值是否都無異常
           let hasThreeNormalAfterAnomaly = true;
           
           for (let checkIdx = afterAnomalyStart; checkIdx <= afterAnomalyEnd; checkIdx++) {
@@ -1493,100 +1492,97 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
               hasThreeNormalAfterAnomaly = false;
               break;
             }
-            
-            // 檢查當前值與前一個值是否有異常
             const checkPrevFreq_kHz = validMeasurements[checkIdx - 1].lowFreq_kHz;
             const checkCurrFreq_kHz = validMeasurements[checkIdx].lowFreq_kHz;
             const checkFreqDiff = Math.abs(checkCurrFreq_kHz - checkPrevFreq_kHz);
             
             if (checkFreqDiff > 1.5) {
-              // 發現異常，說明異常後面不是連續 3 個正常值
               hasThreeNormalAfterAnomaly = false;
               break;
             }
           }
           
-          // 如果異常後有連續 3 個正常值，忽略早期異常
           if (hasThreeNormalAfterAnomaly && (afterAnomalyEnd - afterAnomalyStart + 1) >= 3) {
-            recordedEarlyAnomaly = null;  // 忽略早期異常
-            firstAnomalyIndex = -1;       // 重置
+            recordedEarlyAnomaly = null;
+            firstAnomalyIndex = -1;
           }
         }
-        
-        // 更新最後一個有效測量
         lastValidThreshold = validMeasurements[i].threshold;
         lastValidMeasurement = validMeasurements[i];
       }
     }
     
-    // ============================================================
-    // 最終決定：選擇最優閾值
-    // ============================================================
     if (recordedEarlyAnomaly !== null) {
-      // 有未被忽略的早期異常：使用異常前的閾值
       optimalThreshold = recordedEarlyAnomaly;
       optimalMeasurement = lastValidMeasurement;
     } else {
-      // 沒有異常或異常被忽略：使用最後一個有效測量
       optimalThreshold = lastValidThreshold;
       optimalMeasurement = lastValidMeasurement;
     }
     
-    // 確保返回值在有效範圍內
     const finalThreshold = Math.max(Math.min(optimalThreshold, -24), -70);
-    
-    // 2025 SAFETY MECHANISM: 如果使用了極限閾值 -70dB，改用固定的安全值 -30dB
-    // 這表示 Low Frequency 計算達到極限，使用保守的固定值而不是極限值
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
-    
-    // 檢測是否使用了 -70dB 的極限閾值（但實際使用 -30dB）
     const hasWarning = finalThreshold <= -70;
     
-    // 當應用安全機制時（改為 -30dB），需要使用 -30dB 重新計算 lowFreq_Hz
     let returnLowFreq_Hz = optimalMeasurement.lowFreq_Hz;
     let returnLowFreq_kHz = optimalMeasurement.lowFreq_kHz;
     let returnEndFreq_Hz = optimalMeasurement.endFreq_Hz;
     let returnEndFreq_kHz = optimalMeasurement.endFreq_kHz;
     
+    // Safety Mechanism Re-calculation (如果 safeThreshold !== finalThreshold)
+    // 這裡同樣需要應用 Dynamic End Frame 邏輯
     if (safeThreshold !== finalThreshold) {
-      // 安全機制改變了閾值，使用 -30dB 重新計算 lowFreq_Hz
-      const lastFramePower = spectrogram[spectrogram.length - 1];
-      const peakPower_dB = callPeakPower_dB;
-      const lowFreqThreshold_dB_safe = peakPower_dB + safeThreshold;
+      const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
       
-      let lowFreq_Hz_safe = null;
-      let endFreq_Hz_safe = null;
-      
-      // 使用安全閾值 (-30dB) 計算 Low Frequency
-      for (let binIdx = 0; binIdx < lastFramePower.length; binIdx++) {
-        if (lastFramePower[binIdx] > lowFreqThreshold_dB_safe) {
-          lowFreq_Hz_safe = freqBins[binIdx];
-          
-          // 嘗試線性插值以獲得更高精度
-          if (binIdx > 0) {
-            const thisPower = lastFramePower[binIdx];
-            const prevPower = lastFramePower[binIdx - 1];
-            
-            if (prevPower < lowFreqThreshold_dB_safe && thisPower > lowFreqThreshold_dB_safe) {
-              const powerRatio = (thisPower - lowFreqThreshold_dB_safe) / (thisPower - prevPower);
-              const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
-              lowFreq_Hz_safe = freqBins[binIdx] - powerRatio * freqDiff;
-            }
+      // 1. Re-find Active End Frame for safe threshold
+      let activeEndFrameIdx_safe = -1;
+      for (let f = spectrogram.length - 1; f >= 0; f--) {
+        const frame = spectrogram[f];
+        let frameHasSignal = false;
+        for (let b = 0; b < numBins; b++) {
+          if (frame[b] > lowFreqThreshold_dB_safe) {
+            frameHasSignal = true;
+            break;
           }
+        }
+        if (frameHasSignal) {
+          activeEndFrameIdx_safe = f;
           break;
         }
       }
       
-      if (lowFreq_Hz_safe !== null) {
-        endFreq_Hz_safe = lowFreq_Hz_safe;  // End frequency = low frequency
-        returnLowFreq_Hz = lowFreq_Hz_safe;
-        returnLowFreq_kHz = lowFreq_Hz_safe / 1000;
-        returnEndFreq_Hz = endFreq_Hz_safe;
-        returnEndFreq_kHz = endFreq_Hz_safe / 1000;
+      if (activeEndFrameIdx_safe !== -1) {
+        const targetFramePower = spectrogram[activeEndFrameIdx_safe];
+        let lowFreq_Hz_safe = null;
+        let endFreq_Hz_safe = null;
+        
+        // 2. Re-calculate Low Freq
+        for (let binIdx = 0; binIdx < targetFramePower.length; binIdx++) {
+          if (targetFramePower[binIdx] > lowFreqThreshold_dB_safe) {
+            lowFreq_Hz_safe = freqBins[binIdx];
+            if (binIdx > 0) {
+              const thisPower = targetFramePower[binIdx];
+              const prevPower = targetFramePower[binIdx - 1];
+              if (prevPower < lowFreqThreshold_dB_safe && thisPower > lowFreqThreshold_dB_safe) {
+                const powerRatio = (thisPower - lowFreqThreshold_dB_safe) / (thisPower - prevPower);
+                const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
+                lowFreq_Hz_safe = freqBins[binIdx] - powerRatio * freqDiff;
+              }
+            }
+            break;
+          }
+        }
+        
+        if (lowFreq_Hz_safe !== null) {
+          endFreq_Hz_safe = lowFreq_Hz_safe;
+          returnLowFreq_Hz = lowFreq_Hz_safe;
+          returnLowFreq_kHz = lowFreq_Hz_safe / 1000;
+          returnEndFreq_Hz = endFreq_Hz_safe;
+          returnEndFreq_kHz = endFreq_Hz_safe / 1000;
+        }
       }
     }
     
-    // 返回優化的 Low Frequency 和 End Frequency
     return {
       threshold: safeThreshold,
       lowFreq_Hz: returnLowFreq_Hz,
