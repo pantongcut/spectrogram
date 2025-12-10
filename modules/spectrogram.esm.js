@@ -1308,7 +1308,10 @@ class h extends s {
         let o = this.noverlap;
         if (!o) {
             const e = t.length / this.canvas.width;
-            o = Math.max(0, Math.round(r - e))
+            // Calculate a safety floor (e.g., 5% of fftSamples) to prevent artifacts on dense files
+            const minOverlap = Math.floor(r * 0.05);
+            // Dynamic calc, but clamped to the safety floor
+            o = Math.max(minOverlap, Math.round(r - e));
         }
         
         // OPTIMIZATION: Calculate frequency range bin indices once

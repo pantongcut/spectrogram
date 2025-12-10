@@ -1150,22 +1150,19 @@ function updateSpectrogramSettingsText() {
 
 function getOverlapPercent() {
   if (currentOverlap === 'auto') {
-    const autoVal = getAutoOverlapPercent();
-    
-    // HYBRID FIX:
-    // 1. selectionExpandMode: Needs precise backend alignment.
-    // 2. autoVal <= 5: Indicates a long file where the Plugin's internal logic (unclamped)
-    //    would fail (calc 0%). We must force the safe clamped value (5%) from main.js.
-    if (selectionExpandMode || (autoVal !== null && autoVal <= 5)) {
-      return autoVal;
+    // BEST OF BOTH WORLDS FIX:
+    // Option: Keep strict sync ONLY for Selection Expansion Mode if deemed critical.
+    // This ensures the cropped buffer is rendered with the strict logic defined in getAutoOverlapPercent().
+    if (typeof selectionExpandMode !== 'undefined' && selectionExpandMode) {
+      return getAutoOverlapPercent();
     }
-    
-    // For short/healthy files (>5%), return undefined to let the Plugin 
-    // handle dynamic resolution during Zooming for a smoother experience.
+    // For normal viewing (Initial Load), return undefined.
+    // The patched Plugin now handles the "long file" case safely with a 5% safety floor,
+    // preventing artifacts on initial load. Zooming will correctly re-calculate resolution
+    // dynamically without needing full plugin replacement.
     return undefined;
   }
-  
-  // Existing manual logic...
+  // Manual overlap handling
   const parsed = parseInt(currentOverlap, 10);
   return isNaN(parsed) ? null : parsed;
 }
