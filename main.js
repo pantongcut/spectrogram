@@ -816,27 +816,6 @@ viewer.addEventListener('expand-selection', async (e) => {
       autoIdControl?.reset();
       viewer.dispatchEvent(new CustomEvent('force-hover-enable'));
       freqHoverControl?.refreshHover();
-      
-      // Force plugin refresh with correct container dimensions after zoom reset
-      replacePlugin(
-        getEffectiveColorMap(),
-        spectrogramHeight,
-        currentFreqMin,
-        currentFreqMax,
-        getOverlapPercent(),
-        () => {
-          // Essential callbacks to restore state
-          freqHoverControl?.refreshHover();
-          autoIdControl?.updateMarkers();
-          updateSpectrogramSettingsText();
-          restoreImageEnhancement();
-        },
-        currentFftSize,
-        currentWindowType,
-        undefined, // peakMode (default)
-        undefined, // peakThreshold (default)
-        handleColorMapChange
-      );
     }
   }
 });
@@ -874,27 +853,6 @@ viewer.addEventListener('fit-window-selection', async (e) => {
       autoIdControl?.reset();
       // ✅ 移除此處的 updateSpectrogramSettingsText()，讓 decode 事件處理器負責
       // updateSpectrogramSettingsText();
-      
-      // Force plugin refresh with correct container dimensions after zoom reset
-      replacePlugin(
-        getEffectiveColorMap(),
-        spectrogramHeight,
-        currentFreqMin,
-        currentFreqMax,
-        getOverlapPercent(),
-        () => {
-          // Essential callbacks to restore state
-          freqHoverControl?.refreshHover();
-          autoIdControl?.updateMarkers();
-          updateSpectrogramSettingsText();
-          restoreImageEnhancement();
-        },
-        currentFftSize,
-        currentWindowType,
-        undefined, // peakMode (default)
-        undefined, // peakThreshold (default)
-        handleColorMapChange
-      );
     }
   }
 });
