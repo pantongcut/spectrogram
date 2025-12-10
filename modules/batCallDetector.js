@@ -1332,7 +1332,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
    * @param {number} callPeakPower_dB - Call peak power in dB (stable value)
    * @returns {Object} {threshold, lowFreq_Hz, lowFreq_kHz, endFreq_Hz, endFreq_kHz, warning}
    */
-findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB) {
+findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
       threshold: -24,
       lowFreq_Hz: null,
@@ -1342,10 +1342,6 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
       warning: false
     };
 
-    // CRITICAL FIX: Do NOT use static lastFramePower here.
-    // We must find the correct frame for each threshold inside the loop.
-    
-    // CRITICAL: Use stable call.peakPower_dB
     const stablePeakPower_dB = callPeakPower_dB;
     const numBins = spectrogram[0].length;
     
@@ -1365,41 +1361,53 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
       const lowFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
       
       // ============================================================
-      // 1. 動態尋找有效結束幀 (Dynamic End Frame Detection)
-      // 模擬 Manual Mode：找到最後一個能量超過閾值的幀
+      // 1. 動態尋找有效結束幀 (Forward Scan from Peak)
+      // 模擬 Manual Mode 的 "Anti-Rebounce" 核心行為：
+      // 從 Peak 開始往後找，一旦能量持續低於閾值就視為結束。
+      // 這避免了抓到更後面的回音 (Rebounce)。
       // ============================================================
-      let activeEndFrameIdx = -1;
+      let activeEndFrameIdx = peakFrameIdx; // 預設至少是 Peak 這一幀
       
-      // 從後往前掃描，找到第一個含有 > threshold 的幀
-      for (let f = spectrogram.length - 1; f >= 0; f--) {
+      // 從 Peak 往後掃描
+      for (let f = peakFrameIdx; f < spectrogram.length; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
-        // 快速檢查該幀是否有任何 bin 超過閾值
+        
+        // 檢查該幀是否有信號超過閾值
         for (let b = 0; b < numBins; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
             break;
           }
         }
+        
         if (frameHasSignal) {
-          activeEndFrameIdx = f;
+          activeEndFrameIdx = f; // 更新有效結束幀
+        } else {
+          // 一旦遇到沒有信號的幀，檢查是否應該停止
+          // 為了容錯 (Gap Bridging)，可以允許短暫的 drop，
+          // 但在 Auto Threshold 這種大量測試中，簡單的 "Stop at first silence" 
+          // 通常能提供最穩定的比較基準，且與 Manual Mode 的 cutoff 行為最接近。
+          
+          // 如果這一幀低於閾值，我們認為叫聲在這裡已經結束了 (或至少主體結束)
+          // 停止掃描，忽略後面的任何回音。
           break;
         }
       }
       
-      // 如果找不到任何有效幀（整個選區都低於閾值），則此閾值無效
+      // ============================================================
+      // 2. 計算 LOW FREQUENCY（使用 Forward Scan 找到的 activeEndFrameIdx）
+      // ============================================================
       if (activeEndFrameIdx !== -1) {
         const targetFramePower = spectrogram[activeEndFrameIdx];
         
-        // ============================================================
-        // 2. 計算 LOW FREQUENCY（使用找到的 activeEndFrameIdx）
-        // ============================================================
+        // 尋找該幀的最低頻率 (Low -> High)
         for (let binIdx = 0; binIdx < targetFramePower.length; binIdx++) {
           if (targetFramePower[binIdx] > lowFreqThreshold_dB) {
             lowFreq_Hz = freqBins[binIdx];
             foundBin = true;
             
-            // 嘗試線性插值
+            // 線性插值
             if (binIdx > 0) {
               const thisPower = targetFramePower[binIdx];
               const prevPower = targetFramePower[binIdx - 1];
@@ -1410,7 +1418,7 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
                 lowFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
               }
             }
-            break;
+            break; // 找到最低頻後立即停止
           }
         }
       }
@@ -1449,11 +1457,7 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
       };
     }
     
-    // ... (後續 Anomaly Detection 邏輯保持不變) ...
-    
-    // ============================================================
-    // Low Frequency 需應用防呆機制 (邏輯與之前保持一致)
-    // ============================================================
+    // [Anomaly Detection Logic - Preserved]
     let optimalThreshold = -24;
     let optimalMeasurement = validMeasurements[0];
     let lastValidThreshold = validMeasurements[0].threshold;
@@ -1529,14 +1533,14 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     let returnEndFreq_Hz = optimalMeasurement.endFreq_Hz;
     let returnEndFreq_kHz = optimalMeasurement.endFreq_kHz;
     
-    // Safety Mechanism Re-calculation (如果 safeThreshold !== finalThreshold)
-    // 這裡同樣需要應用 Dynamic End Frame 邏輯
+    // Safety Mechanism Re-calculation logic (如果 safeThreshold !== finalThreshold)
+    // 同樣需要使用 Forward Scan from Peak
     if (safeThreshold !== finalThreshold) {
       const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
       
-      // 1. Re-find Active End Frame for safe threshold
-      let activeEndFrameIdx_safe = -1;
-      for (let f = spectrogram.length - 1; f >= 0; f--) {
+      // 1. Re-scan Forward from Peak
+      let activeEndFrameIdx_safe = peakFrameIdx;
+      for (let f = peakFrameIdx; f < spectrogram.length; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
         for (let b = 0; b < numBins; b++) {
@@ -1547,7 +1551,8 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
         }
         if (frameHasSignal) {
           activeEndFrameIdx_safe = f;
-          break;
+        } else {
+          break; // Stop at first silence
         }
       }
       
@@ -2313,6 +2318,7 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
         freqBins,
         flowKHz,
         fhighKHz,
+        peakFrameIdx,
         peakPower_dB  // Pass stable call peak value instead of using endThreshold_dB
       );
       
