@@ -1560,205 +1560,6 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
   }
 
   /**
-   * 2025 ENHANCEMENT: Find Optimal Start Frequency Threshold (Full Logic)
-   * Scans BACKWARDS from High Frequency frame to Frame 0.
-   * Includes full anomaly detection (Major > 4.0kHz, Minor > 1.5kHz with recovery).
-   * 
-   * @param {Array} spectrogram - STFT spectrogram
-   * @param {Array} freqBins - Frequency bin values
-   * @param {number} peakPower_dB - Call peak power
-   * @param {number} highFreqFrameIdx - The frame index of the High Frequency (anchor point)
-   * @param {boolean} shouldIgnoreLowFreqNoise - Whether to ignore bins <= 40kHz
-   * @returns {Object} {threshold, startFreq_Hz, startFreqFrameIdx, warning}
-   */
-  findOptimalStartFrequencyThreshold(spectrogram, freqBins, peakPower_dB, highFreqFrameIdx, shouldIgnoreLowFreqNoise) {
-    const LOW_FREQ_NOISE_THRESHOLD_kHz = 40;
-    const numBins = spectrogram[0].length;
-    
-    // Limit scan range: From High Freq Frame backwards to 0
-    const searchStartFrame = (highFreqFrameIdx !== null && highFreqFrameIdx >= 0) 
-      ? highFreqFrameIdx 
-      : spectrogram.length - 1;
-      
-    // Test range: -24 to -70 dB
-    const thresholdRange = [];
-    for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
-      thresholdRange.push(threshold);
-    }
-    
-    const measurements = [];
-    
-    // ============================================================
-    // PHASE 1: Data Collection & Major Jump Detection
-    // ============================================================
-    for (const testThreshold_dB of thresholdRange) {
-      const thresholdPower_dB = peakPower_dB + testThreshold_dB;
-      
-      let foundStartFreq_Hz = null;
-      let foundStartFrameIdx = -1;
-      let foundBin = false;
-      
-      // 1. Time Loop: Right -> Left (searchStartFrame to 0)
-      for (let f = searchStartFrame; f >= 0; f--) {
-        const framePower = spectrogram[f];
-        let hasSignalInFrame = false;
-        let currentFrameMaxFreq_Hz = null;
-        
-        // 2. Freq Loop: High -> Low (Top -> Bottom)
-        for (let b = numBins - 1; b >= 0; b--) {
-          const freq_kHz = freqBins[b] / 1000;
-          
-          if (shouldIgnoreLowFreqNoise && freq_kHz <= LOW_FREQ_NOISE_THRESHOLD_kHz) {
-            continue;
-          }
-          
-          if (framePower[b] > thresholdPower_dB) {
-            let thisFreq_Hz = freqBins[b];
-            
-            // Linear Interpolation
-            if (b < numBins - 1) {
-              const thisPower = framePower[b];
-              const nextPower = framePower[b + 1]; // Higher freq bin
-              if (nextPower < thresholdPower_dB && thisPower > thresholdPower_dB) {
-                 const powerRatio = (thisPower - thresholdPower_dB) / (thisPower - nextPower);
-                 const freqDiff = freqBins[b + 1] - freqBins[b];
-                 thisFreq_Hz = freqBins[b] + powerRatio * freqDiff;
-              }
-            }
-            
-            currentFrameMaxFreq_Hz = thisFreq_Hz;
-            hasSignalInFrame = true;
-            break; // Stop freq scan (High to Low priority)
-          }
-        }
-        
-        // Update "Earliest Found Start Frame"
-        if (hasSignalInFrame) {
-          foundStartFrameIdx = f;
-          foundStartFreq_Hz = currentFrameMaxFreq_Hz;
-          foundBin = true;
-        }
-      }
-      
-      // Major Jump Protection (> 6.0 kHz) - Immediate Stop
-      if (foundBin && foundStartFreq_Hz !== null) {
-        const currentFreq_kHz = foundStartFreq_Hz / 1000;
-        let lastValidFreq_kHz = null;
-        
-        // Find last valid measurement
-        for (let i = measurements.length - 1; i >= 0; i--) {
-           if (measurements[i].foundBin && measurements[i].freq_kHz !== null) {
-             lastValidFreq_kHz = measurements[i].freq_kHz;
-             break;
-           }
-        }
-        
-        if (lastValidFreq_kHz !== null) {
-          const jumpDiff = Math.abs(currentFreq_kHz - lastValidFreq_kHz);
-          if (jumpDiff > 6.0) {
-            break; // Stop scanning
-          }
-        }
-      }
-      
-      measurements.push({
-        threshold: testThreshold_dB,
-        freq_Hz: foundStartFreq_Hz,
-        freq_kHz: foundStartFreq_Hz ? foundStartFreq_Hz / 1000 : null,
-        frameIdx: foundStartFrameIdx,
-        foundBin: foundBin
-      });
-    }
-    
-    // ============================================================
-    // PHASE 2: Minor Anomaly Detection (> 1.5 kHz) & Selection
-    // ============================================================
-    const validMeasurements = measurements.filter(m => m.foundBin);
-    
-    if (validMeasurements.length === 0) {
-       return { threshold: -24, startFreq_Hz: null, startFreqFrameIdx: 0, warning: true };
-    }
-    
-    let optimalThreshold = -24;
-    let optimalMeasurement = validMeasurements[0];
-    let lastValidThreshold = validMeasurements[0].threshold;
-    let lastValidMeasurement = validMeasurements[0];
-    let recordedEarlyAnomaly = null;
-    let firstAnomalyIndex = -1;
-    
-    for (let i = 1; i < validMeasurements.length; i++) {
-      const prevFreq_kHz = validMeasurements[i - 1].freq_kHz;
-      const currFreq_kHz = validMeasurements[i].freq_kHz;
-      const freqDifference = Math.abs(currFreq_kHz - prevFreq_kHz);
-      
-      // Major Jump check (redundant safety)
-      if (freqDifference > 6.0) {
-        optimalThreshold = validMeasurements[i - 1].threshold;
-        optimalMeasurement = validMeasurements[i - 1];
-        break;
-      }
-      
-      // Minor Anomaly (> 1.5 kHz)
-      const isAnomaly = freqDifference > 1.5;
-      
-      if (isAnomaly) {
-        if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
-          firstAnomalyIndex = i;
-          recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
-          lastValidThreshold = validMeasurements[i - 1].threshold;
-          lastValidMeasurement = validMeasurements[i - 1];
-        }
-      } else {
-        if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
-          const afterAnomalyStart = firstAnomalyIndex + 1;
-          const afterAnomalyEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
-          let hasThreeNormalAfterAnomaly = true;
-          
-          for (let checkIdx = afterAnomalyStart; checkIdx <= afterAnomalyEnd; checkIdx++) {
-            if (checkIdx >= validMeasurements.length) {
-              hasThreeNormalAfterAnomaly = false;
-              break;
-            }
-            const checkPrevFreq_kHz = validMeasurements[checkIdx - 1].freq_kHz;
-            const checkCurrFreq_kHz = validMeasurements[checkIdx].freq_kHz;
-            const checkFreqDiff = Math.abs(checkCurrFreq_kHz - checkPrevFreq_kHz);
-            
-            if (checkFreqDiff > 1.5) {
-              hasThreeNormalAfterAnomaly = false;
-              break;
-            }
-          }
-          
-          if (hasThreeNormalAfterAnomaly && (afterAnomalyEnd - afterAnomalyStart + 1) >= 3) {
-            recordedEarlyAnomaly = null;
-            firstAnomalyIndex = -1;
-          }
-        }
-        lastValidThreshold = validMeasurements[i].threshold;
-        lastValidMeasurement = validMeasurements[i];
-      }
-    }
-    
-    if (recordedEarlyAnomaly !== null) {
-      optimalThreshold = recordedEarlyAnomaly;
-      optimalMeasurement = lastValidMeasurement;
-    } else {
-      optimalThreshold = lastValidThreshold;
-      optimalMeasurement = lastValidMeasurement;
-    }
-    
-    // Safety Mechanism: Check -70dB limit
-    const isUnsafe = optimalMeasurement.threshold <= -70;
-    
-    return {
-      threshold: optimalMeasurement.threshold,
-      startFreq_Hz: optimalMeasurement.freq_Hz,
-      startFreqFrameIdx: optimalMeasurement.frameIdx,
-      warning: isUnsafe
-    };
-  }
-
-  /**
    * Phase 2: Measure precise
    * Based on Avisoft SASLab Pro, SonoBat, Kaleidoscope Pro, and BatSound standards
    * 
@@ -2254,102 +2055,104 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     call.highFreqThreshold_dB_used = highFreqThreshold_dB_used_manual;
     
     // ============================================================
-    // ============================================================
-    // STEP 2.5: Calculate START FREQUENCY (Independent from High Frequency)
+    // STEP 2.5: Calculate START FREQUENCY (獨立於 High Frequency)
     // 
-    // 2025 OPTIMIZATION:
-    // 1. Scan Scope: High Freq Frame -> Frame 0 (Right to Left)
-    // 2. Scan Direction: High Freq -> Low Freq (Top to Bottom)
-    // 3. Auto Threshold: -24dB to -70dB loop with anomaly detection
-    // 4. Safety Mechanism: Fallback to fixed -24dB if -70dB limit reached
+    // 2025 關鍵修正：
+    // Start Frequency 是真正的 "First frame of call signal (frame 0)"
+    // 總是從第一幀掃描得出，但其值由規則 (a)/(b) 決定
+    // 
+    // 方法：
+    // 在 AUTO MODE 和 NON-AUTO MODE 中，都使用 -24dB 閾值計算 Start Frequency
+    // (a) 若 -24dB 閾值的頻率 < Peak Frequency：使用該值為 Start Frequency
+    // (b) 若 -24dB 閾值的頻率 >= Peak Frequency：Start Frequency = High Frequency
+    // 
+    // 時間點說明：
+    // Start Frequency 總是在第一幀（frame 0），時間 = 0 ms
+    // 但 Start Frequency 的值可能等於 High Frequency（規則 b）
+    // 
+    // 2025 低頻 Noise 保護機制：
+    // 若 Peak Frequency ≥ 60 kHz，則 Start Frequency 不能 ≤ 40 kHz
+    // 在掃描時忽略 40 kHz 或以下的 bin，防止誤判低頻 noise 為 Start Frequency
     // ============================================================
+    const firstFramePower = spectrogram[0];
+    let startFreq_Hz = null;
+    let startFreq_kHz = null;
+    let startFreqBinIdx = 0;  // 2025: Track independent bin index for Start Frequency
+    let startFreqFrameIdx = 0;  // 2025: Start Frequency is always in frame 0
     
-    const peakFreqInKHz = peakFreq_Hz / 1000;
-    const HIGH_PEAK_THRESHOLD_kHz = 60;
-    // Noise Protection: Ignore bins <= 40kHz if Peak >= 60kHz
+    // 使用 -24dB 閾值計算 Start Frequency（無論是否 Auto Mode）
+    const threshold_24dB = peakPower_dB - 24;
+    
+    // 2025: 低頻 Noise 保護閾值
+    const LOW_FREQ_NOISE_THRESHOLD_kHz = 40;  // kHz - 低於此頻率的 bin 在某些情況下應被忽略
+    const HIGH_PEAK_THRESHOLD_kHz = 60;       // kHz - Peak >= 此值時啟動低頻保護
+    const peakFreqInKHz = peakFreq_Hz / 1000; // 將 Peak 頻率轉換為 kHz
     const shouldIgnoreLowFreqNoise = peakFreqInKHz >= HIGH_PEAK_THRESHOLD_kHz;
-
-    // 1. Execute Optimal Threshold Search
-    const startFreqResult = this.findOptimalStartFrequencyThreshold(
-      spectrogram,
-      freqBins,
-      peakPower_dB,
-      highFreqFrameIdx, // Scan Start Point (Backwards)
-      shouldIgnoreLowFreqNoise
-    );
     
-    let finalStartFreq_Hz = startFreqResult.startFreq_Hz;
-    let finalStartFrameIdx = startFreqResult.startFreqFrameIdx;
-    
-    // 2. Safety Mechanism
-    // If Auto Search hit -70dB limit (Unsafe) OR nothing found, use Fallback
-    if (startFreqResult.warning || finalStartFreq_Hz === null) {
-        // Fallback: Fixed -24dB Scan (Right to Left, High to Low)
-        const fallbackThreshold_dB = peakPower_dB - 24;
-        const searchStart = (highFreqFrameIdx !== null && highFreqFrameIdx >= 0) 
-            ? highFreqFrameIdx 
-            : spectrogram.length - 1;
+    // 從低到高掃描，找最低頻率（規則 a）
+    for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
+      if (firstFramePower[binIdx] > threshold_24dB) {
+        const testStartFreq_Hz = freqBins[binIdx];
+        const testStartFreq_kHz = testStartFreq_Hz / 1000;
         
-        let bestFallbackFrame = -1;
-        let bestFallbackFreq = null;
-        
-        // Manual Scan Loop (Right -> Left)
-        for (let f = searchStart; f >= 0; f--) {
-             const framePower = spectrogram[f];
-             let hasSig = false;
-             let maxF = null;
-             
-             // Freq Loop (High -> Low)
-             for (let b = spectrogram[0].length - 1; b >= 0; b--) {
-                 if (shouldIgnoreLowFreqNoise && (freqBins[b]/1000) <= 40) continue;
-                 
-                 if (framePower[b] > fallbackThreshold_dB) {
-                     let thisFreq = freqBins[b];
-                     // Interpolation
-                     if (b < spectrogram[0].length - 1) {
-                        const pThis = framePower[b];
-                        const pNext = framePower[b+1];
-                        if (pNext < fallbackThreshold_dB && pThis > fallbackThreshold_dB) {
-                             const ratio = (pThis - fallbackThreshold_dB) / (pThis - pNext);
-                             thisFreq = freqBins[b] + ratio * (freqBins[b+1] - freqBins[b]);
-                        }
-                     }
-                     maxF = thisFreq;
-                     hasSig = true;
-                     break; // Found highest freq in this frame
-                 }
-             }
-             
-             // Keep tracking the earliest frame found so far
-             if (hasSig) {
-                 bestFallbackFrame = f;
-                 bestFallbackFreq = maxF;
-             }
+        // 2025: 應用低頻 Noise 保護機制
+        // 若 Peak ≥ 60 kHz，忽略 40 kHz 或以下的候選值
+        if (shouldIgnoreLowFreqNoise && testStartFreq_kHz <= LOW_FREQ_NOISE_THRESHOLD_kHz) {
+          // 此 bin 被視為低頻 noise，跳過
+          continue;
         }
         
-        if (bestFallbackFreq !== null) {
-            finalStartFreq_Hz = bestFallbackFreq;
-            finalStartFrameIdx = bestFallbackFrame;
+        // 檢查是否低於 Peak Frequency（規則 a）
+        if (testStartFreq_kHz < peakFreqInKHz) {
+          // 滿足規則 (a)：使用此值為 Start Frequency
+          startFreq_Hz = testStartFreq_Hz;
+          startFreq_kHz = testStartFreq_kHz;
+          startFreqBinIdx = binIdx;  // 2025: Store independent bin index for Start Frequency
+          
+          // 嘗試線性插值以獲得更高精度
+          if (binIdx > 0) {
+            const thisPower = firstFramePower[binIdx];
+            const prevPower = firstFramePower[binIdx - 1];
+            
+            if (prevPower < threshold_24dB && thisPower > threshold_24dB) {
+              const powerRatio = (thisPower - threshold_24dB) / (thisPower - prevPower);
+              const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
+              startFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
+              startFreq_kHz = startFreq_Hz / 1000;
+            }
+          }
+          break;
         }
+      }
     }
     
-    // 3. Ultimate Fallback: Use High Frequency if everything failed
-    if (finalStartFreq_Hz === null) {
-        finalStartFreq_Hz = highFreq_Hz;
-        finalStartFrameIdx = highFreqFrameIdx;
+    // 如果規則 (a) 不滿足（-24dB 頻率 >= Peak Frequency），使用規則 (b)
+    if (startFreq_Hz === null) {
+      // Start Frequency = High Frequency（規則 b）
+      // Note: 此時 Start Frequency 的值等於 High Frequency 的值
+      // 但 Start Frequency 的幀索引固定為 0（frame 0）
+      startFreq_Hz = highFreq_Hz;
+      startFreq_kHz = highFreq_Hz / 1000;
+      startFreqBinIdx = highFreqBinIdx;  // 2025: Use High Frequency's bin index
+      // 但時間點仍然是 0 ms（第一幀）
     }
     
-    // 4. Update Call Object
-    call.startFreq_kHz = finalStartFreq_Hz / 1000;
-    call.startFreqFrameIdx = finalStartFrameIdx;
-    call.startFreqBinIdx = Math.floor(finalStartFreq_Hz / (freqBins[1]-freqBins[0]));
+    // 存儲 Start Frequency 及其信息
+    call.startFreq_kHz = startFreq_kHz;
+    call.startFreqTime_s = timeFrames[0];  // Time of first frame (frame 0)
+    call.startFreqBinIdx = startFreqBinIdx;  // 2025: Store independent bin index
+    call.startFreqFrameIdx = startFreqFrameIdx;  // 2025: Always frame 0
     
-    // Calculate Start Time (ms) - Dynamic based on detected frame
-    const firstFrameTimeInSeconds_start = timeFrames[0];
-    const startFrameTimeInSeconds = timeFrames[finalStartFrameIdx];
-    call.startFreq_ms = (startFrameTimeInSeconds - firstFrameTimeInSeconds_start) * 1000;
-    call.startFreqTime_s = startFrameTimeInSeconds;
-    const startFreq_kHz = call.startFreq_kHz;
+    // ============================================================
+    // NEW (2025): Calculate start frequency time in milliseconds
+    // startFreq_ms = absolute time of start frequency (always at first frame = 0 ms)
+    // Unit: ms (milliseconds), relative to selection area start
+    // 
+    // NOTE: Start Frequency is ALWAYS at frame 0 by definition
+    // (Start Frequency is the "First frame of call signal")
+    // ============================================================
+    const firstFrameTime_ms = 0;  // First frame is at time 0 relative to selection area start
+    call.startFreq_ms = firstFrameTime_ms;  // Start frequency time is always at frame 0
     
     // ============================================================
     // STEP 3: Calculate LOW FREQUENCY from last frame
