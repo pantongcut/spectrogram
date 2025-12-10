@@ -955,7 +955,7 @@ export class BatCallDetector {
    * @param {number} peakFrameIdx - Peak frame index to limit initial scan
    * @returns {Object} {threshold, highFreq_Hz, highFreq_kHz, highFreqFrameIdx, startFreq_Hz, startFreq_kHz, warning}
    */
-findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
+  findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
       threshold: -24,
       highFreq_Hz: null,
@@ -967,9 +967,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     };
 
     // ============================================================
-    // INITIALIZATION (2025 v2 ENHANCEMENT):
-    // 1. Data for Start Frequency (Always Frame 0)
-    // 2. Setup for narrowing search range per step
+    // INITIALIZATION
     // ============================================================
     
     const firstFramePower = spectrogram[0];
@@ -989,16 +987,9 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       thresholdRange.push(threshold);
     }
     
-    // 為每個閾值測量 High Frequency 和 Start Frequency
-    // 2025 v2: 逐步縮小搜尋範圍
     const measurements = [];
     
-    // ============================================================
-    // 2025 BUG FIX: Initialize tracker for immediate stop on major jump
-    // This prevents "Stable Noise" problem where noise creates a stable 
-    // plateau after a huge jump (e.g., 83kHz -> 97kHz -> 97kHz).
-    // ============================================================
-    let lastValidHighFreq_kHz = null;
+    // 移除依賴 lastValidHighFreq_kHz 變數，改為直接查詢 measurements 陣列
     
     for (const testThreshold_dB of thresholdRange) {
       // Build Max Hold Spectrum for current search range
@@ -1034,52 +1025,34 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       const highFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
       
       // ============================================================
-      // 計算 HIGH FREQUENCY（改為：從低到高掃描 Low -> High）
-      // 方向：由低頻往高頻，尋找「上升緣」(Signal -> Noise)
-      // 沿著叫聲能量軌跡「逆流而上」，鎖定信號的上邊界
+      // 計算 HIGH FREQUENCY（從低到高掃描 Low -> High）
       // ============================================================
       for (let binIdx = 0; binIdx < currentMaxSpectrum.length - 1; binIdx++) {
         const thisPower = currentMaxSpectrum[binIdx];
         const nextPower = currentMaxSpectrum[binIdx + 1];
 
-        // 檢測條件：尋找信號的「上緣」(Upper Edge)
-        // 當前 bin 在閾值之上 (Signal)，且下一個 bin 掉到閾值之下 (Noise)
         if (thisPower > highFreqThreshold_dB && nextPower < highFreqThreshold_dB) {
-          
-          // 記錄此處為 High Frequency 候選點
           highFreq_Hz = freqBins[binIdx];
           highFreqBinIdx = binIdx;
-          highFreqFrameIdx = frameIndexForBin[binIdx]; // 記錄該頻率發生的 Frame
+          highFreqFrameIdx = frameIndexForBin[binIdx];
           foundBin = true;
           
-          // 執行線性插值 (Linear Interpolation) 以獲得 Sub-bin 精度
-          // 插值區間：binIdx (Signal) 到 binIdx+1 (Noise)
           const powerRatio = (thisPower - highFreqThreshold_dB) / (thisPower - nextPower);
           const freqDiff = freqBins[binIdx + 1] - freqBins[binIdx];
-          
-          // 更新 High Frequency (Base + Ratio * Width)
           highFreq_Hz = freqBins[binIdx] + powerRatio * freqDiff;
-          
-          // Note: Loop continues to ensure we find the highest frequency edge if there are multiple harmonics, 
-          // or break here if we strictly want the fundamental's upper edge. 
-          // For now, continuing allows finding the absolute max frequency edge effectively.
         }
       }
       
       // ============================================================
-      // 計算 START FREQUENCY（從低到高掃描）
-      // 始終使用 firstFramePower (Frame 0)
+      // 計算 START FREQUENCY
       // ============================================================
       if (foundBin) {
         for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
           if (firstFramePower[binIdx] > highFreqThreshold_dB) {
             startFreq_Hz = freqBins[binIdx];
-            
-            // 嘗試線性插值
             if (binIdx > 0) {
               const thisPower = firstFramePower[binIdx];
               const prevPower = firstFramePower[binIdx - 1];
-              
               if (prevPower < highFreqThreshold_dB && thisPower > highFreqThreshold_dB) {
                 const powerRatio = (thisPower - highFreqThreshold_dB) / (thisPower - prevPower);
                 const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
@@ -1100,23 +1073,30 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       // ============================================================
       // 2025 BUG FIX: Immediate Stop on Major Jump
       // Prevent "Stable Noise" problem where noise creates a stable plateau
-      // after a huge jump (e.g., 83kHz -> 97kHz -> 97kHz).
-      // Stop BEFORE pushing the bad measurement.
+      // Logic: Compare current High Freq with the LAST VALID measurement
       // ============================================================
       if (foundBin && highFreq_Hz !== null) {
         const currentHighFreq_kHz = highFreq_Hz / 1000;
         
-        if (lastValidHighFreq_kHz !== null) {
-          const jumpDiff = Math.abs(currentHighFreq_kHz - lastValidHighFreq_kHz);
+        // 查找上一個有效的測量值 (Robust method)
+        let lastValidFreq_kHz = null;
+        for (let i = measurements.length - 1; i >= 0; i--) {
+          if (measurements[i].foundBin && measurements[i].highFreq_kHz !== null) {
+            lastValidFreq_kHz = measurements[i].highFreq_kHz;
+            break; // 找到最近的一個有效值就停止
+          }
+        }
+        
+        // 如果存在上一個有效值，進行跳變檢查
+        if (lastValidFreq_kHz !== null) {
+          const jumpDiff = Math.abs(currentHighFreq_kHz - lastValidFreq_kHz);
           if (jumpDiff > 4.0) {
             // Major jump detected (> 4.0 kHz).
-            // This indicates we hit the noise floor. Stop immediately.
+            // Hit noise floor. Stop immediately.
             // Do NOT record this measurement.
             break;
           }
         }
-        // Update valid tracker
-        lastValidHighFreq_kHz = currentHighFreq_kHz;
       }
       
       measurements.push({
@@ -1125,20 +1105,16 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         highFreq_Hz: highFreq_Hz,
         highFreq_kHz: highFreq_Hz !== null ? highFreq_Hz / 1000 : null,
         highFreqBinIdx: highFreqBinIdx,
-        highFreqFrameIdx: highFreqFrameIdx,  // 新增：記錄找到高頻的幀
+        highFreqFrameIdx: highFreqFrameIdx,
         startFreq_Hz: startFreq_Hz,
         startFreq_kHz: startFreq_Hz !== null ? startFreq_Hz / 1000 : null,
         foundBin: foundBin
       });
       
       // ============================================================
-      // 2025 v2 NARROWING LOGIC:
-      // 若此步驟找到有效的 highFreq，
-      // 縮小下一步的搜尋範圍到該幀為止
-      // 這樣可以追蹤信號的能量軌跡，避免檢測 rebounce
+      // 2025 v2 NARROWING LOGIC
       // ============================================================
       if (foundBin && highFreqFrameIdx >= 0 && highFreqFrameIdx < currentSearchLimitFrame) {
-        // 如果找到的幀比當前搜尋限制更早，縮小範圍
         currentSearchLimitFrame = highFreqFrameIdx;
         lastValidHighFreqFrameIdx = highFreqFrameIdx;
       }
@@ -1146,7 +1122,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     
     // ============================================================
     // 保存最終的搜尋範圍 (用於 Safety Mechanism)
-    const finalSearchLimitFrame = currentSearchLimitFrame;  // 2025 v2: 保存最後的搜尋範圍
+    const finalSearchLimitFrame = currentSearchLimitFrame;
     
     // ============================================================
     // 只收集成功找到 bin 的測量
@@ -1164,7 +1140,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       };
     }
 
-    // [Standard Anomaly Logic - Preserved from original code with narrowing enhancement]
+    // [Standard Anomaly Logic - Preserved for minor anomaly detection]
     let optimalThreshold = -24;
     let optimalMeasurement = validMeasurements[0];
     let lastValidThreshold = validMeasurements[0].threshold;
@@ -1172,18 +1148,18 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     let recordedEarlyAnomaly = null;
     let firstAnomalyIndex = -1;
     
-    // 2025 v2: Track when narrowing should stop (anomaly detected)
-    let narrowingStopIndex = validMeasurements.length;  // 無異常時使用所有測量
+    // 2025 v2: Track when narrowing should stop
+    // 由於 Loop 內已經過濾了 Major Jump，這裡主要處理 2.5kHz - 4.0kHz 的 Minor Anomaly
     
     for (let i = 1; i < validMeasurements.length; i++) {
       const prevFreq_kHz = validMeasurements[i - 1].highFreq_kHz;
       const currFreq_kHz = validMeasurements[i].highFreq_kHz;
       const freqDifference = Math.abs(currFreq_kHz - prevFreq_kHz);
       
+      // 這個檢查現在是雙重保險，理論上 Loop 內已經攔截了 > 4.0 的情況
       if (freqDifference > 4.0) {
         optimalThreshold = validMeasurements[i - 1].threshold;
         optimalMeasurement = validMeasurements[i - 1];
-        narrowingStopIndex = i;  // 2025 v2: 異常點
         break;
       }
       
@@ -1195,7 +1171,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
           recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
           lastValidThreshold = validMeasurements[i - 1].threshold;
           lastValidMeasurement = validMeasurements[i - 1];
-          narrowingStopIndex = i;  // 2025 v2: 記錄異常位置
         }
       } else {
         if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
@@ -1221,7 +1196,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
           if (hasThreeNormalAfterAnomaly && (afterAnomalyEnd - afterAnomalyStart + 1) >= 3) {
             recordedEarlyAnomaly = null;
             firstAnomalyIndex = -1;
-            narrowingStopIndex = i + 1;  // 2025 v2: 異常被忽略
           }
         }
         lastValidThreshold = validMeasurements[i].threshold;
@@ -1241,20 +1215,19 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
     const hasWarning = finalThreshold <= -70;
     
+    // ... (後續 Safety Mechanism Re-calculation 邏輯保持不變)
+    
     let returnHighFreq_Hz = optimalMeasurement.highFreq_Hz;
     let returnHighFreq_kHz = optimalMeasurement.highFreq_kHz;
     let returnHighFreqBinIdx = optimalMeasurement.highFreqBinIdx;
-    let returnHighFreqFrameIdx = optimalMeasurement.highFreqFrameIdx;  // 2025 v2: 新增
+    let returnHighFreqFrameIdx = optimalMeasurement.highFreqFrameIdx;
     let returnStartFreq_Hz = optimalMeasurement.startFreq_Hz;
     let returnStartFreq_kHz = optimalMeasurement.startFreq_kHz;
     
-    // Safety Mechanism Re-calculation
-    // 2025 v2: 當安全機制改變閾值時，需要在最終的搜尋範圍內重新計算
-    // 使用 finalSearchLimitFrame (經過 narrowing 後的範圍) 而不是固定的 peakFrameIdx
+    // Safety Mechanism Re-calculation logic (如果 safeThreshold !== finalThreshold)
     if (safeThreshold !== finalThreshold) {
       const highFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
       
-      // 在 finalSearchLimitFrame 範圍內構建 Max Spectrum
       const safeMaxSpectrum = new Float32Array(numBins).fill(-Infinity);
       const safeFrameIndexForBin = new Uint16Array(numBins);
       
@@ -1273,14 +1246,12 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       let highFreqFrameIdx_safe = 0;
       let startFreq_Hz_safe = null;
       
-      // 計算 HIGH FREQUENCY (使用 safeMaxSpectrum)
       for (let binIdx = safeMaxSpectrum.length - 1; binIdx >= 0; binIdx--) {
         if (safeMaxSpectrum[binIdx] > highFreqThreshold_dB_safe) {
           highFreq_Hz_safe = freqBins[binIdx];
           highFreqBinIdx_safe = binIdx;
           highFreqFrameIdx_safe = safeFrameIndexForBin[binIdx];
           
-          // 嘗試線性插值
           if (binIdx < safeMaxSpectrum.length - 1) {
             const thisPower = safeMaxSpectrum[binIdx];
             const nextPower = safeMaxSpectrum[binIdx + 1];
@@ -1294,13 +1265,10 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         }
       }
       
-      // 計算 START FREQUENCY (始終使用 firstFramePower)
       if (highFreq_Hz_safe !== null) {
         for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
           if (firstFramePower[binIdx] > highFreqThreshold_dB_safe) {
             startFreq_Hz_safe = freqBins[binIdx];
-            
-            // 嘗試線性插值
             if (binIdx > 0) {
               const thisPower = firstFramePower[binIdx];
               const prevPower = firstFramePower[binIdx - 1];
@@ -1330,10 +1298,10 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       highFreq_Hz: returnHighFreq_Hz,
       highFreq_kHz: returnHighFreq_kHz,
       highFreqBinIdx: returnHighFreqBinIdx,
-      highFreqFrameIdx: returnHighFreqFrameIdx,  // 2025 v2: 新增幀索引
+      highFreqFrameIdx: returnHighFreqFrameIdx,
       startFreq_Hz: returnStartFreq_Hz,
       startFreq_kHz: returnStartFreq_kHz,
-      finalSearchLimitFrame: finalSearchLimitFrame,  // 2025 v2: 返回最終的搜尋範圍限制
+      finalSearchLimitFrame: finalSearchLimitFrame,
       warning: hasWarning
     };
   }
