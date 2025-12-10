@@ -6,7 +6,7 @@ export const COLOR_MAP_DEFAULTS = {
     'mono_dark': { brightness: 0.00, contrast: 1.65, gain: 0.85 },   
     'viridis': { brightness: 0.00, contrast: 1.30, gain: 1.00 },
     'inferno': { brightness: 0.00, contrast: 1.00, gain: 1.00 },
-    'sonoradar': { brightness: 0.00, contrast: 1.10, gain: 1.00 },
+    'sonoradar': { brightness: 0.00, contrast: 1.00, gain: 0.75 },
     'kaleidoscope': { brightness: 0.00, contrast: 1.00, gain: 0.75 },
     'rainbow': { brightness: 0.00, contrast: 1.00, gain: 0.90 },
     'iron': { brightness: 0.00, contrast: 1.00, gain: 0.80 },      
@@ -257,7 +257,7 @@ function generateColorMapRGBA(mapName, gain = 1.0) {
             { pos: 0.2, r: 45, g: 20, b: 5 },    // 深咖啡色：顯示極微弱信號 (Noise floor)
             { pos: 0.4, r: 180, g: 90, b: 10 },   // 焦糖橘色：中等強度過渡
             { pos: 0.7, r: 255, g: 215, b: 0 },   // 金色：主要信號
-            { pos: 0.85, r: 255, g: 240, b: 150 }, // 淺鵝黃：強信號高光
+            { pos: 0.9, r: 255, g: 240, b: 150 }, // 淺鵝黃：強信號高光
             { pos: 1.0, r: 255, g: 255, b: 255 }  // 純白：過載/最強點
         ],
         mono_dark: [
