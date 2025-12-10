@@ -2318,8 +2318,8 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
         freqBins,
         flowKHz,
         fhighKHz,
-        peakFrameIdx,
-        peakPower_dB  // Pass stable call peak value instead of using endThreshold_dB
+        peakPower_dB,  // Pass stable call peak value instead of using endThreshold_dB
+        peakFrameIdx
       );
       
       // ============================================================
