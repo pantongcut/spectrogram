@@ -1332,7 +1332,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
    * @param {number} callPeakPower_dB - Call peak power in dB (stable value)
    * @returns {Object} {threshold, lowFreq_Hz, lowFreq_kHz, endFreq_Hz, endFreq_kHz, warning}
    */
-findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
+findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null) {
     if (spectrogram.length === 0) return {
       threshold: -24,
       lowFreq_Hz: null,
@@ -1344,6 +1344,14 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
 
     const stablePeakPower_dB = callPeakPower_dB;
     const numBins = spectrogram[0].length;
+    
+    // ============================================================
+    // Use limitFrameIdx if provided to match Manual Mode's structural analysis
+    // This allows gap-bridging: signal drops within the call are bridged.
+    // ============================================================
+    const searchEndFrame = (limitFrameIdx !== null && limitFrameIdx < spectrogram.length) 
+      ? limitFrameIdx 
+      : spectrogram.length - 1;
     
     // 測試閾值範圍：-24 到 -70 dB
     const thresholdRange = [];
@@ -1361,39 +1369,30 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
       const lowFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
       
       // ============================================================
-      // 1. 動態尋找有效結束幀 (Forward Scan from Peak)
-      // 模擬 Manual Mode 的 "Anti-Rebounce" 核心行為：
-      // 從 Peak 開始往後找，一旦能量持續低於閾值就視為結束。
-      // 這避免了抓到更後面的回音 (Rebounce)。
+      // 1. 動態尋找有效結束幀 (Gap-Bridging Forward Scan)
+      // 掃描所有幀（從 Peak 到 searchEndFrame），找到最後一個有信號的幀。
+      // 不會在第一個無信號幀停止 - 這實現了 "Gap Bridging"：
+      // 允許信號在幀與幀之間短暫的 drop，但仍視為連續信號。
       // ============================================================
-      let activeEndFrameIdx = peakFrameIdx; // 預設至少是 Peak 這一幀
+      let activeEndFrameIdx = -1; 
       
-      // 從 Peak 往後掃描
-      for (let f = peakFrameIdx; f < spectrogram.length; f++) {
+      // Gap Bridging Scan: Scan ALL frames in range, don't stop at silence
+      for (let f = peakFrameIdx; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
-        
-        // 檢查該幀是否有信號超過閾值
         for (let b = 0; b < numBins; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
             break;
           }
         }
-        
         if (frameHasSignal) {
-          activeEndFrameIdx = f; // 更新有效結束幀
-        } else {
-          // 一旦遇到沒有信號的幀，檢查是否應該停止
-          // 為了容錯 (Gap Bridging)，可以允許短暫的 drop，
-          // 但在 Auto Threshold 這種大量測試中，簡單的 "Stop at first silence" 
-          // 通常能提供最穩定的比較基準，且與 Manual Mode 的 cutoff 行為最接近。
-          
-          // 如果這一幀低於閾值，我們認為叫聲在這裡已經結束了 (或至少主體結束)
-          // 停止掃描，忽略後面的任何回音。
-          break;
-        }
+          activeEndFrameIdx = f; // Always update to the latest found frame
+        } 
       }
+      
+      // Safety fallback
+      if (activeEndFrameIdx === -1) activeEndFrameIdx = peakFrameIdx;
       
       // ============================================================
       // 2. 計算 LOW FREQUENCY（使用 Forward Scan 找到的 activeEndFrameIdx）
@@ -1534,13 +1533,13 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     let returnEndFreq_kHz = optimalMeasurement.endFreq_kHz;
     
     // Safety Mechanism Re-calculation logic (如果 safeThreshold !== finalThreshold)
-    // 同樣需要使用 Forward Scan from Peak
+    // 同樣需要使用 Gap Bridging Scan
     if (safeThreshold !== finalThreshold) {
       const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
       
-      // 1. Re-scan Forward from Peak
-      let activeEndFrameIdx_safe = peakFrameIdx;
-      for (let f = peakFrameIdx; f < spectrogram.length; f++) {
+      // 1. Re-scan Gap Bridging from Peak to searchEndFrame
+      let activeEndFrameIdx_safe = -1;
+      for (let f = peakFrameIdx; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
         for (let b = 0; b < numBins; b++) {
@@ -1551,10 +1550,11 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
         }
         if (frameHasSignal) {
           activeEndFrameIdx_safe = f;
-        } else {
-          break; // Stop at first silence
         }
       }
+      
+      // Safety fallback
+      if (activeEndFrameIdx_safe === -1) activeEndFrameIdx_safe = peakFrameIdx;
       
       if (activeEndFrameIdx_safe !== -1) {
         const targetFramePower = spectrogram[activeEndFrameIdx_safe];
@@ -2318,8 +2318,9 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
         freqBins,
         flowKHz,
         fhighKHz,
-        peakPower_dB,  // Pass stable call peak value instead of using endThreshold_dB
-        peakFrameIdx
+        peakPower_dB,
+        peakFrameIdx,
+        endFrameIdx_forLowFreq
       );
       
       // ============================================================
