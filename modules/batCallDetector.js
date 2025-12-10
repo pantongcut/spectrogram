@@ -2349,6 +2349,7 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     const startFrameTimeInSeconds = timeFrames[finalStartFrameIdx];
     call.startFreq_ms = (startFrameTimeInSeconds - firstFrameTimeInSeconds_start) * 1000;
     call.startFreqTime_s = startFrameTimeInSeconds;
+    const startFreq_kHz = call.startFreq_kHz;
     
     // ============================================================
     // STEP 3: Calculate LOW FREQUENCY from last frame
