@@ -269,13 +269,13 @@ function generateColorMapRGBA(mapName, gain = 1.0) {
             { pos: 1.0, r: 0, g: 0, b: 0 }
         ],
         kaleidoscope: [
-            { pos: 0.0, r: 0, g: 0, b: 0 }, 
-            { pos: 0.01, r: 0, g: 0, b: 3 },
-            { pos: 0.15, r: 0, g: 0, b: 0 }, 
-            { pos: 0.2, r: 0, g: 60, b: 90 },           
-            { pos: 0.5, r: 0, g: 180, b: 60 }, 
-            { pos: 0.85, r: 255, g: 230, b: 0 }, 
-            { pos: 1.0, r: 255, g: 40, b: 0 } 
+            { pos: 0.0, r: 0, g: 0, b: 0 },
+            { pos: 0.01, r: 0, g: 0, b: 3 }, // 深背景噪訊
+            { pos: 0.15, r: 0, g: 10, b: 30 }, // 過渡黑色
+            { pos: 0.3, r: 0, g: 100, b: 140 }, // 深青色 (Dark Cyan)
+            { pos: 0.55, r: 0, g: 255, b: 80 }, // 青綠色 (Cyan-Green)
+            { pos: 0.85, r: 255, g: 230, b: 0 }, // 黃色 (Yellow)
+            { pos: 1.0, r: 255, g: 40, b: 0 } // 橙紅色 (Orange-Red)
         ],
         iron: [
             { pos: 0.0, r: 0, g: 0, b: 0 },
