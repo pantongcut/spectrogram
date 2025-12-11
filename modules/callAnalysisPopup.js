@@ -275,85 +275,34 @@ export function showCallAnalysisPopup({
         batCallConfig.highpassFilterFreq_kHz_isAuto = shouldBeAuto;
       }
       
-      // ============================================================
-      // 2025 CRITICAL ENHANCEMENT: Pre-scan using detectCalls
-      // Instead of relying on global spectrum peak (which is fooled by noise),
-      // use the SAME detection logic as the UI display to find the true peak.
-      // This ensures Auto Highpass Filter sees the same bat as the UI.
-      // ============================================================
-      
-      // Step 1: Pre-scan using detector's call detection logic on raw audio
-
-      let flowKHz_pre = (selection.Flow || 0) / 1000;
-
-      const fhighKHz_pre = selection.Fhigh ? selection.Fhigh / 1000 : null;
-      
-      let autoFilterFreqCalculated = false;
-      
-      try {
-        // Run detection on RAW audio using the same logic as UI
-        const preScanCalls = await detector.detectCalls(audioData, sampleRate, flowKHz_pre, fhighKHz_pre);
-        
-        // Step 2: Use the detected call's peak for Auto Filter calculation
-        if (batCallConfig.highpassFilterFreq_kHz_isAuto === true) {
-          if (preScanCalls.length > 0) {
-            // Success! We found calls in the raw audio.
-            // CRITICAL: Find the call with the HIGHEST peak frequency
-            // This avoids selecting low-frequency noise artifacts (e.g., 5 kHz)
-            // that might be detected first (index 0) before the actual bat call (e.g., 58.86 kHz).
-            // Since we are configuring a Highpass filter to remove low-frequency noise,
-            // the target signal (the bat) must be the highest frequency candidate.
-            let bestCall = preScanCalls[0];
-            let maxPeakFreq = bestCall.peakFreq_kHz !== null ? bestCall.peakFreq_kHz : -Infinity;
-            
-            for (const call of preScanCalls) {
-              const callPeakFreq = call.peakFreq_kHz !== null ? call.peakFreq_kHz : -Infinity;
-              if (callPeakFreq > maxPeakFreq) {
-                maxPeakFreq = callPeakFreq;
-                bestCall = call;
-              }
-            }
-            
-            const detectedPeakFreq = bestCall.peakFreq_kHz;
-            
-            if (detectedPeakFreq !== null && detectedPeakFreq !== undefined) {
-              batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(detectedPeakFreq);
-              autoFilterFreqCalculated = true;
-              console.log('[updateBatCallAnalysis] Pre-scan found', preScanCalls.length, 'call(s). Highest peak at', detectedPeakFreq, 'kHz -> Auto filter set to', batCallConfig.highpassFilterFreq_kHz, 'kHz');
-            }
-          } else {
-            // Fallback: Pre-scan found nothing (maybe noise is too strong)
-            // Keep previous value or default to 0 (filter OFF)
-            console.warn('[updateBatCallAnalysis] Pre-scan found no calls. Auto filter remains unchanged or defaults to 0.');
-          }
-        }
-      } catch (e) {
-        // If pre-scan fails, log and continue
-        console.warn('[updateBatCallAnalysis] Pre-scan failed:', e);
+      // 2025: Auto Mode 時，根據peakFreq計算自動高通濾波器頻率
+      // 使用原始spectrum的peakFreq（未濾波）
+      if (batCallConfig.highpassFilterFreq_kHz_isAuto === true && peakFreq) {
+        batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(peakFreq);
       }
       
-      // Sync detector config to ensure latest batCallConfig values
+      // 同步detector.config以確保使用最新的batCallConfig值
       detector.config = { ...batCallConfig };
       
-      // Retrieve audio data for detection
+      // 獲取要進行偵測的音頻數據
       let audioDataForDetection = audioData;
 
-      // If Highpass Filter is enabled, apply the filter before call measurement
+      // 如果啟用 Highpass Filter，在進行 call measurement 之前應用濾波
       if (batCallConfig.enableHighpassFilter) {
         const highpassFreq_Hz = batCallConfig.highpassFilterFreq_kHz * 1000;
         audioDataForDetection = detector.applyHighpassFilter(audioDataForDetection, highpassFreq_Hz, sampleRate, batCallConfig.highpassFilterOrder);
       }
 
-      // To ensure SNR calculation is correct, use raw (unfiltered) audio data
+      // 為了確保 SNR 計算正確，需要使用原始（未濾波）的音頻數據
       // 2025 REVISED SNR CALCULATION:
       // SNR = 20 × log₁₀ (Signal RMS / Noise RMS)
-      // Signal Region: call's frequency and time range
-      // Noise Region: selection area excluding signal region
+      // Signal Region: call 的頻率和時間範圍
+      // Noise Region: selection area 除去 signal region 外的區域
       // 
       // NOTE: SNR is now calculated in BatCallDetector.detectCalls() using RMS-based method
       // with proper frequency and time range (highFreqFrameIdx to lowFreqFrameIdx)
       
-      // Run main detection on the (potentially filtered) audio data
+      // 先用濾波後的數據進行主要檢測
       const calls = await detector.detectCalls(
         audioDataForDetection,
         sampleRate,
@@ -361,7 +310,7 @@ export function showCallAnalysisPopup({
         selection.Fhigh
       );
       
-      // If filter is enabled and calls are detected, recalculate using raw audio
+      // 如果濾波被啟用且有偵測到 call，重新用原始音頻計算 call
       // 使用原始音頻的 SNR 更準確
       if (batCallConfig.enableHighpassFilter && calls.length > 0) {
         const originalDetector = new (detector.constructor)(batCallConfig, wasmEngine);

@@ -406,110 +406,6 @@ export class BatCallDetector {
     
     return result;
   }
-
-  /**
-   * 2025 NEW: Calculate precise peak frequency using parabolic interpolation
-   * Extracts the parabolic interpolation logic for reuse
-   * 
-   * @param {Array} spectrogram - STFT spectrogram [timeFrame][freqBin] in dB
-   * @param {Array} freqBins - Frequency bin centers in Hz
-   * @returns {Object} { peakFreq_Hz, peakPower_dB, peakBinIdx, peakFrameIdx }
-   */
-  calculatePrecisePeak(spectrogram, freqBins) {
-    if (!spectrogram || spectrogram.length === 0 || !freqBins) {
-      return { peakFreq_Hz: null, peakPower_dB: -Infinity, peakBinIdx: 0, peakFrameIdx: 0 };
-    }
-
-    let peakFreq_Hz = null;
-    let peakPower_dB = -Infinity;
-    let peakFrameIdx = 0;
-    let peakBinIdx = 0;
-
-    // Phase 1: Find global peak bin
-    for (let frameIdx = 0; frameIdx < spectrogram.length; frameIdx++) {
-      const framePower = spectrogram[frameIdx];
-      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-        if (framePower[binIdx] > peakPower_dB) {
-          peakPower_dB = framePower[binIdx];
-          peakBinIdx = binIdx;
-          peakFrameIdx = frameIdx;
-        }
-      }
-    }
-
-    // Phase 2: Apply parabolic interpolation for sub-bin precision
-    // If peak is not at edges, interpolate between neighboring bins
-    peakFreq_Hz = freqBins[peakBinIdx];
-
-    if (peakBinIdx > 0 && peakBinIdx < spectrogram[peakFrameIdx].length - 1) {
-      const framePower = spectrogram[peakFrameIdx];
-      const db0 = framePower[peakBinIdx - 1];
-      const db1 = framePower[peakBinIdx];
-      const db2 = framePower[peakBinIdx + 1];
-
-      // Parabolic vertex formula: y = a*x^2 + b*x + c
-      // Peak position correction using 2nd derivative
-      const a = (db2 - 2 * db1 + db0) / 2;
-      if (Math.abs(a) > 1e-10) {
-        // bin correction = (f(x-1) - f(x+1)) / (4*a)
-        const binCorrection = (db0 - db2) / (4 * a);
-        const binWidth = freqBins[1] - freqBins[0]; // Frequency distance between bins
-        peakFreq_Hz = freqBins[peakBinIdx] + binCorrection * binWidth;
-      }
-    }
-
-    return {
-      peakFreq_Hz: peakFreq_Hz,
-      peakPower_dB: peakPower_dB,
-      peakBinIdx: peakBinIdx,
-      peakFrameIdx: peakFrameIdx
-    };
-  }
-
-  /**
-   * 2025 NEW: Calculate precise peak frequency from raw audio data
-   * Generates spectrogram and applies parabolic interpolation for highest precision
-   * 
-   * @param {Float32Array} audioData - Raw audio samples
-   * @param {number} sampleRate - Sample rate in Hz
-   * @param {number} flowKHz - Low frequency limit in kHz (optional, default 1 kHz)
-   * @param {number} fhighKHz - High frequency limit in kHz (optional, default Nyquist)
-   * @returns {Promise<number>} Peak frequency in kHz with parabolic interpolation
-   */
-  async getPrecisePeakFrequency(audioData, sampleRate, flowKHz = 1, fhighKHz = null) {
-    if (!audioData || audioData.length === 0) {
-      return null;
-    }
-
-    // Use Nyquist frequency as default high limit
-    if (fhighKHz === null) {
-      fhighKHz = sampleRate / 2000;  // Convert Hz to kHz
-    }
-
-    // Generate spectrogram using the detector's standard method
-    const spectrogram = this.generateSpectrogram(audioData, sampleRate, flowKHz, fhighKHz);
-    if (!spectrogram || spectrogram.length === 0) {
-      return null;
-    }
-
-    // Get frequency bins from the detector's internal state
-    // We need to reconstruct the frequency bins (same as used in generateSpectrogram)
-    // Assuming the spectrogram uses the FFT size and sample rate to calculate bins
-    const fftSize = Math.pow(2, Math.ceil(Math.log2(sampleRate / 10)));  // ~10ms default
-    const freqResolution = sampleRate / fftSize;
-    const numBins = Math.ceil(fhighKHz * 1000 / freqResolution);
-    
-    const freqBins = new Float32Array(numBins);
-    for (let i = 0; i < numBins; i++) {
-      freqBins[i] = i * freqResolution;
-    }
-
-    // Calculate precise peak using parabolic interpolation
-    const peakResult = this.calculatePrecisePeak(spectrogram, freqBins);
-
-    // Convert Hz to kHz
-    return peakResult.peakFreq_Hz ? peakResult.peakFreq_Hz / 1000 : null;
-  }
   
   /**
    * Detect all bat calls in audio selection
@@ -1802,13 +1698,49 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     // Professional Standard: Use FFT + Parabolic Interpolation
     // (aligned with Avisoft, SonoBat, Kaleidoscope, BatSound)
     // 
-    // 2025 REFACTOR: Use the reusable calculatePrecisePeak method
+    // Method:
+    // 1. Find peak bin in spectrogram
+    // 2. If peak is not at edge, apply parabolic interpolation
+    // 3. This provides sub-bin precision (~0.1 Hz accuracy)
     // ============================================================
-    const peakResult = this.calculatePrecisePeak(spectrogram, freqBins);
-    let peakFreq_Hz = peakResult.peakFreq_Hz;
-    let peakPower_dB = peakResult.peakPower_dB;
-    let peakFrameIdx = peakResult.peakFrameIdx;
-    let peakBinIdx = peakResult.peakBinIdx;
+    let peakFreq_Hz = null;
+    let peakPower_dB = -Infinity;
+    let peakFrameIdx = 0;
+    let peakBinIdx = 0;
+    
+    // Phase 1: Find global peak bin
+    for (let frameIdx = 0; frameIdx < spectrogram.length; frameIdx++) {
+      const framePower = spectrogram[frameIdx];
+      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
+        if (framePower[binIdx] > peakPower_dB) {
+          peakPower_dB = framePower[binIdx];
+          peakBinIdx = binIdx;
+          peakFrameIdx = frameIdx;
+        }
+      }
+    }
+    
+    // Phase 2: Apply parabolic interpolation for sub-bin precision
+    // If peak is not at edges, interpolate between neighboring bins
+    peakFreq_Hz = freqBins[peakBinIdx];
+    
+    if (peakBinIdx > 0 && peakBinIdx < spectrogram[peakFrameIdx].length - 1) {
+      const framePower = spectrogram[peakFrameIdx];
+      const db0 = framePower[peakBinIdx - 1];
+      const db1 = framePower[peakBinIdx];
+      const db2 = framePower[peakBinIdx + 1];
+      
+      // Parabolic vertex formula: y = a*x^2 + b*x + c
+      // Peak position correction using 2nd derivative
+      const a = (db2 - 2 * db1 + db0) / 2;
+      if (Math.abs(a) > 1e-10) {
+        // bin correction = (f(x-1) - f(x+1)) / (4*a)
+        const binCorrection = (db0 - db2) / (4 * a);
+        const refinedBin = peakBinIdx + binCorrection;
+        const binWidth = freqBins[1] - freqBins[0]; // Frequency distance between bins
+        peakFreq_Hz = freqBins[peakBinIdx] + binCorrection * binWidth;
+      }
+    }
     
     // Store peak values for use in auto-threshold calculation
     // IMPORTANT: These values are NOW STABLE and don't depend on selection area size
