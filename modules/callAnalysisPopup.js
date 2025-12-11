@@ -275,29 +275,10 @@ export function showCallAnalysisPopup({
         batCallConfig.highpassFilterFreq_kHz_isAuto = shouldBeAuto;
       }
       
-      // [2025 REFACTOR] Auto Mode 時，使用 instantaneous peak frequency 而非 average spectrum peak
-      // 這解決了背景噪音（如 25kHz）壓倒蝙蝠叫聲（如 58kHz）的問題
-      // 使用 detector 的 computeMaxPeakFreq() 找到全局最大功率的瞬時峰值
-      if (batCallConfig.highpassFilterFreq_kHz_isAuto === true) {
-        // Compute instantaneous peak frequency using detector's 1024 FFT (not visualizer's 512 FFT)
-        // IMPORTANT: Pass flowKHz and fhighKHz to limit search to selection frequency range
-        const instantaneousPeakFreq_kHz = await detector.computeMaxPeakFreq(
-          audioData, 
-          sampleRate,
-          selection.Flow,  // Low frequency boundary in kHz
-          selection.Fhigh  // High frequency boundary in kHz
-        );
-        
-        if (instantaneousPeakFreq_kHz !== null) {
-          batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(instantaneousPeakFreq_kHz);
-          console.log(`[Highpass Auto] Using instantaneous peak: ${instantaneousPeakFreq_kHz.toFixed(2)} kHz → filter: ${batCallConfig.highpassFilterFreq_kHz} kHz`);
-        } else {
-          console.warn('[Highpass Auto] Failed to compute instantaneous peak, using fallback');
-          // Fallback: use average spectrum peak if instantaneous peak computation fails
-          if (peakFreq) {
-            batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(peakFreq);
-          }
-        }
+      // 2025: Auto Mode 時，根據peakFreq計算自動高通濾波器頻率
+      // 使用原始spectrum的peakFreq（未濾波）
+      if (batCallConfig.highpassFilterFreq_kHz_isAuto === true && peakFreq) {
+        batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(peakFreq);
       }
       
       // 同步detector.config以確保使用最新的batCallConfig值
