@@ -280,17 +280,11 @@ export function showCallAnalysisPopup({
       // calculate the peak using the same high-precision method as the detector (FFT + Parabolic Interpolation)
       let precisePeakFreq = null;
       try {
-        // FIX: Convert Hz to kHz for the detector method
-        // selection.Flow and selection.Fhigh are in Hz, but getPrecisePeakFrequency expects kHz
-        // Also enforce a minimum start frequency (1 kHz) to avoid DC/LF noise interfering with peak detection
-        const flowKHz = selection.Flow ? Math.max(selection.Flow / 1000, 1) : 1;
-        const fhighKHz = selection.Fhigh ? selection.Fhigh / 1000 : null;
-
         precisePeakFreq = await detector.getPrecisePeakFrequency(
           audioData,
           sampleRate,
-          flowKHz,
-          fhighKHz
+          selection.Flow,
+          selection.Fhigh
         );
       } catch (e) {
         // Fallback to UI spectrum peak if precise calculation fails
