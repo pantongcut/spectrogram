@@ -6,7 +6,7 @@ export const COLOR_MAP_DEFAULTS = {
     'mono_dark': { brightness: 0.00, contrast: 1.25, gain: 0.90 },   
     'viridis': { brightness: 0.00, contrast: 1.30, gain: 1.00 },
     'inferno': { brightness: 0.00, contrast: 1.00, gain: 1.00 },
-    'sonoradar': { brightness: 0.00, contrast: 1.00, gain: 0.75 },
+    'cyberpunk': { brightness: 0.00, contrast: 1.00, gain: 1.00 },
     'kaleidoscope': { brightness: 0.00, contrast: 1.00, gain: 0.75 },
     'rainbow': { brightness: 0.00, contrast: 1.00, gain: 0.90 },
     'iron': { brightness: 0.00, contrast: 1.00, gain: 0.80 },      
@@ -251,13 +251,13 @@ function generateColorMapRGBA(mapName, gain = 1.0) {
             { pos: 0.85, r: 250, g: 155, b: 135 },
             { pos: 1.0, r: 252, g: 253, b: 191 }
         ],
-        sonoradar: [
-            { pos: 0.0, r: 0, g: 0, b: 0 },       // 全黑背景
-            { pos: 0.15, r: 0, g: 0, b: 0 }, 
-            { pos: 0.2, r: 45, g: 20, b: 5 },    // 深咖啡色：顯示極微弱信號 (Noise floor)
-            { pos: 0.75, r: 180, g: 90, b: 10 },   // 焦糖橘色：中等強度過渡
-            { pos: 0.85, r: 255, g: 215, b: 0 },   // 金色：主要信號
-            { pos: 1.0, r: 255, g: 255, b: 255 }  // 純白：過載/最強點
+        cyberpunk: [
+            { pos: 0.0, r: 0, g: 0, b: 0 },       // 背景：純黑 (Deep Space)
+            { pos: 0.15, r: 0, g: 10, b: 40 },    // 暗部：午夜藍，讓底噪若隱若現
+            { pos: 0.35, r: 0, g: 60, b: 180 },   // 中暗部：深寶藍 (Royal Blue)
+            { pos: 0.6, r: 0, g: 180, b: 255 },   // 主信號：電光藍 (Electric Blue) - 這是圖中最顯眼的顏色
+            { pos: 0.85, r: 140, g: 255, b: 245 },// 高光：冰青色 (Ice Cyan)
+            { pos: 1.0, r: 255, g: 255, b: 255 }  // 極值：純白 (White Hot)
         ],
         mono_dark: [
             { pos: 0.0, r: 0, g: 0, b: 0 },       // 背景全黑
@@ -381,7 +381,7 @@ class h extends s {
             case "inferno":
             case "viridis":
             case "magma":
-            case "sonoradar":
+            case "cyberpunk":
             case "mono_dark":
             case "mono_light":
             case "kaleidoscope":
@@ -771,7 +771,7 @@ class h extends s {
             { name: "inferno", label: "Inferno" },
             { name: "viridis", label: "Viridis" },
             { name: "magma", label: "Magma" },
-            { name: "sonoradar", label: "SonoRadar" },
+            { name: "cyberpunk", label: "Cyberpunk" },
             { name: "mono_dark", label: "Mono Dark" },
             { name: "mono_light", label: "Mono Light" },
             { name: "kaleidoscope", label: "Kaleidoscope" },
