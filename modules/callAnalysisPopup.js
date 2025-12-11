@@ -299,15 +299,29 @@ export function showCallAnalysisPopup({
         // Step 2: Use the detected call's peak for Auto Filter calculation
         if (batCallConfig.highpassFilterFreq_kHz_isAuto === true) {
           if (preScanCalls.length > 0) {
-            // Success! We found a bat in the raw audio.
-            // Use the first call (or the best one) for filter decision
-            const bestCall = preScanCalls[0];
+            // Success! We found calls in the raw audio.
+            // CRITICAL: Find the call with the HIGHEST peak frequency
+            // This avoids selecting low-frequency noise artifacts (e.g., 5 kHz)
+            // that might be detected first (index 0) before the actual bat call (e.g., 58.86 kHz).
+            // Since we are configuring a Highpass filter to remove low-frequency noise,
+            // the target signal (the bat) must be the highest frequency candidate.
+            let bestCall = preScanCalls[0];
+            let maxPeakFreq = bestCall.peakFreq_kHz !== null ? bestCall.peakFreq_kHz : -Infinity;
+            
+            for (const call of preScanCalls) {
+              const callPeakFreq = call.peakFreq_kHz !== null ? call.peakFreq_kHz : -Infinity;
+              if (callPeakFreq > maxPeakFreq) {
+                maxPeakFreq = callPeakFreq;
+                bestCall = call;
+              }
+            }
+            
             const detectedPeakFreq = bestCall.peakFreq_kHz;
             
             if (detectedPeakFreq !== null && detectedPeakFreq !== undefined) {
               batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(detectedPeakFreq);
               autoFilterFreqCalculated = true;
-              console.log('[updateBatCallAnalysis] Pre-scan detected peak at', detectedPeakFreq, 'kHz -> Auto filter set to', batCallConfig.highpassFilterFreq_kHz, 'kHz');
+              console.log('[updateBatCallAnalysis] Pre-scan found', preScanCalls.length, 'call(s). Highest peak at', detectedPeakFreq, 'kHz -> Auto filter set to', batCallConfig.highpassFilterFreq_kHz, 'kHz');
             }
           } else {
             // Fallback: Pre-scan found nothing (maybe noise is too strong)
