@@ -6,7 +6,7 @@ export const COLOR_MAP_DEFAULTS = {
     'mono_dark': { brightness: 0.00, contrast: 1.25, gain: 0.90 },   
     'viridis': { brightness: 0.00, contrast: 1.30, gain: 1.00 },
     'inferno': { brightness: 0.00, contrast: 1.00, gain: 1.00 },
-    'cyberpunk': { brightness: 0.00, contrast: 1.00, gain: 1.00 },
+    'cyberpunk': { brightness: 0.00, contrast: 1.00, gain: 0.75 },
     'kaleidoscope': { brightness: 0.00, contrast: 1.00, gain: 0.75 },
     'rainbow': { brightness: 0.00, contrast: 1.00, gain: 0.90 },
     'iron': { brightness: 0.00, contrast: 1.00, gain: 0.80 },      
@@ -253,7 +253,7 @@ function generateColorMapRGBA(mapName, gain = 1.0) {
         ],
         cyberpunk: [
             { pos: 0.0, r: 0, g: 0, b: 0 },       // 背景：純黑 (Deep Space)
-            { pos: 0.15, r: 0, g: 10, b: 40 },    // 暗部：午夜藍，讓底噪若隱若現
+            { pos: 0.25, r: 0, g: 10, b: 40 },    // 暗部：午夜藍，讓底噪若隱若現
             { pos: 0.35, r: 0, g: 60, b: 180 },   // 中暗部：深寶藍 (Royal Blue)
             { pos: 0.6, r: 0, g: 180, b: 255 },   // 主信號：電光藍 (Electric Blue) - 這是圖中最顯眼的顏色
             { pos: 0.85, r: 140, g: 255, b: 245 },// 高光：冰青色 (Ice Cyan)
