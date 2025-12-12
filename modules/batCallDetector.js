@@ -1062,10 +1062,9 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
 
-    // 根據你的公式：Min + (Range * 0.25)
-    // 例如: Min 0, Max 100 -> 0 + (100 * 0.25) = 25
+    // 根據你的公式：Min + (Range * 0.45)
     const dynamicRange = maxDb - minDb;
-    const robustNoiseFloor_dB = minDb + dynamicRange * 0.35;
+    const robustNoiseFloor_dB = minDb + dynamicRange * 0.45;
     
     console.log('[findOptimalHighFrequencyThreshold] NOISE FLOOR CALCULATION:');
     console.log(`  Min dB: ${minDb.toFixed(2)}, Max dB: ${maxDb.toFixed(2)}, Range: ${dynamicRange.toFixed(2)}`);
