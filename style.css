@@ -2799,6 +2799,18 @@ input.tag-button.editing {
 }
 
 /* ============================================================
+   Spectrogram Canvas Optimization for Smooth Zoom
+   ============================================================ */
+
+#spectrogram-only canvas {
+  /* Use 'auto' or 'smooth' for bilinear interpolation during CSS stretch */
+  image-rendering: auto; 
+  /* Ensure canvas stretches with the container width during the wheel event */
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ============================================================
    舊 Canvas 容器樣式（保留以備後用或向後相容）
    ============================================================ */
 
