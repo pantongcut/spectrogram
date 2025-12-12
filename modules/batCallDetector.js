@@ -425,8 +425,21 @@ export class BatCallDetector {
     
     if (callSegments.length === 0) return [];
     
+    // ============================================================
+    // FILTER: Remove segments that are too short
+    // Calculate frame duration in seconds and filter before processing
+    // ============================================================
+    const filteredSegments = callSegments.filter(segment => {
+      const frameDurationSec = 1 / (sampleRate / this.config.fftSize);
+      const numFrames = segment.endFrame - segment.startFrame + 1;
+      const segmentDuration_ms = numFrames * frameDurationSec * 1000;
+      return segmentDuration_ms >= this.config.minCallDuration_ms;
+    });
+    
+    if (filteredSegments.length === 0) return [];
+    
     // Phase 2: Measure precise parameters for each detected call
-    const calls = callSegments.map(segment => {
+    const calls = filteredSegments.map(segment => {
       const call = new BatCall();
       call.startTime_s = timeFrames[segment.startFrame];
       call.endTime_s = timeFrames[Math.min(segment.endFrame + 1, timeFrames.length - 1)];
@@ -1869,6 +1882,7 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     let safeHighFreqBinIdx = undefined;
     let safeHighFreqFrameIdx = 0;
     let finalSearchLimitFrameFromAuto = 0;  // 2025 v2: 保存 auto mode 返回的搜尋範圍限制
+    let skipStep2HighFrequency = false;     // 2025 NEW: Flag to skip Step 2 if Auto Mode succeeds
     
     if (this.config.highFreqThreshold_dB_isAuto === true) {
       const result = this.findOptimalHighFrequencyThreshold(
@@ -1967,6 +1981,29 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
       // 當 threshold 達到 -70dB 極限時，自動改用 -30dB
       // 不再需要顯示 warning，因此 highFreqDetectionWarning 已棄用
       
+      // ============================================================
+      // 2025 NEW: DIRECT ASSIGNMENT - Trust Auto Mode Result
+      // If Auto Mode found a valid high frequency, assign it directly
+      // and skip the Step 2 re-calculation to avoid picking up noise
+      // ============================================================
+      if (safeHighFreq_kHz !== null) {
+        call.highFreq_kHz = safeHighFreq_kHz;
+        call.highFreqFrameIdx = safeHighFreqFrameIdx;
+        
+        // Calculate high frequency time immediately
+        const firstFrameTimeInSeconds = timeFrames[0];
+        if (safeHighFreqFrameIdx < timeFrames.length) {
+          const highFreqTimeInSeconds = timeFrames[safeHighFreqFrameIdx];
+          call.highFreqTime_ms = (highFreqTimeInSeconds - firstFrameTimeInSeconds) * 1000;
+        } else {
+          call.highFreqTime_ms = 0;
+        }
+        
+        // Flag to skip Step 2 re-calculation
+        skipStep2HighFrequency = true;
+        
+        console.log(`[AUTO MODE DIRECT ASSIGNMENT] High Freq: ${safeHighFreq_kHz.toFixed(2)} kHz @ Frame ${safeHighFreqFrameIdx} - Skipping Step 2`);
+      }
     }
     
     // ============================================================
@@ -2179,17 +2216,20 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     // This is the HIGHEST frequency in the entire call (not just first frame)
     // Search from HIGH to LOW frequency (reverse bin order)
     // Track both frequency value AND the frame it appears in
+    // 
+    // 2025 NEW: Skip this block if Auto Mode already found and assigned highFreq
     // ============================================================
-    let highFreq_Hz = 0;  // 2025: Init to 0 to properly find max
-    let highFreqBinIdx = 0;
-    let highFreqFrameIdx = -1; // 2025: Use -1 to indicate not found yet
-    
-    // 2025 v2 CRITICAL CHANGE: 使用 AUTO MODE 返回的 finalSearchLimitFrame
-    // 如果在 AUTO MODE 中，使用其返回的搜尋範圍限制
-    // 如果是 MANUAL MODE 或未設定，使用 peakFrameIdx
-    const highFreqScanLimit = (this.config.highFreqThreshold_dB_isAuto === true && finalSearchLimitFrameFromAuto > 0)
-      ? Math.min(finalSearchLimitFrameFromAuto, spectrogram.length - 1)
-      : Math.min(peakFrameIdx, spectrogram.length - 1);
+    if (!skipStep2HighFrequency) {
+      let highFreq_Hz = 0;  // 2025: Init to 0 to properly find max
+      let highFreqBinIdx = 0;
+      let highFreqFrameIdx = -1; // 2025: Use -1 to indicate not found yet
+      
+      // 2025 v2 CRITICAL CHANGE: 使用 AUTO MODE 返回的 finalSearchLimitFrame
+      // 如果在 AUTO MODE 中，使用其返回的搜尋範圍限制
+      // 如果是 MANUAL MODE 或未設定，使用 peakFrameIdx
+      const highFreqScanLimit = (this.config.highFreqThreshold_dB_isAuto === true && finalSearchLimitFrameFromAuto > 0)
+        ? Math.min(finalSearchLimitFrameFromAuto, spectrogram.length - 1)
+        : Math.min(peakFrameIdx, spectrogram.length - 1);
 
     for (let frameIdx = 0; frameIdx <= highFreqScanLimit; frameIdx++) {
       const framePower = spectrogram[frameIdx];
@@ -2261,6 +2301,7 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
     // 計算相對於 peakPower_dB 的偏移值
     const highFreqThreshold_dB_used_manual = highThreshold_dB - peakPower_dB;
     call.highFreqThreshold_dB_used = highFreqThreshold_dB_used_manual;
+    }
     
     // ============================================================
     // STEP 2.5: Calculate START FREQUENCY (獨立於 High Frequency)
