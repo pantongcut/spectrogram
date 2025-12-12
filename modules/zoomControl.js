@@ -1,7 +1,9 @@
 // modules/zoomControl.js
 
 /**
- * Zoom Control with Geometric Ratio Anchoring and Layout Synchronization.
+ * Zoom Control with "Double-Lock" Scroll Sync.
+ * Ensures the spectrogram stays centered under the mouse by applying scroll 
+ * corrections both synchronously and asynchronously to bypass browser clamping.
  */
 export function initZoomControls(ws, container, duration, applyZoomCallback,
                                 wrapperElement, onBeforeZoom = null,
@@ -17,8 +19,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   let wheelTimeout = null;
   let isWheelZooming = false;
 
-  // [CRITICAL] Inject CSS to ensure smooth scaling and DISABLE native smooth scrolling
-  // Native smooth scrolling interferes with programmatic exact positioning.
+  // [CSS] Force smooth visual scaling and remove scroll lag
   function _injectCssForSmoothing() {
     const styleId = 'spectrogram-smooth-zoom-style';
     if (!document.getElementById(styleId)) {
@@ -31,7 +32,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
           image-rendering: auto; 
           transform-origin: 0 0;
         }
-        /* Force wrapper to update scroll instantly */
+        /* Important: Prevents browser smooth-scrolling from fighting our math */
         #${wrapperElement.id || 'viewer-wrapper'} {
           scroll-behavior: auto !important;
         }
@@ -55,7 +56,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   }
 
   function computeMinZoomLevel() {
-    let visibleWidth = wrapperElement.clientWidth;
+    const visibleWidth = wrapperElement.clientWidth;
     const dur = duration();
     if (dur > 0) {
       minZoomLevel = Math.floor((visibleWidth - 2) / dur);
@@ -143,7 +144,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   }
 
   /**
-   * Robust Mouse-Centered Zoom Logic
+   * Precise Mouse Wheel Zoom Logic
    */
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
@@ -152,26 +153,20 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
     
-    // --- PHASE 1: CALCULATE ANCHOR RATIO ---
-    // We use getBoundingClientRect() to get the EXACT visual width, ignoring logic errors.
-    // Ratio = (Where we are in pixels) / (Total Width)
-    
+    // --- 1. Calculate Pivot Point (Before Zoom) ---
     const wrapperRect = wrapperElement.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect(); // Current actual width
+    const containerRect = container.getBoundingClientRect();
     
-    // Mouse X relative to the wrapper viewport
-    const mouseXInWrapper = e.clientX - wrapperRect.left;
+    // Position of mouse inside the viewport (0 to wrapperWidth)
+    const mouseXInViewport = e.clientX - wrapperRect.left;
     
-    // Mouse X relative to the content (Absolute X)
-    const currentScroll = wrapperElement.scrollLeft;
-    const mouseAbsX = currentScroll + mouseXInWrapper;
-    
-    // Calculate ratio (0.0 to 1.0) - "The mouse is at 45.3% of the audio"
-    // Using Math.max to avoid division by zero
-    const currentTotalWidth = containerRect.width || 1; 
-    const anchorRatio = mouseAbsX / currentTotalWidth;
+    // Calculate the mouse's relative position (0.0 to 1.0) across the ENTIRE audio
+    // Formula: (CurrentScroll + MouseViewX) / CurrentTotalWidth
+    const currentScrollLeft = wrapperElement.scrollLeft;
+    const currentTotalWidth = containerRect.width || 1;
+    const pivotRatio = (currentScrollLeft + mouseXInViewport) / currentTotalWidth;
 
-    // --- PHASE 2: CALCULATE NEW ZOOM ---
+    // --- 2. Calculate New Zoom ---
     const delta = -e.deltaY;
     const scaleFactor = 1 + (delta * 0.001); 
     
@@ -180,29 +175,38 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
 
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
+    // --- 3. Apply Visual Changes ---
     zoomLevel = newZoomLevel;
     isWheelZooming = true;
 
-    // --- PHASE 3: APPLY CSS & FORCE LAYOUT UPDATE ---
     const dur = duration();
-    const newTotalWidth = dur * zoomLevel;
+    const newTotalWidth = dur * newZoomLevel;
     
-    // 1. Set new width
+    // Set Width
     container.style.width = `${newTotalWidth}px`;
 
-    // 2. [CRITICAL] Force Browser Layout Reflow
-    // Accessing 'scrollWidth' forces the browser to recalculate the scrollable area immediately.
-    // Without this, the browser might clip the next scrollLeft assignment to the OLD width.
-    const _forceLayout = wrapperElement.scrollWidth;
+    // [CRITICAL] Force Reflow: Read property to ensure browser accepts new width
+    void container.offsetWidth; 
 
-    // 3. Apply corrected scroll position
-    // Target Absolute X = New Width * Anchor Ratio
-    // Target Scroll = Target Absolute X - Mouse Position in Viewport
-    const newScroll = (newTotalWidth * anchorRatio) - mouseXInWrapper;
-    
-    wrapperElement.scrollLeft = newScroll;
+    // Calculate Target Scroll
+    // TargetPos = (TotalWidth * Ratio) - MouseViewX
+    const targetScroll = (newTotalWidth * pivotRatio) - mouseXInViewport;
 
-    // --- PHASE 4: DEBOUNCE REDRAW ---
+    // Attempt 1: Sync set
+    wrapperElement.scrollLeft = targetScroll;
+
+    // Attempt 2: Async set (Double-Lock) to handle browser clamping lag
+    requestAnimationFrame(() => {
+        wrapperElement.scrollLeft = targetScroll;
+        // Optional: One more check for Safari/Firefox specific rendering queues
+        requestAnimationFrame(() => {
+             if (Math.abs(wrapperElement.scrollLeft - targetScroll) > 5) {
+                 wrapperElement.scrollLeft = targetScroll;
+             }
+        });
+    });
+
+    // --- 4. Debounce Heavy Rendering ---
     if (wheelTimeout) {
       clearTimeout(wheelTimeout);
     }
@@ -213,21 +217,17 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // Re-enforce the scroll position after WS redraws the canvas
-        // (WS zoom sometimes resets scroll position)
+        // Re-calculate perfectly after WaveSurfer's internal updates
         const finalWidth = duration() * zoomLevel;
-        const finalScroll = (finalWidth * anchorRatio) - mouseXInWrapper;
-        
-        requestAnimationFrame(() => {
-            wrapperElement.scrollLeft = finalScroll;
-        });
+        const finalScroll = (finalWidth * pivotRatio) - mouseXInViewport;
+        wrapperElement.scrollLeft = finalScroll;
       }
       
       applyZoomCallback();
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
       
-    }, 30);
+    }, 20);
   }
 
   if (wrapperElement) {
