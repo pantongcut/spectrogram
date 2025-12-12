@@ -1080,6 +1080,11 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     
     const stablePeakPower_dB = callPeakPower_dB;
     
+    // ============================================================
+    // Initialize Hard Stop Flag
+    // ============================================================
+    let hitNoiseFloor = false;
+    
     // 測試閾值範圍：-24 到 -70 dB，間距 0.5 dB
     const thresholdRange = [];
     for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
@@ -1205,6 +1210,19 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
             } else {
               // Signal is at or below noise floor - stop immediately (hit noise)
               console.log(`    ✗ Signal AT/BELOW noise floor → BREAK (hit noise)`);
+              
+              // ============================================================
+              // [NEW] Set Hard Stop Flag and use last valid measurement
+              // ============================================================
+              hitNoiseFloor = true;
+              // Find last valid measurement before the break
+              for (let j = measurements.length - 1; j >= 0; j--) {
+                if (measurements[j].foundBin && measurements[j].highFreq_kHz !== null) {
+                  optimalMeasurement = measurements[j];
+                  optimalThreshold = measurements[j].threshold;
+                  break;
+                }
+              }
               break;
             }
           }
@@ -1253,93 +1271,104 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       };
     }
 
-    // [Standard Anomaly Logic - Preserved from previous version]
-    // 這部分邏輯負責處理 2.5kHz - 4.0kHz 的微小異常，保持不變
+    // ============================================================
+    // [NEW] Initialize Optimal Variables Before Anomaly Analysis
+    // ============================================================
     let optimalThreshold = -24;
     let optimalMeasurement = validMeasurements[0];
-    let lastValidThreshold = validMeasurements[0].threshold;
-    let lastValidMeasurement = validMeasurements[0];
-    let recordedEarlyAnomaly = null;
-    let firstAnomalyIndex = -1;
-    
-    for (let i = 1; i < validMeasurements.length; i++) {
-      const prevFreq_kHz = validMeasurements[i - 1].highFreq_kHz;
-      const currFreq_kHz = validMeasurements[i].highFreq_kHz;
-      const freqDifference = Math.abs(currFreq_kHz - prevFreq_kHz);
+    // ============================================================
+    // [NEW] Wrap Anomaly Analysis - Skip if Hard Stop Triggered
+    // ============================================================
+    if (!hitNoiseFloor) {
+      // [Standard Anomaly Logic - Preserved from previous version]
+      // 這部分邏輯負責處理 2.5kHz - 4.0kHz 的微小異常，保持不變
+      let lastValidThreshold = validMeasurements[0].threshold;
+      let lastValidMeasurement = validMeasurements[0];
+      let recordedEarlyAnomaly = null;
+      let firstAnomalyIndex = -1;
       
-      // 雙重保險，雖然 Loop 內已經攔截
-      if (freqDifference > 4.0) {
-        optimalThreshold = validMeasurements[i - 1].threshold;
-        optimalMeasurement = validMeasurements[i - 1];
-        break;
-      }
-      
-      // 2025 ENHANCED: Anomaly Logic with Noise Floor Check
-      // Only treat as anomaly if frequency jump is > 2.5 kHz AND signal is below noise floor
-      let isAnomaly = false;
-      if (freqDifference > 2.5) {
-        // Additional check: is the current measurement's power above noise floor?
-        const currentPower_dB = validMeasurements[i].highFreqPower_dB;
+      for (let i = 1; i < validMeasurements.length; i++) {
+        const prevFreq_kHz = validMeasurements[i - 1].highFreq_kHz;
+        const currFreq_kHz = validMeasurements[i].highFreq_kHz;
+        const freqDifference = Math.abs(currFreq_kHz - prevFreq_kHz);
         
-        console.log(`  [ANOMALY CHECK] Index ${i}: Freq ${prevFreq_kHz.toFixed(2)} → ${currFreq_kHz.toFixed(2)} kHz (Diff: ${freqDifference.toFixed(2)} kHz > 2.5)`);
-        console.log(`    Power: ${currentPower_dB !== null ? currentPower_dB.toFixed(2) : 'N/A'} dB | Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
+        // 雙重保險，雖然 Loop 內已經攔截
+        if (freqDifference > 4.0) {
+          optimalThreshold = validMeasurements[i - 1].threshold;
+          optimalMeasurement = validMeasurements[i - 1];
+          break;
+        }
         
-        if (currentPower_dB !== null && currentPower_dB <= robustNoiseFloor_dB) {
-          // Signal is at or below noise floor - this is a legitimate anomaly
-          console.log(`    ✗ Power AT/BELOW noise floor → ANOMALY DETECTED`);
-          isAnomaly = true;
+        // 2025 ENHANCED: Anomaly Logic with Noise Floor Check
+        // Only treat as anomaly if frequency jump is > 2.5 kHz AND signal is below noise floor
+        let isAnomaly = false;
+        if (freqDifference > 2.5) {
+          // Additional check: is the current measurement's power above noise floor?
+          const currentPower_dB = validMeasurements[i].highFreqPower_dB;
+          
+          console.log(`  [ANOMALY CHECK] Index ${i}: Freq ${prevFreq_kHz.toFixed(2)} → ${currFreq_kHz.toFixed(2)} kHz (Diff: ${freqDifference.toFixed(2)} kHz > 2.5)`);
+          console.log(`    Power: ${currentPower_dB !== null ? currentPower_dB.toFixed(2) : 'N/A'} dB | Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
+          
+          if (currentPower_dB !== null && currentPower_dB <= robustNoiseFloor_dB) {
+            // Signal is at or below noise floor - this is a legitimate anomaly
+            console.log(`    ✗ Power AT/BELOW noise floor → ANOMALY DETECTED`);
+            isAnomaly = true;
+          } else {
+            // Signal is above noise floor - treat as valid signal transition
+            // Ignore the frequency jump
+            console.log(`    ✓ Power ABOVE noise floor → VALID TRANSITION (ignore jump)`);
+            isAnomaly = false;
+          }
+        }
+        
+        if (isAnomaly) {
+          if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
+            firstAnomalyIndex = i;
+            recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
+            lastValidThreshold = validMeasurements[i - 1].threshold;
+            lastValidMeasurement = validMeasurements[i - 1];
+          }
         } else {
-          // Signal is above noise floor - treat as valid signal transition
-          // Ignore the frequency jump
-          console.log(`    ✓ Power ABOVE noise floor → VALID TRANSITION (ignore jump)`);
-          isAnomaly = false;
+          if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
+            const afterAnomalyStart = firstAnomalyIndex + 1;
+            const afterAnomalyEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
+            let hasThreeNormalAfterAnomaly = true;
+            
+            for (let checkIdx = afterAnomalyStart; checkIdx <= afterAnomalyEnd; checkIdx++) {
+              if (checkIdx >= validMeasurements.length) {
+                hasThreeNormalAfterAnomaly = false;
+                break;
+              }
+              const checkPrevFreq_kHz = validMeasurements[checkIdx - 1].highFreq_kHz;
+              const checkCurrFreq_kHz = validMeasurements[checkIdx].highFreq_kHz;
+              const checkFreqDiff = Math.abs(checkCurrFreq_kHz - checkPrevFreq_kHz);
+              
+              if (checkFreqDiff > 2.5) {
+                hasThreeNormalAfterAnomaly = false;
+                break;
+              }
+            }
+            
+            if (hasThreeNormalAfterAnomaly && (afterAnomalyEnd - afterAnomalyStart + 1) >= 3) {
+              recordedEarlyAnomaly = null;
+              firstAnomalyIndex = -1;
+            }
+          }
+          lastValidThreshold = validMeasurements[i].threshold;
+          lastValidMeasurement = validMeasurements[i];
         }
       }
       
-      if (isAnomaly) {
-        if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
-          firstAnomalyIndex = i;
-          recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
-          lastValidThreshold = validMeasurements[i - 1].threshold;
-          lastValidMeasurement = validMeasurements[i - 1];
-        }
+      if (recordedEarlyAnomaly !== null) {
+        optimalThreshold = recordedEarlyAnomaly;
+        optimalMeasurement = lastValidMeasurement;
       } else {
-        if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
-          const afterAnomalyStart = firstAnomalyIndex + 1;
-          const afterAnomalyEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
-          let hasThreeNormalAfterAnomaly = true;
-          
-          for (let checkIdx = afterAnomalyStart; checkIdx <= afterAnomalyEnd; checkIdx++) {
-            if (checkIdx >= validMeasurements.length) {
-              hasThreeNormalAfterAnomaly = false;
-              break;
-            }
-            const checkPrevFreq_kHz = validMeasurements[checkIdx - 1].highFreq_kHz;
-            const checkCurrFreq_kHz = validMeasurements[checkIdx].highFreq_kHz;
-            const checkFreqDiff = Math.abs(checkCurrFreq_kHz - checkPrevFreq_kHz);
-            
-            if (checkFreqDiff > 2.5) {
-              hasThreeNormalAfterAnomaly = false;
-              break;
-            }
-          }
-          
-          if (hasThreeNormalAfterAnomaly && (afterAnomalyEnd - afterAnomalyStart + 1) >= 3) {
-            recordedEarlyAnomaly = null;
-            firstAnomalyIndex = -1;
-          }
-        }
-        lastValidThreshold = validMeasurements[i].threshold;
-        lastValidMeasurement = validMeasurements[i];
+        optimalThreshold = lastValidThreshold;
+        optimalMeasurement = lastValidMeasurement;
       }
-    }
-    
-    if (recordedEarlyAnomaly !== null) {
-      optimalThreshold = recordedEarlyAnomaly;
-      optimalMeasurement = lastValidMeasurement;
     } else {
-      optimalThreshold = lastValidThreshold;
-      optimalMeasurement = lastValidMeasurement;
+      // Hard stop was triggered at noise floor
+      console.log(`[findOptimalHighFrequencyThreshold] Hard stop at noise floor. Using threshold: ${optimalThreshold}dB`);
     }
     
     const finalThreshold = Math.max(Math.min(optimalThreshold, -24), -70);
