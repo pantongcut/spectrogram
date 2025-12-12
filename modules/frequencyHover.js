@@ -426,15 +426,24 @@ export function initFrequencyHover({
     }
   });
 
-  viewer.addEventListener('contextmenu', (e) => {
-    // 如果右鍵在 selection area 上，不要顯示 persistent-line，直接返回
+  // 改為雙擊左鍵 (dblclick) 創建/刪除 persistent line
+  viewer.addEventListener('dblclick', (e) => {
+    // 如果雙擊在 selection area 上，不要顯示 persistent-line，直接返回
     if (e.target.closest('.selection-rect')) {
       return;
     }
     
+    // 如果雙擊在 tooltip 上，直接返回
+    if (e.target.closest('.draggable-tooltip')) {
+        return;
+    }
+
     if (!persistentLinesEnabled || disablePersistentLinesForScrollbar || isOverTooltip) return;
     if (e.target.closest('.selection-expand-btn') || e.target.closest('.selection-fit-btn') || e.target.closest('.selection-btn-group')) return;
+    
+    // dblclick 時 preventDefault 可以防止部分選取文字的預設行為
     e.preventDefault();
+    
     const rect = fixedOverlay.getBoundingClientRect();
     const y = e.clientY - rect.top;
     const freq = (1 - y / spectrogramHeight) * (maxFrequency - minFrequency) + minFrequency;
