@@ -1044,6 +1044,21 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     const firstFramePower = spectrogram[0];
     const numBins = firstFramePower.length;
     
+    // ============================================================
+    // 2025 NEW: Calculate Robust Noise Floor (25th Percentile)
+    // This represents the "pure noise/low signal" baseline to filter false positives
+    // ============================================================
+    const allPowerValues = [];
+    for (let frameIdx = 0; frameIdx < spectrogram.length; frameIdx++) {
+      const framePower = spectrogram[frameIdx];
+      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
+        allPowerValues.push(framePower[binIdx]);
+      }
+    }
+    allPowerValues.sort((a, b) => a - b);
+    const percentile25Index = Math.floor(allPowerValues.length * 0.25);
+    const robustNoiseFloor_dB = allPowerValues[Math.max(0, percentile25Index)];
+    
     // Initial search limit: from 0 to peakFrameIdx
     let currentSearchLimitFrame = Math.min(peakFrameIdx, spectrogram.length - 1);
     
@@ -1142,17 +1157,21 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
       
       // ============================================================
-      // 3. MAJOR JUMP PROTECTION (> 4.0 kHz)
-      // 直接檢查 measurements 陣列中的上一個有效值
+      // 3. MAJOR JUMP PROTECTION (> 4.0 kHz) with Noise Floor Check
+      // 2025 ENHANCED: Check if the current signal is above noise floor
+      // before stopping due to frequency jump
       // ============================================================
       if (foundBin && highFreq_Hz !== null) {
         const currentHighFreq_kHz = highFreq_Hz / 1000;
+        const currentHighFreqPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
         
         // 查找上一個有效的測量值
         let lastValidFreq_kHz = null;
+        let lastValidPower_dB = null;
         for (let i = measurements.length - 1; i >= 0; i--) {
           if (measurements[i].foundBin && measurements[i].highFreq_kHz !== null) {
             lastValidFreq_kHz = measurements[i].highFreq_kHz;
+            lastValidPower_dB = measurements[i].highFreqPower_dB;
             break;
           }
         }
@@ -1161,9 +1180,15 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         if (lastValidFreq_kHz !== null) {
           const jumpDiff = Math.abs(currentHighFreq_kHz - lastValidFreq_kHz);
           if (jumpDiff > 4.0) {
-            // Major jump detected (> 4.0 kHz).
-            // Hit noise floor. Stop immediately.
-            break; 
+            // Major jump detected (> 4.0 kHz)
+            // NEW LOGIC: Check if current signal is above noise floor
+            if (currentHighFreqPower_dB > robustNoiseFloor_dB) {
+              // Signal is above noise floor - this is likely a valid signal transition
+              // Ignore the jump and continue
+            } else {
+              // Signal is at or below noise floor - stop immediately (hit noise)
+              break;
+            }
           }
         }
       }
@@ -1175,6 +1200,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         highFreq_kHz: highFreq_Hz !== null ? highFreq_Hz / 1000 : null,
         highFreqBinIdx: highFreqBinIdx,
         highFreqFrameIdx: highFreqFrameIdx,
+        highFreqPower_dB: foundBin && highFreqFrameIdx < spectrogram.length ? spectrogram[highFreqFrameIdx][highFreqBinIdx] : null,
         startFreq_Hz: startFreq_Hz,
         startFreq_kHz: startFreq_Hz !== null ? startFreq_Hz / 1000 : null,
         foundBin: foundBin
@@ -1230,7 +1256,22 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         break;
       }
       
-      const isAnomaly = freqDifference > 2.5;
+      // 2025 ENHANCED: Anomaly Logic with Noise Floor Check
+      // Only treat as anomaly if frequency jump is > 2.5 kHz AND signal is below noise floor
+      let isAnomaly = false;
+      if (freqDifference > 2.5) {
+        // Additional check: is the current measurement's power above noise floor?
+        const currentPower_dB = validMeasurements[i].highFreqPower_dB;
+        
+        if (currentPower_dB !== null && currentPower_dB <= robustNoiseFloor_dB) {
+          // Signal is at or below noise floor - this is a legitimate anomaly
+          isAnomaly = true;
+        } else {
+          // Signal is above noise floor - treat as valid signal transition
+          // Ignore the frequency jump
+          isAnomaly = false;
+        }
+      }
       
       if (isAnomaly) {
         if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
