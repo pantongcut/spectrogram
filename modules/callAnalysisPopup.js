@@ -302,31 +302,62 @@ export function showCallAnalysisPopup({
       // NOTE: SNR is now calculated in BatCallDetector.detectCalls() using RMS-based method
       // with proper frequency and time range (highFreqFrameIdx to lowFreqFrameIdx)
       
-      // 先用濾波後的數據進行主要檢測
+      // [2025 OPTIMIZATION] Pass skipSNR option to skip expensive SNR calculation on filtered pass
+      // When Highpass Filter is enabled, SNR will be calculated on the second pass using original audio
       const calls = await detector.detectCalls(
         audioDataForDetection,
         sampleRate,
         selection.Flow,
-        selection.Fhigh
+        selection.Fhigh,
+        { skipSNR: batCallConfig.enableHighpassFilter }  // Skip SNR on filtered pass
       );
       
-      // 如果濾波被啟用且有偵測到 call，重新用原始音頻計算 call
-      // 使用原始音頻的 SNR 更準確
+      // 如果濾波被啟用且有偵測到 call，用原始音頻直接計算 SNR（不重複執行完整偵測）
+      // 這比執行第二次 detectCalls 更高效，避免重複運行 findOptimalHighFrequencyThreshold
       if (batCallConfig.enableHighpassFilter && calls.length > 0) {
-        const originalDetector = new (detector.constructor)(batCallConfig, wasmEngine);
-        const originalCalls = await originalDetector.detectCalls(
-          audioData,  // 使用原始未濾波的音頻來計算更準確的 SNR
-          sampleRate,
-          selection.Flow,
-          selection.Fhigh
-        );
-        
-        // 如果原始檢測也找到 call，將 SNR 和機制信息從原始檢測複製到濾波後的 call
-        if (originalCalls.length > 0) {
-          calls[0].snr_dB = originalCalls[0].snr_dB;
-          calls[0].snrMechanism = originalCalls[0].snrMechanism;
-          calls[0].snrDetails = originalCalls[0].snrDetails;
-          calls[0].quality = originalCalls[0].quality;
+        try {
+          // 只生成原始音頻的 spectrogram（不執行完整偵測）
+          const rawSpectrogram = detector.generateSpectrogram(
+            audioData,  // 使用原始未濾波的音頻
+            sampleRate,
+            selection.Flow,
+            selection.Fhigh
+          );
+          
+          // 直接在現有 call 上計算 RMS-based SNR，使用原始音頻的 spectrogram
+          const snrResult = detector.calculateRMSbasedSNR(
+            calls[0],
+            rawSpectrogram.powerMatrix,
+            rawSpectrogram.freqBins,
+            calls[0].endFrameIdx_forLowFreq
+          );
+          
+          // 更新 call 物件的 SNR 資訊
+          if (snrResult.snr_dB !== null && isFinite(snrResult.snr_dB)) {
+            calls[0].snr_dB = snrResult.snr_dB;
+            calls[0].snrMechanism = 'RMS-based (2025) - Spectrogram (Original Audio)';
+            calls[0].snrDetails = {
+              frequencyRange_kHz: snrResult.frequencyRange_kHz,
+              timeRange_frames: snrResult.timeRange_frames,
+              signalPowerMean_dB: snrResult.signalPowerMean_dB,
+              noisePowerMean_dB: snrResult.noisePowerMean_dB,
+              signalCount: snrResult.signalCount,
+              noiseCount: snrResult.noiseCount
+            };
+            calls[0].quality = detector.getQualityRating(snrResult.snr_dB);
+            
+            // Log final SNR result on original audio
+            console.log(
+              `[SNR REFINED] Using original audio - Mechanism: ${calls[0].snrMechanism}, SNR: ${calls[0].snr_dB.toFixed(2)} dB, ` +
+              `Freq range: ${snrResult.frequencyRange_kHz.lowFreq.toFixed(1)}-${snrResult.frequencyRange_kHz.highFreq.toFixed(1)} kHz, ` +
+              `Time frames: ${snrResult.timeRange_frames.start}-${snrResult.timeRange_frames.end} (${snrResult.timeRange_frames.duration} frames), ` +
+              `Signal power: ${snrResult.signalPowerMean_dB.toFixed(1)} dB (${snrResult.signalCount} bins), ` +
+              `Noise power: ${snrResult.noisePowerMean_dB.toFixed(1)} dB (${snrResult.noiseCount} bins)`
+            );
+          }
+        } catch (error) {
+          // If SNR recalculation fails, keep the skipped SNR from filtered pass
+          console.warn(`[SNR] Failed to recalculate SNR on original audio: ${error.message}`);
         }
       }
       

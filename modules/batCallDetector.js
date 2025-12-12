@@ -410,8 +410,16 @@ export class BatCallDetector {
   /**
    * Detect all bat calls in audio selection
    * Returns: array of BatCall objects
+   * 
+   * @param {Float32Array} audioData - Audio samples
+   * @param {number} sampleRate - Sample rate in Hz
+   * @param {number} flowKHz - Low frequency bound in kHz
+   * @param {number} fhighKHz - High frequency bound in kHz
+   * @param {Object} options - Optional parameters
+   * @param {boolean} options.skipSNR - If true, skip expensive SNR calculation on first pass
+   * @returns {Promise<Array>} Array of BatCall objects
    */
-  async detectCalls(audioData, sampleRate, flowKHz, fhighKHz) {
+  async detectCalls(audioData, sampleRate, flowKHz, fhighKHz, options = { skipSNR: false }) {
     if (!audioData || audioData.length === 0) return [];
     
     // Generate high-resolution STFT spectrogram
@@ -513,6 +521,22 @@ export class BatCallDetector {
         return false; // No peak power data, discard
       }
       
+      // Store robust noise floor in call object for later use
+      call.noiseFloor_dB = robustNoiseFloor_dB;
+      
+      // [2025 OPTIMIZATION] Conditional SNR Calculation
+      // If skipSNR is true (filtered pass), skip expensive RMS-based calculation
+      // and use fallback value. SNR will be recalculated on second pass with original audio.
+      if (options.skipSNR) {
+        // Skip expensive RMS-based SNR calculation on filtered pass
+        const spectralSNR_dB = call.peakPower_dB - robustNoiseFloor_dB;
+        call.snr_dB = spectralSNR_dB;
+        call.snrMechanism = 'Skipped (Filtered Pass)';
+        call.quality = this.getQualityRating(spectralSNR_dB);
+        // Do NOT filter out based on SNR when skipping (will be recalculated on original audio)
+        return true;
+      }
+      
       // 2025 ENHANCEMENT: Calculate RMS-based SNR from spectrogram
       // Signal: time range [highFreqFrameIdx, endFrameIdx_forLowFreq], freq range [lowFreq, highFreq]
       // Noise: all other regions in spectrogram
@@ -567,16 +591,11 @@ export class BatCallDetector {
         console.log(`[SNR] RMS-based calculation error: ${error.message}, using spectral fallback: ${spectralSNR_dB.toFixed(2)} dB`);
       }
       
-      // Calculate SNR using robust noise baseline (25th percentile)
-      const snr_dB = call.peakPower_dB - robustNoiseFloor_dB;
-      
-      // Store SNR and noiseFloor values in call object
-      call.noiseFloor_dB = robustNoiseFloor_dB;
-
       // Calculate quality rating based on SNR
       call.quality = this.getQualityRating(call.snr_dB);
       
       // If SNR (25th percentile) is too low, likely just noise
+      const snr_dB = call.peakPower_dB - robustNoiseFloor_dB;
       if (snr_dB < snrThreshold_dB) {
         return false;
       }
