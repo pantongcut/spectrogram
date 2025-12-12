@@ -1045,7 +1045,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     const numBins = firstFramePower.length;
     
     // ============================================================
-    // 2025 NEW: Calculate Robust Noise Floor (25th Percentile)
+    // 2025 NEW: Calculate Robust Noise Floor (35th Percentile)
     // This represents the "pure noise/low signal" baseline to filter false positives
     // ============================================================
     // 1. Calculate Dynamic Range Noise Floor
@@ -1064,7 +1064,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
 
     // 根據你的公式：Min + (Range * 0.25)
     // 例如: Min 0, Max 100 -> 0 + (100 * 0.25) = 25
-    const robustNoiseFloor_dB = minDb + (maxDb - minDb) * 0.25;
+    const robustNoiseFloor_dB = minDb + (maxDb - minDb) * 0.35;
     
     // Initial search limit: from 0 to peakFrameIdx
     let currentSearchLimitFrame = Math.min(peakFrameIdx, spectrogram.length - 1);
