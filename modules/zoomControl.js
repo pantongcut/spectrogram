@@ -238,7 +238,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
       
-    }, 150); // Wait 150ms after scroll stops
+    }, 30); // Wait 30ms after scroll stops
   }
 
   // Initialize wheel listener on the Wrapper (the element that has the scrollbar)
