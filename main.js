@@ -977,40 +977,48 @@ getWavesurfer().on('decode', () => {
     }
   }
   
-  // 1. 強制設定寬度並觸發 Reflow
+  // Force layout update
   container.style.width = '100%';
   wrapper.style.width = '100%';
-  void container.offsetWidth; // Force Reflow
+  void container.offsetWidth; 
   
   zoomControl.resetZoomState();
-  
   progressLineElem.style.display = 'none';
   updateProgressLine(0);
 
-  // 2. 使用 setTimeout 確保 Main Thread 空閒
   setTimeout(() => {
       const colorMap = getEffectiveColorMap();
+      
+      // [STEP 1] Calculate the correct initial overlap explicitly
+      // Since 'updateSpectrogramSettingsText' shows the correct value, we know this function works.
+      let initialOverlap = getOverlapPercent(); // undefined for 'auto'
+      
+      if (initialOverlap === undefined) {
+          // Manually calculate the optimal overlap (e.g., 86) to fix Initial Load (Scenario 1)
+          initialOverlap = getAutoOverlapPercent();
+      }
+
       replacePlugin(
         colorMap,
         spectrogramHeight,
         currentFreqMin,
         currentFreqMax,
-        getOverlapPercent(), // 這裡是 undefined (Auto)
+        initialOverlap, // [STEP 2] Inject the specific value (86) for the FIRST render
         () => {
-            // 這是 onRendered Callback
+            // onRendered Callback
+            
+            // [STEP 3] Unlock! Restore "Auto" mode for future Zooms (Scenario 2)
+            // We set the internal noverlap to null so the plugin recalculates on next redraw
+            const plugin = getPlugin();
+            if (plugin && currentOverlap === 'auto') {
+                plugin.noverlap = null; 
+            }
+
             renderAxes();
             freqHoverControl?.refreshHover();
             autoIdControl?.updateMarkers();
             updateSpectrogramSettingsText();
             restoreImageEnhancement();
-
-            setTimeout(() => {
-                const plugin = getPlugin();
-                if (plugin) {
-                    plugin.render();
-                    requestAnimationFrame(updateSpectrogramSettingsText);
-                }
-            }, 50);
         },
         currentFftSize,
         currentWindowType,
