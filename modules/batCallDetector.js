@@ -1205,7 +1205,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
             } else {
               // Signal is at or below noise floor - stop immediately (hit noise)
               console.log(`    ✗ Signal AT/BELOW noise floor → BREAK (hit noise)`);
-              console.log(`[BREAK POINT] Stopped at threshold ${testThreshold_dB}dB. Last measurement in array: ${measurements.length > 0 ? measurements[measurements.length - 1].threshold + 'dB' : 'N/A'}`);
               break;
             }
           }
@@ -1242,8 +1241,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     // 只收集成功找到 bin 的測量
     const validMeasurements = measurements.filter(m => m.foundBin);
     
-    console.log(`\n[BREAK ANALYSIS] Loop stopped at threshold, Total measurements: ${measurements.length}, Valid: ${validMeasurements.length}`);\n    if (validMeasurements.length > 0) {
-      console.log(`  First valid: ${validMeasurements[0].threshold}dB (Freq: ${validMeasurements[0].highFreq_kHz.toFixed(2)} kHz)`);\n      console.log(`  Last valid: ${validMeasurements[validMeasurements.length - 1].threshold}dB (Freq: ${validMeasurements[validMeasurements.length - 1].highFreq_kHz.toFixed(2)} kHz)`);\n    }\n    
     if (validMeasurements.length === 0) {
       return {
         threshold: -24,
@@ -1265,16 +1262,14 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     let recordedEarlyAnomaly = null;
     let firstAnomalyIndex = -1;
     
-    console.log(`\n[ANOMALY DETECTION LOOP] Starting with ${validMeasurements.length} valid measurements:`);\n    
     for (let i = 1; i < validMeasurements.length; i++) {
       const prevFreq_kHz = validMeasurements[i - 1].highFreq_kHz;
       const currFreq_kHz = validMeasurements[i].highFreq_kHz;
       const freqDifference = Math.abs(currFreq_kHz - prevFreq_kHz);
       
-      console.log(`  [ANOMALY LOOP] i=${i}: ${validMeasurements[i - 1].threshold}dB (${prevFreq_kHz.toFixed(2)}kHz) vs ${validMeasurements[i].threshold}dB (${currFreq_kHz.toFixed(2)}kHz), Diff: ${freqDifference.toFixed(2)}kHz`);\n      
       // 雙重保險，雖然 Loop 內已經攔截
       if (freqDifference > 4.0) {
-        console.log(`    ✗ freqDifference ${freqDifference.toFixed(2)} > 4.0 → Set optimal to ${validMeasurements[i - 1].threshold}dB and BREAK`);\n        optimalThreshold = validMeasurements[i - 1].threshold;
+        optimalThreshold = validMeasurements[i - 1].threshold;
         optimalMeasurement = validMeasurements[i - 1];
         break;
       }
@@ -1342,23 +1337,14 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     if (recordedEarlyAnomaly !== null) {
       optimalThreshold = recordedEarlyAnomaly;
       optimalMeasurement = lastValidMeasurement;
-      console.log(`\n[ANOMALY RESULT] Early anomaly detected at threshold ${recordedEarlyAnomaly}dB`);
     } else {
       optimalThreshold = lastValidThreshold;
       optimalMeasurement = lastValidMeasurement;
-      console.log(`\n[ANOMALY RESULT] No anomaly detected, using last valid threshold ${lastValidThreshold}dB`);
     }
-    
-    console.log(`[FINAL THRESHOLD SELECTION]`);
-    console.log(`  optimalThreshold: ${optimalThreshold}dB`);
-    console.log(`  optimalMeasurement.threshold: ${optimalMeasurement.threshold}dB`);
-    console.log(`  optimalMeasurement.highFreq_kHz: ${optimalMeasurement.highFreq_kHz.toFixed(2)}`);
     
     const finalThreshold = Math.max(Math.min(optimalThreshold, -24), -70);
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
     const hasWarning = finalThreshold <= -70;
-    
-    console.log(`  Final threshold: ${finalThreshold}dB, Safe threshold: ${safeThreshold}dB, Warning: ${hasWarning}`);
     
     let returnHighFreq_Hz = optimalMeasurement.highFreq_Hz;
     let returnHighFreq_kHz = optimalMeasurement.highFreq_kHz;
@@ -1435,7 +1421,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
     
-    console.log(`[RETURN VALUE] threshold: ${safeThreshold}dB, highFreq_kHz: ${(returnHighFreq_Hz !== null ? returnHighFreq_Hz / 1000 : null)?.toFixed(2) || 'null'}`);\n    
     return {
       threshold: safeThreshold,
       highFreq_Hz: returnHighFreq_Hz,
