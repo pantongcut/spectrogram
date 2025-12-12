@@ -1013,7 +1013,7 @@ export class BatCallDetector {
       // to ensure it's from the true call, not from rebounce tail
       if (thisPower < (endThreshold_dB + 3)) {
         // Power is barely above threshold: might be from rebounce tail
-        result.confidence *= 0.6; // Reduce confidence
+        result.confidence *= 0.65; // Reduce confidence
         result.details.rebounceWarning = 'Low frequency power barely above threshold';
       }
       result.details.rebounceCompat = 'verified'; // Mark as checked
@@ -1022,7 +1022,7 @@ export class BatCallDetector {
     // ============================================================
     // FINAL CONFIDENCE ASSESSMENT
     // ============================================================
-    if (result.confidence < 0.6) {
+    if (result.confidence < 0.65) {
       result.valid = false;
       if (!result.reason) {
         result.reason = `Low confidence measurement (${(result.confidence * 100).toFixed(1)}%)`;
