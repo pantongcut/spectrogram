@@ -1081,9 +1081,11 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     const stablePeakPower_dB = callPeakPower_dB;
     
     // ============================================================
-    // Initialize Hard Stop Flag
+    // Initialize Hard Stop Flag and Optimal Variables
     // ============================================================
     let hitNoiseFloor = false;
+    let optimalThreshold = -24;
+    let optimalMeasurement = null;
     
     // 測試閾值範圍：-24 到 -70 dB，間距 0.5 dB
     const thresholdRange = [];
@@ -1272,10 +1274,13 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     }
 
     // ============================================================
-    // [NEW] Initialize Optimal Variables Before Anomaly Analysis
+    // [NEW] Initialize Optimal Measurement for Standard Case
     // ============================================================
-    let optimalThreshold = -24;
-    let optimalMeasurement = validMeasurements[0];
+    // If we didn't hit noise floor, initialize with the first valid measurement
+    if (!hitNoiseFloor && validMeasurements.length > 0) {
+      optimalMeasurement = validMeasurements[0];
+    }
+    
     // ============================================================
     // [NEW] Wrap Anomaly Analysis - Skip if Hard Stop Triggered
     // ============================================================
