@@ -11,6 +11,8 @@
   --input-bg: #ffffff;
   --button-hover: #222222;
   --icon-color: #ffffff;
+  --sidebar-bg: #ffffff;
+  --dragbar-bg: #ffffff;
   --dragbar-icon-color: #222222;
   --moon-icon-color: #ffffff;
 }
@@ -25,6 +27,8 @@ body.dark-mode {
   --input-bg: #1E1F20;
   --button-hover: #4a4a4a;
   --icon-color: #E3E3E3;
+  --sidebar-bg: #1E1F20;
+  --dragbar-bg: #1E1F20;
   --dragbar-icon-color: #E3E3E3;
   --moon-icon-color: #FFD700;
 }
@@ -537,7 +541,7 @@ input[type="file"]:hover {
   box-sizing: border-box;
   transition: width 0.3s ease, opacity 0.3s ease;
   overflow: hidden;
-  background-color: var(--bg-secondary);
+  background-color: var(--sidebar-bg);
   color: var(--text-primary);
 }
 
@@ -570,7 +574,7 @@ input[type="file"]:hover {
   margin: 0;
   height: 350px;
   max-width: 100%;
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-tertiary);
   border-radius: 8px;
   box-sizing: border-box;
   transition: height 0.3s ease;
@@ -1470,7 +1474,7 @@ input.tag-button.editing {
   position: relative;
   height: 30px;
   line-height: 30px;
-  background: var(--bg-secondary);
+  background: var(--dragbar-bg);
   border-bottom: 1px solid var(--border-color);
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
