@@ -504,7 +504,7 @@ input[type="file"]:hover {
   transform: translateX(-50%);
   bottom: -18px;
   font-size: 12px;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--bg-tertiary);
   padding: 0px 3px;
   pointer-events: none;
   white-space: nowrap;
@@ -647,7 +647,7 @@ input[type="file"]:hover {
   background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  border: 1px solid #eee;
+  border: 1px solid var(--border-color);
   font-family: 'Noto Sans HK', sans-serif;
   white-space: nowrap;
   opacity: 0;
@@ -689,7 +689,7 @@ input[type="range"]#peakThresholdSlider {
   background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  border: 1px solid #eee;
+  border: 1px solid var(--border-color);
   font-family: 'Noto Sans HK', sans-serif;
   white-space: nowrap;
   opacity: 0;
@@ -1625,7 +1625,8 @@ input.tag-button.editing {
   z-index: 15;
   padding: 6px 8px 2px 2px;
   line-height: 14px;
-  background: #fff;
+  background: var(--bg-tertiary);
+  border: solid 1px var(--border-color);
   font-size: 12px;
   font-family: 'Noto Sans HK', sans-serif;
   box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
@@ -2486,7 +2487,7 @@ input.tag-button.editing {
   position: fixed;
   width: 450px;
   background: white;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-color);
   border-radius: 10px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   z-index: 1000;
