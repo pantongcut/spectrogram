@@ -115,7 +115,7 @@ html, body {
   width: 40px;
   text-align: right;
   font-size: 12px;
-  color: black;
+  color: var(--text-primary);
   pointer-events: none;
 }
 
@@ -568,16 +568,18 @@ input[type="file"]:hover {
   margin: 0;
   height: 350px;
   max-width: 100%;
-  background-color: #f5f5f5;
+  background-color: var(--bg-secondary);
   border-radius: 8px;
   box-sizing: border-box;
   transition: height 0.3s ease;
+  color: var(--text-primary);
 }
 
 #Metadata .section-title {
   font-weight: bold;
   font-size: 14px;
   display: block;
+  color: var(--text-primary);
 }
 
 #guano-output {
@@ -589,6 +591,7 @@ input[type="file"]:hover {
   word-break: break-word;
   font-family: 'Noto Sans HK', sans-serif;
   font-size: 12px;
+  color: var(--text-primary);
 }
 
 #Metadata.collapsed {
@@ -1065,7 +1068,7 @@ body.dark-mode .sidebar-button {
 /* === File Path Display === */
 .file-path-display {
   display: inline-block;
-  background-color: #f5f5f5;
+  background-color: var(--bg-secondary);
   padding: 5px 16px;
   border-radius: 8px;
   max-width: 200px;
@@ -1074,6 +1077,11 @@ body.dark-mode .sidebar-button {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 14px;
+  color: var(--text-primary);
+}
+
+.file-path-display i {
+  color: var(--icon-color);
 }
 
 /* Reusable file name text style */
@@ -1082,6 +1090,7 @@ body.dark-mode .sidebar-button {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-primary);
 }
 
 /* Hover effect for file names in the sidebar */
@@ -1318,12 +1327,12 @@ input.tag-button.editing {
 .branding-title {
    font-size: 20px;
    font-weight: 600;
-   color: #222;
+   color: var(--text-primary);
 }
 
 .branding-subtitle {
    font-size: 9px;
-   color: #666;
+   color: var(--text-secondary);
 }
 
 /* === Custom Dropdown === */
@@ -1459,8 +1468,8 @@ input.tag-button.editing {
   position: relative;
   height: 30px;
   line-height: 30px;
-  background: rgba(255, 255, 255);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
   cursor: move;
@@ -1472,6 +1481,11 @@ input.tag-button.editing {
   font-weight: bold;
   font-size: 12px;
   font-family: 'Noto Sans HK', sans-serif;
+  color: var(--text-primary);
+}
+
+.popup-drag-bar i {
+  color: var(--icon-color);
 }
 
 .popup-close-btn {
@@ -1656,7 +1670,7 @@ input.tag-button.editing {
   transform: translateY(-50%);
   width: 5px;
   height: 1px;
-  background: black;
+  background: var(--text-primary);
 }
 
 .freq-minor-tick {
@@ -1665,13 +1679,14 @@ input.tag-button.editing {
   transform: translateY(-50%);
   width: 3px;
   height: 1px;
-  background: black;
+  background: var(--text-primary);
 }
 
 .freq-axis-label {
   position: absolute;
   right: 8px;
   transform: translateY(-50%);
+  color: var(--text-primary);
 }
 
 .time-major-tick {
@@ -1679,7 +1694,7 @@ input.tag-button.editing {
   top: -1px;
   width: 1px;
   height: 5px;
-  background: black;
+  background: var(--text-primary);
   opacity: 0.7;
 }
 
@@ -1688,7 +1703,7 @@ input.tag-button.editing {
   top: -1px;
   width: 1px;
   height: 3px;
-  background: black;
+  background: var(--text-primary);
   opacity: 0.7;
 }
 
@@ -1697,9 +1712,11 @@ input.tag-button.editing {
   top: 1px;
   transform: translateX(-50%);
   font-size: 12px;
+  color: var(--text-primary);
 }
 .time-axis-label.zero-label {
   transform: none;
+  color: var(--text-primary);
 }
 
 .coord-scale-wrapper {
@@ -1715,6 +1732,7 @@ input.tag-button.editing {
   display: flex;
   align-items: center;
   gap: 10px;
+  color: black;
 }
 .coord-scale-wrapper .leaflet-control-scale {
   margin: 0;
