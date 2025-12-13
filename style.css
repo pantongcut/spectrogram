@@ -11,6 +11,7 @@
   --input-bg: #ffffff;
   --button-hover: #222222;
   --icon-color: #ffffff;
+  --dragbar-icon-color: #222222;
   --moon-icon-color: #ffffff;
 }
 
@@ -24,6 +25,7 @@ body.dark-mode {
   --input-bg: #1E1F20;
   --button-hover: #4a4a4a;
   --icon-color: #E3E3E3;
+  --dragbar-icon-color: #E3E3E3;
   --moon-icon-color: #FFD700;
 }
 
@@ -1485,7 +1487,7 @@ input.tag-button.editing {
 }
 
 .popup-drag-bar i {
-  color: var(--icon-color);
+  color: var(--dragbar-icon-color);
 }
 
 .popup-close-btn {
@@ -1497,8 +1499,9 @@ input.tag-button.editing {
   line-height: 30px;
   border: none;
   background: transparent;
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
+  color: var(--dragbar-icon-color);
 }
 .popup-close-btn:hover {
   color: #c00;
