@@ -1,3 +1,32 @@
+/* ============================================================
+   CSS Variables for Light/Dark Mode Theme Support
+   ============================================================ */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #eeeeee;
+  --text-primary: #000000;
+  --text-secondary: #333333;
+  --border-color: #cccccc;
+  --input-bg: #ffffff;
+  --button-hover: #222222;
+  --icon-color: #ffffff;
+  --moon-icon-color: #ffffff;
+}
+
+body.dark-mode {
+  --bg-primary: #131314;
+  --bg-secondary: #1E1F20;
+  --bg-tertiary: #28292a;
+  --text-primary: #E3E3E3;
+  --text-secondary: #C4C7C5;
+  --border-color: #444746;
+  --input-bg: #1E1F20;
+  --button-hover: #4a4a4a;
+  --icon-color: #E3E3E3;
+  --moon-icon-color: #FFD700;
+}
+
 /* === Selection Time Info (右上角) === */
 #selection-time-info {
   position: absolute;
@@ -12,8 +41,10 @@ html, body {
   padding: 0 5px;
   margin: 0px;
   overflow-x: hidden;
-  background: #fff;
+  background: var(--bg-primary);
+  color: var(--text-primary);
   font-family: 'Noto Sans HK', sans-serif;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* Disable text selection globally */
@@ -43,7 +74,8 @@ html, body {
   white-space: nowrap;
   box-sizing: border-box;
   position: relative;
-  border: 1px solid black;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
 }
 #spectrogram-only {
   position: relative;
@@ -316,17 +348,18 @@ input[type="text"],
 input[type="number"],
 input[type="file"] {
   padding: 4px 10px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   font-size: 14px;
   font-family: 'Noto Sans HK', sans-serif;
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
-  background-color: #fff;
+  background-color: var(--input-bg);
+  color: var(--text-primary);
   cursor: text;
   transition: background 0.3s;
 }
 input[type="file"]:hover {
-  background-color: #f0f0f0;
+  background-color: var(--bg-tertiary);
 }
 
 .flat-icon-button {
@@ -494,7 +527,7 @@ input[type="file"]:hover {
 
 #sidebar {
   width: 250px;
-  border-right: 1px solid #ccc;
+  border-right: 1px solid var(--border-color);
   padding: 10px 10px 10px 0px;
   margin-right:10px;
   font-size: 13px;
@@ -502,6 +535,8 @@ input[type="file"]:hover {
   box-sizing: border-box;
   transition: width 0.3s ease, opacity 0.3s ease;
   overflow: hidden;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 #sidebar.edit-mode {
@@ -964,7 +999,11 @@ body.markers-disabled .freq-marker {
 }
 
 .sidebar-button:hover {
-  background-color: #222;
+  background-color: var(--button-hover);
+}
+
+body.dark-mode .sidebar-button {
+  background-color: #333537;
 }
 
 /* Hover colors for playback buttons */
@@ -985,8 +1024,12 @@ body.markers-disabled .freq-marker {
 }
 
 .sidebar-button i {
-  color: white;
+  color: var(--icon-color);
   font-size: 15px;
+}
+
+#themeToggleBtn i {
+  color: var(--moon-icon-color);
 }
 
 .file-note-input {
@@ -996,8 +1039,8 @@ body.markers-disabled .freq-marker {
   padding: 0;
   font-size: 13px;
   height: 20px;
-  background-color: #eee;
-  border: 1px solid #ccc;
+  background-color: var(--input-bg);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   border-width: 0;
   box-sizing: border-box;
@@ -1006,6 +1049,7 @@ body.markers-disabled .freq-marker {
   pointer-events: none;
   transition: width 0.3s ease, margin-left 0.3s ease, opacity 0.3s ease,
               padding 0.3s ease, border-width 0.3s ease;
+  color: var(--text-primary);
 }
 
 #sidebar.edit-mode .file-note-input {
@@ -1286,9 +1330,9 @@ input.tag-button.editing {
 .dropdown-button {
   font-size: 14px;
   padding: 4px 30px 4px 12px;
-  background-color: #fff;
-  color: #333;
-  border: 1px solid #ccc;
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.2s;
@@ -1297,11 +1341,12 @@ input.tag-button.editing {
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 .dropdown-button:hover {
-  background-color: #d5d5d5;
+  background-color: var(--button-hover);
+  color: var(--text-primary);
 }
 .dropdown-button:disabled {
-  background-color: #eee;
-  color: #aaa;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
   cursor: not-allowed;
 }
 .dropdown-button::after {
@@ -1312,7 +1357,7 @@ input.tag-button.editing {
   margin-top: -3px;
   border-left: 5px solid transparent;
   border-right: 5px solid transparent;
-  border-top: 6px solid #333;
+  border-top: 6px solid var(--text-primary);
 }
 
 #sampleRateInput.dropdown-button {
@@ -1379,10 +1424,10 @@ input.tag-button.editing {
 /* === Map Popup === */
 .map-popup {
   position: absolute;
-  background: rgba(255, 255, 255);
+  background: var(--bg-secondary);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   z-index: 1000;
   box-shadow: 0 2px 6px rgba(0,0,0,0.3);
@@ -1391,6 +1436,7 @@ input.tag-button.editing {
   overflow: hidden;
   opacity: 1;
   transition: opacity 0.3s ease;
+  color: var(--text-primary);
 }
 
 .map-popup.hidden {
@@ -2562,10 +2608,10 @@ input.tag-button.editing {
 .bat-call-controls {
   padding: 5px;
   margin: 0px 5px 5px 5px;
-  background: #fafafa;
+  background: var(--bg-secondary);
   display: flex;
   border-radius: 5px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--border-color);
   gap: 8px;
   align-items: center;
   justify-content: center;
@@ -2575,6 +2621,7 @@ input.tag-button.editing {
   opacity: 1;
   overflow: hidden;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease;
+  color: var(--text-primary);
 }
 
 .bat-call-controls[style*="display: none"] {
@@ -2595,18 +2642,19 @@ input.tag-button.editing {
 
 .bat-call-controls span {
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary);
   font-size: 11px;
 }
 
 .bat-call-controls input[type="number"],
 .bat-call-controls .dropdown-button {
   padding: 3px 6px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border-color);
   border-radius: 3px;
   font-size: 11px;
   font-family: 'Noto Sans HK', sans-serif;
-  background: white;
+  background: var(--input-bg);
+  color: var(--text-primary);
 }
 
 .bat-call-controls input[type="number"] {

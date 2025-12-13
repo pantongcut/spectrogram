@@ -402,6 +402,24 @@ stopBtn.addEventListener('click', () => {
   updateProgressLine(0);
   hideStopButton();
 });
+
+// Theme Toggle Button
+const themeToggleBtn = document.getElementById('themeToggleBtn');
+if (themeToggleBtn) {
+  // Check if user has a saved preference in localStorage
+  const savedTheme = localStorage.getItem('theme-mode');
+  if (savedTheme === 'dark') {
+    document.body.classList.add('dark-mode');
+  }
+
+  themeToggleBtn.addEventListener('click', () => {
+    document.body.classList.toggle('dark-mode');
+    const isDarkMode = document.body.classList.contains('dark-mode');
+    localStorage.setItem('theme-mode', isDarkMode ? 'dark' : 'light');
+    console.log('Theme toggled to:', isDarkMode ? 'Dark' : 'Light');
+  });
+}
+
 const overlay = document.getElementById('drop-overlay');
 const loadingOverlay = document.getElementById('loading-overlay');
 const uploadOverlay = document.getElementById('upload-overlay');
