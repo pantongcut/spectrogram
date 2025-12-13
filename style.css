@@ -1558,15 +1558,11 @@ input.tag-button.editing {
 /* === Sidebar Active Item === */
 .sidebar-item.active {
   font-weight: bold;
-  color: #007bff !important; /* 強制使用藍色 */
-  background-color: rgba(0, 123, 255, 0.1); /* (可選) 加一點淡淡的背景色讓選中更明顯 */
+  color: #007bff !important;
 }
 
-/* === 關鍵：強制覆蓋子元素的顏色 === */
-/* 這是為了解決 color: var(--text-primary) 的影響 */
 .sidebar-item.active .sidebar-left,
-.sidebar-item.active .fileNameText,
-.sidebar-item.active i {
+.sidebar-item.active .fileNameText {
   color: #007bff !important;
 }
 
