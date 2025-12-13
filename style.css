@@ -11,6 +11,7 @@
   --input-bg: #ffffff;
   --button-hover: #222222;
   --icon-color: #ffffff;
+  --toolbar-bg: #ffffff;
   --sidebar-bg: #ffffff;
   --dragbar-bg: #ffffff;
   --dragbar-icon-color: #222222;
@@ -27,6 +28,7 @@ body.dark-mode {
   --input-bg: #1E1F20;
   --button-hover: #4a4a4a;
   --icon-color: #E3E3E3;
+  --toolbar-bg: #28292a;
   --sidebar-bg: #1E1F20;
   --dragbar-bg: #1E1F20;
   --dragbar-icon-color: #E3E3E3;
@@ -44,7 +46,7 @@ body.dark-mode {
 }
 /* === 全局樣式 === */
 html, body {
-  padding: 0 5px;
+  padding: 0px;
   margin: 0px;
   overflow-x: hidden;
   background: var(--bg-primary);
@@ -527,14 +529,13 @@ input[type="file"]:hover {
 #mainarea {
   flex-grow: 1;
   overflow-x: hidden;
-  padding-left: 2px;
-  padding-top: 10px;
+  padding: 10px 5px 0px 2px
 }
 
 #sidebar {
   width: 250px;
   border-right: 1px solid var(--border-color);
-  padding: 10px 10px 10px 0px;
+  padding: 10px 10px 10px 10px;
   margin-right:10px;
   font-size: 13px;
   flex-shrink: 0;
@@ -685,7 +686,7 @@ input[type="range"]#peakThresholdSlider {
   row-gap: 5px;
   padding: 8px 12px;
   width: 780px;
-  background-color: #fff;
+  background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   border: 1px solid #eee;
