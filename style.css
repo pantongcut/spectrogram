@@ -347,7 +347,7 @@ input[type="range"]::-moz-range-thumb {
   font-size: 13px;
   font-weight: bold;
   text-align: right;
-  color: #333;
+  color: var(--text-primary);
   margin: -3px 0px 0px -10px;
 }
 
@@ -644,7 +644,7 @@ input[type="file"]:hover {
   row-gap: 5px;
   padding: 8px 12px;
   width: 450px;
-  background-color: #fff;
+  background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   border: 1px solid #eee;
@@ -723,10 +723,11 @@ input[type="range"]#peakThresholdSlider {
   gap: 4px;
   padding: 4px 8px;
   background: none;
+  color: var(--text-primary);
   border: none;
   border-radius: 20px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, color 0,2s;
 }
 
 #tool-bar .toolbar-button:hover {
