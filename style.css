@@ -2514,7 +2514,7 @@ input.tag-button.editing {
 }
 
 .power-spectrum-popup.modal-popup {
-  background: var(--bg-primary);
+  background: var(--bg-secondary);
   transition: background 0.3s, border 0.3s;
 }
 
