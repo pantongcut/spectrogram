@@ -1111,12 +1111,13 @@ body.dark-mode .sidebar-button {
   position: absolute;
   top: 0px; left: 0px; right: 0px; bottom: 0px;
   border: 1px solid;
-  background-color: rgba(255, 255, 255, 0.6);
+  background-color: color-mix(in srgb, var(--bg-tertiary), transparent 50%);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 99;
   pointer-events: none;
+  transition: background-color 0.2s;
 }
 
 #map-drop-overlay {
@@ -2220,13 +2221,15 @@ input.tag-button.editing {
   text-align: center;
   font-family: 'Noto Sans HK', sans-serif;
   font-size: 24px;
-  color: #333;
+  color: var(--text-secondary);
+  transition: color 0.2s;
 }
 
 .drop-icon {
   font-size: 60px;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 10px;
+  transition: color 0.2s;
 }
 
 #spectrogram-only {
