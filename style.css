@@ -52,7 +52,7 @@ html, body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Noto Sans HK', sans-serif;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Disable text selection globally */
@@ -309,7 +309,7 @@ input[type="range"] {
   border-radius: 3px;
   margin: 0 6px;
   outline: none;
-  transition: background 0.3s;
+  transition: background 0.2s;
   vertical-align: middle;
 }
 input[type="range"]::-webkit-slider-thumb,
@@ -364,7 +364,7 @@ input[type="file"] {
   background-color: var(--input-bg);
   color: var(--text-primary);
   cursor: text;
-  transition: background 0.3s;
+  transition: background 0.2s;
 }
 input[type="file"]:hover {
   background-color: var(--bg-tertiary);
@@ -540,7 +540,7 @@ input[type="file"]:hover {
   font-size: 13px;
   flex-shrink: 0;
   box-sizing: border-box;
-  transition: width 0.3s ease, opacity 0.3s ease;
+  transition: border-right 0.2s, background-color 0.2s, color 0.2s, width 0.2s ease, opacity 0.2s ease;
   overflow: hidden;
   background-color: var(--sidebar-bg);
   color: var(--text-primary);
@@ -567,7 +567,7 @@ input[type="file"]:hover {
   height: 100vh;
   max-height: calc(100vh - 480px);
   overflow-y: auto;
-  transition: max-height 0.3s ease;
+  transition: max-height 0.2s ease;
 }
 
 #Metadata {
@@ -578,7 +578,7 @@ input[type="file"]:hover {
   background-color: var(--bg-tertiary);
   border-radius: 8px;
   box-sizing: border-box;
-  transition: height 0.3s ease;
+  transition: background-color 0.2s, color 0.2s, height 0.2s ease;
   color: var(--text-primary);
 }
 
@@ -594,7 +594,7 @@ input[type="file"]:hover {
   padding: 0;
   height:310px;
   overflow-x: auto;
-  transition: height 0.3s ease;
+  transition: height 0.2s ease;
   word-break: break-word;
   font-family: 'Noto Sans HK', sans-serif;
   font-size: 12px;
@@ -1058,8 +1058,8 @@ body.dark-mode .sidebar-button {
   overflow: hidden;
   opacity: 0;
   pointer-events: none;
-  transition: width 0.3s ease, margin-left 0.3s ease, opacity 0.3s ease,
-              padding 0.3s ease, border-width 0.3s ease;
+  transition: width 0.2s ease, margin-left 0.2s ease, opacity 0.2s ease,
+              padding 0.2s ease, border-width 0.2s ease;
   color: var(--text-primary);
 }
 
@@ -1225,7 +1225,7 @@ body.tag-mode-active #tag-panel {
 }
 
 #whole-spectrogram {
-  transition: padding-left 0.3s ease;
+  transition: padding-left 0.2s ease;
 }
 
 body.tag-mode-active #whole-spectrogram {
@@ -1452,7 +1452,7 @@ input.tag-button.editing {
   user-select: none;
   overflow: hidden;
   opacity: 1;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.2s ease;
   color: var(--text-primary);
 }
 
@@ -1904,7 +1904,7 @@ input.tag-button.editing {
   max-width: 0;
   opacity: 0;
   overflow: hidden;
-  transition: max-width 0.3s ease, opacity 0.3s ease;
+  transition: max-width 0.2s ease, opacity 0.2s ease;
 }
 
 .leaflet-route-toggle-control .route-button-group.visible {
@@ -1958,7 +1958,7 @@ input.tag-button.editing {
   max-width: 0;
   opacity: 0;
   overflow: hidden;
-  transition: max-width 0.3s ease, opacity 0.3s ease;
+  transition: max-width 0.2s ease, opacity 0.2s ease;
 }
 
 .leaflet-text-toggle-control .text-button-group.visible {
@@ -2749,7 +2749,7 @@ input.tag-button.editing {
   justify-content: center;
   align-items: center;
   z-index: 100;
-  transition: color 0.3s ease, transform 0.3s ease;
+  transition: color 0.2s ease, transform 0.2s ease;
 }
 
 .power-spectrum-settings-btn:hover {
@@ -2769,7 +2769,7 @@ input.tag-button.editing {
   stroke-linejoin: round;
   
   /* 可選：添加過渡動畫以平滑更新 */
-  transition: d 0.3s ease-in-out;
+  transition: d 0.2s ease-in-out;
 }
 
 /* 峰值標記點樣式 */
