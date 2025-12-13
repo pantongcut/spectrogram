@@ -1674,30 +1674,27 @@ updateExpandBackBtn();
   updateSpectrogramSettingsText();
 });
 
+// 用於防抖動的 Timer
 let resizeTimeout;
 
 window.addEventListener('resize', () => {
-  // 1. 即時更新座標軸 (保持視覺上的響應速度)
+  // 1. 即時更新座標軸 (保持視覺響應)
   if (container.clientWidth !== containerWidth) {
     containerWidth = container.clientWidth;
     renderAxes();
   }
 
-  // 2. 防抖動重繪 Spectrogram (解決縮小視窗時不重繪的問題)
-  // 當 resize 動作停止 200ms 後，強制執行完整的 Zoom/Redraw 邏輯
+  // 2. 防抖動重繪
   if (resizeTimeout) clearTimeout(resizeTimeout);
   
   resizeTimeout = setTimeout(() => {
-    // applyZoom 會重新計算基於新視窗寬度的 minZoomLevel
-    // 並觸發 ws.zoom() -> 這會通知 WASM Engine 根據新的寬度重新計算 Auto-Overlap
     if (zoomControl) {
-      zoomControl.applyZoom();
+      zoomControl.resetZoomState();
     }
     
     if (freqHoverControl) freqHoverControl.refreshHover();
     if (autoIdControl) autoIdControl.updateMarkers();
     
-    // 確保設置文本也更新 (例如 FFT size 等)
     updateSpectrogramSettingsText();
   }, 100); 
 });
