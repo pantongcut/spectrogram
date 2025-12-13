@@ -1670,18 +1670,10 @@ function updateParametersDisplay(popup, batCall, peakFreqFallback = null) {
     endFreqEl.textContent = batCall.endFreq_kHz?.toFixed(2) || '-';
     // Display lowFreq_kHz (may be optimized to use Start Frequency if lower)
     lowFreqEl.textContent = batCall.lowFreq_kHz?.toFixed(2) || '-';
-    
     // Display High Freq (warning suppressed - using -30dB safety mechanism)
     highFreqEl.textContent = batCall.highFreq_kHz?.toFixed(2) || '-';
-    if (highFreqWarningIcon) {
-      highFreqWarningIcon.style.display = 'none';
-    }
-    highFreqEl.style.color = '#0066cc';  // Blue color for normal value
-    
     // Display Low Freq (warning suppressed - using -30dB safety mechanism)
     lowFreqEl.textContent = batCall.lowFreq_kHz?.toFixed(2) || '-';
-    lowFreqEl.style.color = '#0066cc';  // Blue color for normal value
-    
     kneeFreqEl.textContent = batCall.kneeFreq_kHz?.toFixed(2) || '-';
     charFreqEl.textContent = batCall.characteristicFreq_kHz?.toFixed(2) || '-';
     bandwidthEl.textContent = batCall.bandwidth_kHz?.toFixed(2) || '-';
