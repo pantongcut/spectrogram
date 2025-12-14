@@ -16,6 +16,9 @@
   --dragbar-bg: #ffffff;
   --dragbar-icon-color: #222222;
   --moon-icon-color: #ffffff;
+  --scrollbar-track: #ffffff;
+  --scrollbar-thumb: #ccc;
+  --scrollbar-thumb-hover: #999;
 }
 
 body.dark-mode {
@@ -33,6 +36,9 @@ body.dark-mode {
   --dragbar-bg: #28292a;
   --dragbar-icon-color: #E3E3E3;
   --moon-icon-color: #FFD700;
+  --scrollbar-track: #1E1F20; /* 與 Sidebar 背景一致，讓它隱藏起來 */
+  --scrollbar-thumb: #444746; /* 與邊框顏色一致 */
+  --scrollbar-thumb-hover: #5e5e5e;
 }
 
 /* === Selection Time Info (右上角) === */
@@ -44,6 +50,7 @@ body.dark-mode {
   font-size: 12px;
   background: rgba(255,255,255,0.92);
 }
+
 /* === 全局樣式 === */
 html, body {
   padding: 0px;
@@ -53,6 +60,8 @@ html, body {
   color: var(--text-primary);
   font-family: 'Noto Sans HK', sans-serif;
   transition: background-color 0.3s ease, color 0.3s ease;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin; /* 設為細一點比較優雅 */
 }
 
 /* Disable text selection globally */
