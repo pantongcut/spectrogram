@@ -9,7 +9,7 @@
   --text-secondary: #333333;
   --border-color: #cccccc;
   --input-bg: #ffffff;
-  --button-hover: #E3E3E3;
+  --button-hover: #cdcdcd;
   --icon-color: #ffffff;
   --toolbar-bg: #ffffff;
   --sidebar-bg: #ffffff;
@@ -29,7 +29,7 @@ body.dark-mode {
   --text-secondary: #C4C7C5;
   --border-color: #444746;
   --input-bg: #1E1F20;
-  --button-hover: #4a4a4a;
+  --button-hover: #616161;
   --icon-color: #E3E3E3;
   --toolbar-bg: #28292a;
   --sidebar-bg: #1E1F20;
@@ -1056,6 +1056,10 @@ body.markers-disabled .freq-marker {
 
 body.dark-mode .sidebar-button {
   background-color: #333537;
+}
+
+body.dark-mode .sidebar-button:hover {
+  background-color: var(--button-hover);
 }
 
 /* Hover colors for playback buttons */
