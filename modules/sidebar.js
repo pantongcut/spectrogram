@@ -215,7 +215,10 @@ function initSidebarResizer() {
     startX = e.clientX;
     startWidth = sidebar.offsetWidth;
 
-    // Add visual feedback
+    // Add the resizing class to disable transitions during drag
+    sidebar.classList.add('resizing');
+
+    // Add visual feedback to resizer
     resizer.classList.add('active');
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'w-resize';
@@ -230,13 +233,18 @@ function initSidebarResizer() {
       // Apply constraints
       newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
 
-      // Update sidebar width
+      // Update sidebar width (instant, no transition due to .resizing class)
       sidebar.style.width = `${newWidth}px`;
     };
 
     // Handle mouseup
     const handleMouseUp = () => {
       isResizing = false;
+
+      // Remove the resizing class to restore transitions
+      sidebar.classList.remove('resizing');
+
+      // Remove visual feedback
       resizer.classList.remove('active');
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
@@ -251,4 +259,5 @@ function initSidebarResizer() {
     document.addEventListener('mouseup', handleMouseUp);
   });
 }
+
 

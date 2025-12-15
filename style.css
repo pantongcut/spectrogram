@@ -604,6 +604,10 @@ input[type="file"]:hover {
   color: var(--text-primary);
 }
 
+#sidebar.resizing {
+  transition: none !important;
+}
+
 #sidebar.edit-mode {
   width: 300px;
 }
