@@ -479,8 +479,8 @@ input[type="file"]:hover {
   position: absolute;
   cursor: pointer;
   width: 40px;
-  top: 3; left: 0;
-  right: 0; bottom: 3;
+  top: 3px; left: 0;
+  right: 0; bottom: 3px;
   background-color: #888;
   transition: 0.4s;
   border-radius: 26px;
