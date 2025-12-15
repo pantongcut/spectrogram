@@ -19,6 +19,14 @@ export function drawTimeAxis({
   else if (pxPerSec >= 500) step = 200;
   else if (pxPerSec >= 300) step = 500;
 
+  // [Fix] Time Expansion 模式修正：
+  // 因為 TE 模式下 duration 是實際時間的 10 倍，導致同樣的 zoomLevel 下 pxPerSec 會變小，
+  // 造成 step 計算過小，刻度過於密集。
+  // 此處將 step 乘以 10，讓視覺密度 (像素間距) 回復到與非 TE 模式一致。
+  if (timeExpansion) {
+    step *= 10;
+  }
+
   // 使用 DocumentFragment 批量插入 DOM，減少重排
   const fragment = document.createDocumentFragment();
   
@@ -68,6 +76,8 @@ export function drawTimeAxis({
   axisElement.innerHTML = '';
   axisElement.appendChild(fragment);
   axisElement.style.width = `${totalWidth}px`;
+  
+  // 更新軸單位顯示
   labelElement.textContent = step >= 1000 ? 'Time (s)' : 'Time (ms)';
 }
 
@@ -99,8 +109,7 @@ export function drawFrequencyGrid({
   const range = maxFrequency;
   
   // 根據 frequency range 調整精細度
-  // 修復：無論是否為 Time Expansion 模式，都使用相同的 step 邏輯 (物理間隔一致)
-  // 這樣在 TE 模式下，網格線不會變密，只有標籤數值會變大 (由下方的 displayValue 處理)
+  // 無論是否為 Time Expansion 模式，都使用相同的 step 邏輯 (物理間隔一致)
   let majorStep, minorStep;
   if (range <= 20) {
     majorStep = 1;
