@@ -26,7 +26,10 @@ export function drawTimeAxis({
   // 使用 DocumentFragment 批量插入 DOM，減少重排
   const fragment = document.createDocumentFragment();
   
-  for (let t = 0; t < duration * 1000; t += step) {
+  // 確保循環使用整數運算以避免浮點數累積誤差
+  const maxTimeMs = Math.floor(duration * 1000);
+
+  for (let t = 0; t < maxTimeMs; t += step) {
     const left = (t / 1000) * pxPerSec;
 
     // 主刻度線
@@ -47,7 +50,15 @@ export function drawTimeAxis({
     // 時間標籤
     const baseLabel = step >= 1000 ? (t / 1000) : t;
     const displayLabel = timeExpansion ? (baseLabel / 10) : baseLabel;
-    const labelStr = (step >= 1000 && !timeExpansion) ? `${baseLabel}` : `${displayLabel}`;
+    
+    // 格式化標籤：如果使用了 Time Expansion 且數值較小，避免過長的小數
+    let labelStr;
+    if (step >= 1000 && !timeExpansion) {
+        labelStr = `${baseLabel}`;
+    } else {
+        // 對於小數，去除多餘的零，例如 0.10 -> 0.1
+        labelStr = Number(displayLabel.toPrecision(12)).toString();
+    }
     
     const label = document.createElement('span');
     label.className = 'time-axis-label';
@@ -61,6 +72,8 @@ export function drawTimeAxis({
   axisElement.innerHTML = '';
   axisElement.appendChild(fragment);
   axisElement.style.width = `${totalWidth}px`;
+  
+  // 更新軸單位顯示
   labelElement.textContent = step >= 1000 ? 'Time (s)' : 'Time (ms)';
 }
 
@@ -86,27 +99,23 @@ export function drawFrequencyGrid({
   const viewerWrapper = document.getElementById('viewer-wrapper');
   const isLightTheme = viewerWrapper && viewerWrapper.classList.contains('theme-light');
   
-  // In light mode (mono_light colormap), use dark grid; in dark mode, use white grid
   ctx.strokeStyle = isLightTheme ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.3)';
   ctx.lineWidth = 0.4;
 
   const range = maxFrequency;
   
   // 根據 frequency range 調整精細度
-  // 當 frequency range <= 20kHz 時，精度最高 (1 kHz)
+  // 無論是否為 Time Expansion 模式，都使用相同的 step 邏輯 (物理間隔一致)
   let majorStep, minorStep;
   if (range <= 20) {
-    // frequency range <= 20kHz: 1kHz 精細度 (最高精度)
-    majorStep = timeExpansion ? 0.1 : 1;
-    minorStep = timeExpansion ? 0.05 : 0.5;
+    majorStep = 1;
+    minorStep = 0.5;
   } else if (range <= 50) {
-    // frequency range <= 50kHz: 5kHz 精細度
-    majorStep = timeExpansion ? 0.5 : 5;
-    minorStep = timeExpansion ? 0.25 : 2.5;
+    majorStep = 5;
+    minorStep = 2.5;
   } else {
-    // frequency range > 50kHz: 10kHz 精細度
-    majorStep = timeExpansion ? 1 : 10;
-    minorStep = timeExpansion ? 0.5 : 5;
+    majorStep = 10;
+    minorStep = 5;
   }
 
   // 優化：批量繪製所有網格線
@@ -136,6 +145,7 @@ export function drawFrequencyGrid({
     label.className = 'freq-label-static freq-axis-label';
     label.style.top = `${y - 1}px`;
     const freqValue = f + offsetKHz;
+    // TE 模式下，頻率數值顯示為 10 倍
     const displayValue = timeExpansion ? (freqValue * 10) : freqValue;
     label.textContent = Number(displayValue.toFixed(1)).toString();
     fragment.appendChild(label);
