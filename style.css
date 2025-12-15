@@ -2706,24 +2706,26 @@ input.tag-button.editing {
   text-align: center;
 }
 
+.param-value.snr {
+  font-weight: 600;
+}
+
 /* Quality rating colors */
 .param-value.quality-very-poor {
   color: #d9534f;  /* Red */
 }
 
 .param-value.quality-marginal {
-  color: #f0ad4e;  /* Orange */
+  color: #ec8b03;  /* Orange */
 }
 
 .param-value.quality-normal {
-  color: #333;     /* Normal/Dark gray */
+  color: var(--paravalue-color);     /* Normal/Dark gray */
 }
 
 .param-value.quality-good {
   color: #5cb85c;  /* Green */
 }
-
-
 
 .param-value.quality-excellent {
   color: #1b7f00;  /* Dark green */
