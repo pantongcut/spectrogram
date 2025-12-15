@@ -7,6 +7,7 @@
   --bg-tertiary: #eeeeee;
   --text-primary: #000000;
   --text-secondary: #333333;
+  --paravalue-color:#0066cc;
   --border-color: #cccccc;
   --input-bg: #ffffff;
   --button-hover: #999;
@@ -31,6 +32,7 @@ body.dark-mode {
   --bg-tertiary: #28292a;
   --text-primary: #E3E3E3;
   --text-secondary: #C4C7C5;
+  --paravalue-color:#FFD700;
   --border-color: #444746;
   --input-bg: #1E1F20;
   --zoombutton-bg: #333333;
@@ -2680,7 +2682,7 @@ input.tag-button.editing {
 
 .param-value {
   text-align: right;
-  color: #0066cc;
+  color: var(--paravalue-color);
   font-size: 12px;
   width: 35%;
 }
