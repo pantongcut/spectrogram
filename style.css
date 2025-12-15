@@ -618,6 +618,28 @@ input[type="file"]:hover {
   pointer-events: none;
 }
 
+/* === Sidebar Resizer Handle === */
+#sidebar-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: w-resize;
+  background-color: transparent;
+  transition: background-color 0.2s ease;
+  user-select: none;
+  position: relative;
+  z-index: 100;
+}
+
+#sidebar-resizer:hover,
+#sidebar-resizer.active {
+  background-color: #007bff;
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.1);
+}
+
+#sidebar.collapsed ~ #sidebar-resizer {
+  display: none;
+}
+
 #fileList {
   list-style: none;
   padding: 0;
@@ -2136,6 +2158,7 @@ input.tag-button.editing {
   display: flex;
   flex-direction: row;
   height: 100vh;
+  position: relative;
 }
 
 #fileListHeaderRow {

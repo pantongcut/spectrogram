@@ -178,7 +178,10 @@ export function initSidebar({ onFileSelected } = {}) {
     const fileNameText = document.getElementById('fileNameText');
     fileNameText.textContent = filePath ? filePath : 'Upload wav file(s)';
   }
-  
+
+  // Initialize Sidebar Resizer
+  initSidebarResizer();
+
   return {
     refresh: (filePath, resetSearch = true) => {
       updateCurrentPath(filePath);
@@ -189,3 +192,63 @@ export function initSidebar({ onFileSelected } = {}) {
     }
   };
 }
+
+/**
+ * Initialize sidebar resizer functionality
+ */
+function initSidebarResizer() {
+  const sidebar = document.getElementById('sidebar');
+  const resizer = document.getElementById('sidebar-resizer');
+  const layout = document.getElementById('layout');
+
+  if (!resizer || !sidebar || !layout) return;
+
+  const MIN_WIDTH = 250;
+  const MAX_WIDTH = 500;
+  let isResizing = false;
+  let startX = 0;
+  let startWidth = 0;
+
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isResizing = true;
+    startX = e.clientX;
+    startWidth = sidebar.offsetWidth;
+
+    // Add visual feedback
+    resizer.classList.add('active');
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'w-resize';
+
+    // Handle mousemove
+    const handleMouseMove = (moveEvent) => {
+      if (!isResizing) return;
+
+      const deltaX = moveEvent.clientX - startX;
+      let newWidth = startWidth + deltaX;
+
+      // Apply constraints
+      newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, newWidth));
+
+      // Update sidebar width
+      sidebar.style.width = `${newWidth}px`;
+    };
+
+    // Handle mouseup
+    const handleMouseUp = () => {
+      isResizing = false;
+      resizer.classList.remove('active');
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+
+      // Remove event listeners
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    // Add event listeners
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  });
+}
+
