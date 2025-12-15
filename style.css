@@ -75,7 +75,7 @@ html, body {
 }
 
 ::-webkit-scrollbar {
-  width: 1%;  /* 垂直 Scrollbar 的寬度 */
+  width: 10px;  /* 垂直 Scrollbar 的寬度 */
   height: 10px; /* 水平 Scrollbar 的高度 (這就是你截圖中的那個) */
 }
 
@@ -91,7 +91,7 @@ html, body {
   border-radius: 10px; /* 讓滑塊變圓潤 */
   
   /* 關鍵技巧：使用 border 來製造滑塊與軌道間的空隙，讓它看起來更像懸浮的 */
-  border: 2px solid var(--scrollbar-track);
+  border: 1ch solid var(--scrollbar-track);
   background-clip: content-box;
 }
 
@@ -1200,7 +1200,7 @@ body.dark-mode .sidebar-button:hover {
 #loading-overlay {
   position: absolute;
   top: 0px; left: 0px; right: 0px; bottom: 0px;
-  border: 1px solid;
+  border: 1px solid var(--border-color);
   background-color: rgba(255, 255, 255, 0.6);
   display: none;
   align-items: center;
