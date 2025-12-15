@@ -1633,12 +1633,14 @@ input.tag-button.editing {
 /* === Sidebar Active Item === */
 .sidebar-item.active {
   font-weight: bold;
-  color: #007bff !important;
+  color: var(--paravalue-color);
+  transition: color 0.3s;
 }
 
 .sidebar-item.active .sidebar-left,
 .sidebar-item.active .fileNameText {
-  color: #007bff !important;
+  color: var(--paravalue-color);
+  transition: color 0.3s;
 }
 
 .sidebar-left {
@@ -2715,7 +2717,7 @@ input.tag-button.editing {
   color: #d9534f;  /* Red */
 }
 
-.param-value.quality-marginal {
+.param-value.quality-poor {
   color: #ec8b03;  /* Orange */
 }
 
