@@ -286,10 +286,25 @@ export class BatCallDetector {
    * @param {number} endFrameIdx_forLowFreq - End frame index for Low Frequency (limiting frame)
    * @returns {Object} { snr_dB, mechanism, signalPowerMean_dB, noisePowerMean_dB, signalCount, noiseCount }
    */
-  calculateRMSbasedSNR(call, spectrogram, freqBins, endFrameIdx_forLowFreq) {
+/**
+   * 2025 ENHANCEMENT: Calculate RMS-based SNR from Spectrogram
+   * * Updated Logic (Dec 2025):
+   * Signal: Inside call (HighFreq Frame to LowFreq Frame), within [LowFreq, HighFreq]
+   * Noise: Calculated from external "Noise Spectrogram" (Last 10ms of file)
+   * Frequency Range: Selection Area [Flow, Fhigh]
+   * * @param {Object} call - BatCall object
+   * @param {Array} spectrogram - STFT spectrogram of the signal [timeFrame][freqBin]
+   * @param {Array} freqBins - Frequency bin centers in Hz
+   * @param {number} endFrameIdx_forLowFreq - End frame index for Low Frequency
+   * @param {number} flowKHz - Selection Start Frequency (kHz)
+   * @param {number} fhighKHz - Selection End Frequency (kHz)
+   * @param {Object} noiseSpectrogram - (Optional) Spectrogram of the last 10ms of original file
+   * @returns {Object} result
+   */
+  calculateRMSbasedSNR(call, spectrogram, freqBins, endFrameIdx_forLowFreq, flowKHz, fhighKHz, noiseSpectrogram = null) {
     const result = {
       snr_dB: null,
-      mechanism: 'RMS-based (2025) - Spectrogram',
+      mechanism: 'RMS-based (2025)',
       signalPowerMean_dB: null,
       noisePowerMean_dB: null,
       signalCount: 0,
@@ -310,101 +325,232 @@ export class BatCallDetector {
       return result;
     }
     
-    if (call.highFreq_kHz === undefined || call.lowFreq_kHz === undefined) {
-      result.debug.reason = 'Frequency parameters not set';
-      return result;
-    }
-    
-    // Convert frequency boundaries to Hz for comparison
+    // 1. Calculate SIGNAL Power (From Call Region)
     const signalFreq_Hz_low = call.lowFreq_kHz * 1000;
     const signalFreq_Hz_high = call.highFreq_kHz * 1000;
     
-    // Store frequency range for logging
-    result.frequencyRange_kHz = {
-      lowFreq: call.lowFreq_kHz,
-      highFreq: call.highFreq_kHz
-    };
-    
-    // Store time range for logging
-    result.timeRange_frames = {
-      start: call.highFreqFrameIdx,
-      end: endFrameIdx_forLowFreq,
-      duration: endFrameIdx_forLowFreq - call.highFreqFrameIdx + 1
-    };
-    
-    // Collect power values from spectrogram
-    let signalPowerSum_linear = 0;  // Linear scale (not dB)
-    let noisePowerSum_linear = 0;
+    let signalPowerSum_linear = 0;
     let signalCount = 0;
-    let noiseCount = 0;
     
-    // Iterate through spectrogram in time-frequency space
-    for (let timeIdx = 0; timeIdx < spectrogram.length; timeIdx++) {
+    // Store ranges for logging
+    result.frequencyRange_kHz = { lowFreq: call.lowFreq_kHz, highFreq: call.highFreq_kHz };
+    result.timeRange_frames = { start: call.highFreqFrameIdx, end: endFrameIdx_forLowFreq, duration: endFrameIdx_forLowFreq - call.highFreqFrameIdx + 1 };
+    
+    // Iterate Signal Region
+    for (let timeIdx = call.highFreqFrameIdx; timeIdx <= endFrameIdx_forLowFreq; timeIdx++) {
+      if (timeIdx >= spectrogram.length) break;
       const frame = spectrogram[timeIdx];
       
       for (let freqIdx = 0; freqIdx < frame.length; freqIdx++) {
         const freqHz = freqBins[freqIdx];
-        const powerDb = frame[freqIdx];
-        
-        // Convert dB to linear scale: P_linear = 10^(P_dB / 10)
-        const powerLinear = Math.pow(10, powerDb / 10);
-        
-        // Check if this bin is in the signal region
-        const isInTimeRange = (timeIdx >= call.highFreqFrameIdx) && (timeIdx <= endFrameIdx_forLowFreq);
-        const isInFreqRange = (freqHz >= signalFreq_Hz_low) && (freqHz <= signalFreq_Hz_high);
-        
-        if (isInTimeRange && isInFreqRange) {
-          // This bin is in the SIGNAL region
-          signalPowerSum_linear += powerLinear;
+        if (freqHz >= signalFreq_Hz_low && freqHz <= signalFreq_Hz_high) {
+          const powerDb = frame[freqIdx];
+          signalPowerSum_linear += Math.pow(10, powerDb / 10);
           signalCount++;
-        } else {
-          // This bin is in the NOISE region
-          noisePowerSum_linear += powerLinear;
-          noiseCount++;
         }
       }
     }
     
+    // 2. Calculate NOISE Power
+    // Logic: Use last 10ms of file (passed as noiseSpectrogram)
+    // Range: Selection Frequency (flowKHz to fhighKHz)
+    let noisePowerSum_linear = 0;
+    let noiseCount = 0;
+    
+    if (noiseSpectrogram && noiseSpectrogram.powerMatrix && noiseSpectrogram.powerMatrix.length > 0) {
+      // Use External Noise Spectrogram (Last 10ms)
+      result.mechanism = 'RMS-based (Last 10ms)';
+      
+      const selLowHz = flowKHz * 1000;
+      const selHighHz = fhighKHz * 1000;
+      const noiseMatrix = noiseSpectrogram.powerMatrix;
+      const noiseFreqBins = noiseSpectrogram.freqBins; // Assuming same resolution
+      
+      for (let t = 0; t < noiseMatrix.length; t++) {
+        const frame = noiseMatrix[t];
+        for (let b = 0; b < frame.length; b++) {
+          const freqHz = noiseFreqBins[b];
+          // Filter by Selection Area Frequency Range
+          if (freqHz >= selLowHz && freqHz <= selHighHz) {
+            const powerDb = frame[b];
+            noisePowerSum_linear += Math.pow(10, powerDb / 10);
+            noiseCount++;
+          }
+        }
+      }
+    } else {
+      // Fallback: Use non-signal bins in the current spectrogram (Legacy behavior)
+      // This happens if noiseSpectrogram is not passed
+      result.mechanism = 'RMS-based (Fallback Internal)';
+      
+      for (let timeIdx = 0; timeIdx < spectrogram.length; timeIdx++) {
+        const frame = spectrogram[timeIdx];
+        for (let freqIdx = 0; freqIdx < frame.length; freqIdx++) {
+          const freqHz = freqBins[freqIdx];
+          const isInSignalTime = (timeIdx >= call.highFreqFrameIdx) && (timeIdx <= endFrameIdx_forLowFreq);
+          const isInSignalFreq = (freqHz >= signalFreq_Hz_low) && (freqHz <= signalFreq_Hz_high);
+          
+          if (!(isInSignalTime && isInSignalFreq)) {
+             const powerDb = frame[freqIdx];
+             noisePowerSum_linear += Math.pow(10, powerDb / 10);
+             noiseCount++;
+          }
+        }
+      }
+    }
+    
+    // 3. Compute Results
     if (signalCount === 0) {
       result.debug.reason = 'No signal bins found';
       return result;
     }
     
     if (noiseCount === 0) {
-      result.debug.reason = 'No noise region (entire area is signal)';
-      result.snr_dB = Infinity;
-      result.noisePowerMean_dB = -Infinity;
+      result.snr_dB = Infinity; // Should not happen with 10ms noise floor
       return result;
     }
     
-    // Calculate mean power in linear scale
     const signalPowerMean_linear = signalPowerSum_linear / signalCount;
     const noisePowerMean_linear = noisePowerSum_linear / noiseCount;
     
-    // Convert back to dB for logging
     result.signalPowerMean_dB = 10 * Math.log10(Math.max(signalPowerMean_linear, 1e-16));
     result.noisePowerMean_dB = 10 * Math.log10(Math.max(noisePowerMean_linear, 1e-16));
     result.signalCount = signalCount;
     result.noiseCount = noiseCount;
     
-    // Avoid division by zero
     if (noisePowerMean_linear < 1e-16) {
       result.snr_dB = Infinity;
-      result.debug.reason = 'Noise power too small';
       return result;
     }
     
-    if (signalPowerMean_linear < 1e-16) {
-      result.snr_dB = -Infinity;
-      result.debug.reason = 'Signal power too small';
-      return result;
-    }
-    
-    // Calculate SNR in dB: 10 × log₁₀(Signal Power / Noise Power)
-    // (not 20 × log₁₀ because we're comparing power, not amplitude)
     result.snr_dB = -10 * Math.log10(signalPowerMean_linear / noisePowerMean_linear);
     
     return result;
+  }
+  
+  /**
+   * Detect all bat calls in audio selection
+   * ...
+   * @param {Object} options.noiseSpectrogram - (Optional) Spectrogram of last 10ms for SNR calc
+   */
+  async detectCalls(audioData, sampleRate, flowKHz, fhighKHz, options = { skipSNR: false, noiseSpectrogram: null }) {
+    // ... (existing code: spectrogram generation, Phase 1 detection) ...
+    if (!audioData || audioData.length === 0) return [];
+    
+    const spectrogram = this.generateSpectrogram(audioData, sampleRate, flowKHz, fhighKHz);
+    if (!spectrogram) return [];
+    
+    const { powerMatrix, timeFrames, freqBins, freqResolution } = spectrogram;
+    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz);
+    
+    // ... (existing code: filtering segments) ...
+    
+    const filteredSegments = callSegments.filter(segment => {
+      const frameDurationSec = 1 / (sampleRate / this.config.fftSize);
+      const numFrames = segment.endFrame - segment.startFrame + 1;
+      const segmentDuration_ms = numFrames * frameDurationSec * 1000;
+      return segmentDuration_ms >= this.config.minCallDuration_ms;
+    });
+    
+    if (filteredSegments.length === 0) return [];
+
+    // Phase 2: Measure precise parameters
+    const calls = filteredSegments.map(segment => {
+       // ... (existing call object creation and frequency measurement) ...
+       const call = new BatCall();
+       call.startTime_s = timeFrames[segment.startFrame];
+       call.endTime_s = timeFrames[Math.min(segment.endFrame + 1, timeFrames.length - 1)];
+       call.spectrogram = powerMatrix.slice(segment.startFrame, segment.endFrame + 1);
+       call.timeFrames = timeFrames.slice(segment.startFrame, segment.endFrame + 2);
+       call.freqBins = freqBins;
+       
+       call.calculateDuration();
+       
+       if (call.duration_ms < this.config.minCallDuration_ms) return null;
+       
+       this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution);
+       
+       call.Flow = call.lowFreq_kHz * 1000;
+       call.Fhigh = call.highFreq_kHz;
+       call.callType = CallTypeClassifier.classify(call);
+       
+       return call;
+    }).filter(call => call !== null);
+
+    // ... (existing code: noise floor calc) ...
+    // Collect power values for robustNoiseFloor_dB (used for simple filtering)
+    const allPowerValues = [];
+    for (let frameIdx = 0; frameIdx < powerMatrix.length; frameIdx++) {
+      const framePower = powerMatrix[frameIdx];
+      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
+        allPowerValues.push(framePower[binIdx]);
+      }
+    }
+    allPowerValues.sort((a, b) => a - b);
+    const percentile25Index = Math.floor(allPowerValues.length * 0.25);
+    const noiseFloor_dB = allPowerValues[Math.max(0, percentile25Index)];
+    const minNoiseFloor_dB = -80;
+    const robustNoiseFloor_dB = Math.max(noiseFloor_dB, minNoiseFloor_dB);
+    const snrThreshold_dB = -20;
+
+    const filteredCalls = calls.filter(call => {
+      if (call.peakPower_dB === null || call.peakPower_dB === undefined) return false;
+      call.noiseFloor_dB = robustNoiseFloor_dB;
+      
+      if (options.skipSNR) {
+         // ... (existing skip logic) ...
+         const spectralSNR_dB = call.peakPower_dB - robustNoiseFloor_dB;
+         call.snr_dB = spectralSNR_dB;
+         call.snrMechanism = 'Skipped (Filtered Pass)';
+         call.quality = this.getQualityRating(spectralSNR_dB);
+         return true;
+      }
+      
+      try {
+        // [MODIFIED] Pass flowKHz, fhighKHz, and options.noiseSpectrogram
+        const snrResult = this.calculateRMSbasedSNR(
+          call,
+          powerMatrix,
+          freqBins,
+          call.endFrameIdx_forLowFreq,
+          flowKHz,  // New param
+          fhighKHz, // New param
+          options.noiseSpectrogram // New param
+        );
+        
+        if (snrResult.snr_dB !== null && isFinite(snrResult.snr_dB)) {
+          call.snr_dB = snrResult.snr_dB;
+          call.snrMechanism = snrResult.mechanism;
+          // ... (existing logging) ...
+          call.snrDetails = {
+            frequencyRange_kHz: snrResult.frequencyRange_kHz,
+            timeRange_frames: snrResult.timeRange_frames,
+            signalPowerMean_dB: snrResult.signalPowerMean_dB,
+            noisePowerMean_dB: snrResult.noisePowerMean_dB,
+            signalCount: snrResult.signalCount,
+            noiseCount: snrResult.noiseCount
+          };
+        } else {
+           // Fallback
+           const spectralSNR_dB = call.peakPower_dB - robustNoiseFloor_dB;
+           call.snr_dB = spectralSNR_dB;
+        }
+      } catch (error) {
+        // Error handling
+        const spectralSNR_dB = call.peakPower_dB - robustNoiseFloor_dB;
+        call.snr_dB = spectralSNR_dB;
+      }
+      
+      call.quality = this.getQualityRating(call.snr_dB);
+      
+      const snr_dB = call.peakPower_dB - robustNoiseFloor_dB;
+      if (snr_dB < snrThreshold_dB) {
+        return false;
+      }
+      return true;
+    });
+    
+    return filteredCalls;
   }
   
   /**
