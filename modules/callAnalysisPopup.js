@@ -386,7 +386,7 @@ export function showCallAnalysisPopup({
           // Manual 模式：保持用戶輸入的值（已經是絕對值），黑色文字
           batCallHighThresholdInput.value = Math.abs(detector.config.highFreqThreshold_dB).toString();
           batCallHighThresholdInput.placeholder = 'Auto';  // 恢復預設 placeholder
-          batCallHighThresholdInput.style.color = '#000';  // 黑色
+          batCallHighThresholdInput.style.color = 'var(--text-primary)';  // 黑色
         }
       }
       
@@ -413,7 +413,7 @@ export function showCallAnalysisPopup({
           // Manual 模式：保持用戶輸入的值（已經是絕對值），黑色文字
           batCallLowThresholdInput.value = Math.abs(detector.config.lowFreqThreshold_dB).toString();
           batCallLowThresholdInput.placeholder = 'Auto';  // 恢復預設 placeholder
-          batCallLowThresholdInput.style.color = '#000';  // 黑色
+          batCallLowThresholdInput.style.color = 'var(--text-primary)';  // 黑色
         }
       }
       
@@ -435,7 +435,7 @@ export function showCallAnalysisPopup({
           // Manual 模式：顯示用戶設定的值，黑色文字
           highpassFilterFreqInput.value = detector.config.highpassFilterFreq_kHz.toString();
           highpassFilterFreqInput.placeholder = 'Auto';  // 恢復預設 placeholder
-          highpassFilterFreqInput.style.color = '#000';  // 黑色
+          highpassFilterFreqInput.style.color = 'var(--text-primary)';  // 黑色
         }
       }
       
@@ -737,7 +737,7 @@ export function showCallAnalysisPopup({
             if (currentValue === '' || currentValue === 'auto') {
               // 從 Auto 切換到 24 (絕對值)
               inputElement.value = '24';
-              inputElement.style.color = '#000';
+              inputElement.style.color = 'var(--text-primary)';
               inputElement.style.fontStyle = 'normal';
             } else {
               // 數值增加，使用 step 值（0.5）
@@ -772,7 +772,7 @@ export function showCallAnalysisPopup({
             if (currentValue === '' || currentValue === 'auto') {
               // 從 Auto 切換到 70 (絕對值)
               inputElement.value = '70';
-              inputElement.style.color = '#000';
+              inputElement.style.color = 'var(--text-primary)';
               inputElement.style.fontStyle = 'normal';
             } else {
               // 數值減少，使用 step 值（0.5）
