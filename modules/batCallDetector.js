@@ -1,4 +1,5 @@
 import { getApplyWindowFunction, getGoertzelEnergyFunction } from './callAnalysisPopup.js';
+import { getTimeExpansionMode } from './fileState.js';
 export const DEFAULT_DETECTION_CONFIG = {
   // Energy threshold (dB below maximum within frequency range)
   // Typical: -18 dB (Avisoft), -24 dB (SonoBat, more conservative)
@@ -180,6 +181,100 @@ export class BatCall {
   calculateBandwidth() {
     if (this.highFreq_kHz !== null && this.lowFreq_kHz !== null) {
       this.bandwidth_kHz = this.highFreq_kHz - this.lowFreq_kHz;
+    }
+  }
+  
+  /**
+   * Apply Time Expansion correction to call parameters
+   * 
+   * In Time Expansion mode (e.g., 10x playback speed), the raw analysis yields:
+   * - Frequencies that are 1/factor times the actual biological frequency
+   * - Durations that are factor times the actual biological duration
+   * 
+   * This method corrects these parameters:
+   * - Multiplies all frequency values by the factor
+   * - Divides all time/duration values by the factor
+   * 
+   * @param {number} factor - Time expansion factor (e.g., 10 for 10x expansion)
+   */
+  applyTimeExpansion(factor = 10) {
+    if (factor <= 1) return;  // No correction needed if factor is 1 or less
+    
+    // ============================================================
+    // FREQUENCY FIELDS - Multiply by factor
+    // ============================================================
+    if (this.peakFreq_kHz !== null) {
+      this.peakFreq_kHz *= factor;
+    }
+    if (this.highFreq_kHz !== null) {
+      this.highFreq_kHz *= factor;
+    }
+    if (this.startFreq_kHz !== null) {
+      this.startFreq_kHz *= factor;
+    }
+    if (this.endFreq_kHz !== null) {
+      this.endFreq_kHz *= factor;
+    }
+    if (this.lowFreq_kHz !== null) {
+      this.lowFreq_kHz *= factor;
+    }
+    if (this.characteristicFreq_kHz !== null) {
+      this.characteristicFreq_kHz *= factor;
+    }
+    if (this.kneeFreq_kHz !== null) {
+      this.kneeFreq_kHz *= factor;
+    }
+    if (this.bandwidth_kHz !== null) {
+      this.bandwidth_kHz *= factor;
+    }
+    if (this.Fhigh !== null) {
+      this.Fhigh *= factor;
+    }
+    if (this.Flow !== null) {
+      this.Flow *= factor;  // Flow is in Hz, needs scaling too
+    }
+    
+    // ============================================================
+    // TIME & DURATION FIELDS - Divide by factor
+    // ============================================================
+    if (this.startTime_s !== null) {
+      this.startTime_s /= factor;
+    }
+    if (this.endTime_s !== null) {
+      this.endTime_s /= factor;
+    }
+    if (this.duration_ms !== null) {
+      this.duration_ms /= factor;
+    }
+    if (this.peakFreqTime_ms !== null) {
+      this.peakFreqTime_ms /= factor;
+    }
+    if (this.highFreqTime_ms !== null) {
+      this.highFreqTime_ms /= factor;
+    }
+    if (this.startFreq_ms !== null) {
+      this.startFreq_ms /= factor;
+    }
+    if (this.endFreq_ms !== null) {
+      this.endFreq_ms /= factor;
+    }
+    if (this.lowFreq_ms !== null) {
+      this.lowFreq_ms /= factor;
+    }
+    if (this.characteristicFreq_ms !== null) {
+      this.characteristicFreq_ms /= factor;
+    }
+    if (this.kneeFreq_ms !== null) {
+      this.kneeFreq_ms /= factor;
+    }
+    if (this.kneeTime_ms !== null) {
+      this.kneeTime_ms /= factor;
+    }
+    if (this.startFreqTime_s !== null) {
+      this.startFreqTime_s /= factor;
+    }
+    if (this.endFreqTime_s !== null) {
+      this.endFreqTime_s /= factor;
     }
   }
   
@@ -3393,6 +3488,14 @@ findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callP
       // Pure FM call: restore the anti-rebounce setting from original config
       // Re-read from parent config to get user's intended setting
       this.config.enableBackwardEndFreqScan = this.config.enableBackwardEndFreqScan !== false;
+    }
+    
+    // ============================================================
+    // [2025] Apply Time Expansion Correction to Frequency Parameters
+    // If Time Expansion mode is enabled, correct all frequency values
+    // ============================================================
+    if (getTimeExpansionMode()) {
+      call.applyTimeExpansion(10);  // Default 10x time expansion
     }
   }
   
