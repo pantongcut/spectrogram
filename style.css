@@ -73,8 +73,6 @@ html, body {
   color: var(--text-primary);
   font-family: 'Noto Sans HK', sans-serif;
   transition: background-color 0.3s ease, color 0.3s ease;
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-  scrollbar-width: thin; /* 設為細一點比較優雅 */
 }
 
 ::-webkit-scrollbar {
