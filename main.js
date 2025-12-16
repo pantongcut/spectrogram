@@ -1701,6 +1701,14 @@ window.addEventListener('resize', () => {
     containerWidth = container.clientWidth;
     renderAxes();
   }
+  
+  const ws = document.getElementById('viewer-container');
+  if (ws) {
+      const overflow = ws.style.overflowX;
+      ws.style.overflowX = 'hidden';
+      void ws.offsetHeight; // Trigger reflow
+      ws.style.overflowX = 'auto'; // Restore
+  }
 
   // 2. 防抖動重繪
   if (resizeTimeout) clearTimeout(resizeTimeout);
