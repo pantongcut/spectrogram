@@ -403,6 +403,47 @@ stopBtn.addEventListener('click', () => {
   hideStopButton();
 });
 
+// [修正 Scrollbar 樣式 - Phantom Zoom 法]
+const wrapperElem = document.getElementById('viewer-wrapper');
+// 注意：我們這次要操作的是內部的內容層，而不僅僅是容器
+const contentElem = document.getElementById('spectrogram-only'); 
+
+if (wrapperElem && contentElem) {
+  let resizeTimeout;
+
+  const ro = new ResizeObserver(() => {
+    // 1. 防抖動更新座標軸 (保留你原有的邏輯)
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    
+    // 立即執行：模擬 Zoom 行為
+    // 當 Wrapper 改變大小時，我們 "騙" 瀏覽器說內容寬度也變了
+    window.requestAnimationFrame(() => {
+        // 加 1px padding，強迫 scrollWidth 發生變化 (模擬 Zoom)
+        contentElem.style.paddingRight = '1px';
+        
+        // 強制瀏覽器計算佈局 (Reflow)
+        void contentElem.offsetWidth;
+        
+        // 馬上還原，肉眼看不見這個閃爍
+        contentElem.style.paddingRight = '0px';
+    });
+
+    resizeTimeout = setTimeout(() => {
+       if (typeof renderAxes === 'function' && typeof containerWidth !== 'undefined') {
+          // 這裡假設 container 已定義在你的 scope 中
+          const container = document.getElementById('viewer-container');
+          if (container && container.clientWidth !== containerWidth) {
+             containerWidth = container.clientWidth;
+             renderAxes();
+          }
+       }
+    }, 30);
+  });
+
+  // 監聽 Wrapper 的變化
+  ro.observe(wrapperElem);
+}
+
 // Theme Toggle Button
 const themeToggleBtn = document.getElementById('themeToggleBtn');
 if (themeToggleBtn) {

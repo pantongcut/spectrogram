@@ -108,8 +108,8 @@ html, body {
 }
 
 #viewer-container::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 10px !important;
+  height: 10px !important;
 }
 
 #viewer-container::-webkit-scrollbar-track {
@@ -163,8 +163,8 @@ html, body {
   border: 1px solid var(--border-color);
   background-color: var(--bg-primary);
   transition: background-color 0.3s, border 0.3s;
-  -webkit-mask-image: linear-gradient(to bottom, black 100%, black 100%);
-  mask-image: linear-gradient(to bottom, black 100%, black 100%);
+  scrollbar-width: auto; 
+  scrollbar-color: auto;
 }
 
 #spectrogram-only {
