@@ -6,25 +6,20 @@ import { defaultDetector } from './batCallDetector.js';
 // ============================================================
 // 全局 Call Analysis 窗口狀態管理
 // ============================================================
-// 存儲所有打開的 Call Analysis popup 及其關聯的 selection
-const openCallAnalysisPopups = new Map();  // Map<popupElement, {selection, selectionContextMenu}>
+const openCallAnalysisPopups = new Map();
 
-// 添加或更新 popup 狀態
 function registerCallAnalysisPopup(popupElement, selection) {
   openCallAnalysisPopups.set(popupElement, { selection });
 }
 
-// 移除 popup 狀態並啟用相關的 Call analysis 菜單項
 function unregisterCallAnalysisPopup(popupElement) {
   const data = openCallAnalysisPopups.get(popupElement);
   if (data && data.selection) {
-    // 啟用該 selection 的 Call analysis 菜單項
     enableCallAnalysisMenuItem(data.selection);
   }
   openCallAnalysisPopups.delete(popupElement);
 }
 
-// 檢查該 selection 是否已有打開的 popup
 function hasOpenPopup(selection) {
   for (const [popup, data] of openCallAnalysisPopups) {
     if (data.selection === selection) {
@@ -34,7 +29,6 @@ function hasOpenPopup(selection) {
   return false;
 }
 
-// 禁用指定 selection 的 Call analysis 菜單項
 function disableCallAnalysisMenuItem(selection) {
   if (selection && selection._callAnalysisMenuItem) {
     selection._callAnalysisMenuItem.classList.add('disabled');
@@ -43,7 +37,6 @@ function disableCallAnalysisMenuItem(selection) {
   }
 }
 
-// 啟用指定 selection 的 Call analysis 菜單項
 function enableCallAnalysisMenuItem(selection) {
   if (selection && selection._callAnalysisMenuItem) {
     selection._callAnalysisMenuItem.classList.remove('disabled');
@@ -66,13 +59,11 @@ export function initFrequencyHover({
   getZoomLevel,
   getDuration
 }) {
-  // Inject CSS for hover theme switching (only once)
   if (!document.getElementById('hover-theme-style')) {
     const styleEl = document.createElement('style');
     styleEl.id = 'hover-theme-style';
     styleEl.textContent = `
       :root {
-        /* Default (Dark Mode) Variables */
         --hover-color: #ffffff;
         --selection-border: #ffffff;
         --selection-bg: rgba(255, 255, 255, 0.03);
@@ -80,9 +71,7 @@ export function initFrequencyHover({
         --btn-group-bg: rgba(255, 255, 255, 0.3);
         --btn-group-color: #333;
       }
-      
       #viewer-wrapper.theme-light {
-        /* Light Mode Variables */
         --hover-color: #000000;
         --selection-border: #000000;
         --selection-bg: rgba(0, 0, 0, 0.05);
@@ -90,22 +79,18 @@ export function initFrequencyHover({
         --btn-group-bg: rgba(0, 0, 0, 0.7);
         --btn-group-color: #000;
       }
-      
       #hover-line-vertical, #hover-line {
         border-color: var(--hover-color);
         background-color: var(--hover-color);
       }
-      
       .selection-rect {
         border-color: var(--selection-border);
         background-color: var(--selection-bg);
         transition: background-color 0.1s ease;
       }
-
       .selection-rect:hover {
         background-color: var(--selection-bg-hover) !important;
       }
-
       .selection-btn-group {
         background-color: var(--btn-group-bg) !important;
         color: var(--btn-group-color);
@@ -145,7 +130,6 @@ export function initFrequencyHover({
   let tapTimer = null;
   const doubleTapDelay = 300;
 
-  // 監聽 main.js 觸發的強制解除 hover 狀態事件
   viewer.addEventListener('force-hover-enable', () => {
     suppressHover = false;
     isOverBtnGroup = false;
@@ -225,7 +209,6 @@ export function initFrequencyHover({
     zoomControls.addEventListener('mouseleave', () => { suppressHover = false; });
   }
 
-  // 右上角 selection time info 元素
   const selectionTimeInfo = document.getElementById('selection-time-info');
 
   function showSelectionTimeInfo(startMs, endMs) {
@@ -582,7 +565,7 @@ export function initFrequencyHover({
           } catch (e) {}
           delete sel._batCallDetectionListener;
         }
-        if (document.body.contains(popupElement)) {
+        if (popupElement && document.body.contains(popupElement)) {
           popupElement.remove();
         }
       }
@@ -607,23 +590,21 @@ export function initFrequencyHover({
     tooltip.className = 'draggable-tooltip freq-tooltip';
     tooltip.style.left = `${left + width + 10}px`;
     tooltip.style.top = `${top}px`;
-    const timeExp = getTimeExpansionMode();
-    const freqMul = timeExp ? 10 : 1;
-    const timeDiv = timeExp ? 10 : 1;
-    const dispFhigh = Fhigh * freqMul;
-    const dispFlow = Flow * freqMul;
-    const dispBandwidth = Bandwidth * freqMul;
-    const dispDurationMs = (Duration * 1000) / timeDiv;
+    // Initial display with '-' until data is ready
+    const dispFhigh = '-';
+    const dispFlow = '-';
+    const dispBandwidth = '-';
+    const dispDurationMs = '-';
     
     tooltip.innerHTML = `
       <table class="freq-tooltip-table">
         <tr>
           <td class="label">Freq.High:</td>
-          <td class="value"><span class="fhigh">${dispFhigh.toFixed(1)}</span> kHz</td>
+          <td class="value"><span class="fhigh">${dispFhigh}</span> kHz</td>
         </tr>
         <tr>
           <td class="label">Freq.Low:</td>
-          <td class="value"><span class="flow">${dispFlow.toFixed(1)}</span> kHz</td>
+          <td class="value"><span class="flow">${dispFlow}</span> kHz</td>
         </tr>
         <tr>
           <td class="label">Freq.Peak:</td>
@@ -639,11 +620,11 @@ export function initFrequencyHover({
         </tr>
         <tr>
           <td class="label">Bandwidth:</td>
-          <td class="value"><span class="bandwidth">${dispBandwidth.toFixed(1)}</span> kHz</td>
+          <td class="value"><span class="bandwidth">${dispBandwidth}</span> kHz</td>
         </tr>
         <tr>
           <td class="label">Duration:</td>
-          <td class="value"><span class="duration">${dispDurationMs.toFixed(1)}</span> ms</td>
+          <td class="value"><span class="duration">${dispDurationMs}</span> ms</td>
         </tr>
       </table>
       <div class="tooltip-close-btn">×</div>
@@ -897,7 +878,7 @@ export function initFrequencyHover({
           sel.data.Flow = newFlow;
         }
   
-        // 2025: 拖動時清除舊的分析數據，只更新視覺選區
+        // 2025: Clear old analysis data during resize
         if (sel.data.batCall) delete sel.data.batCall;
         if (sel.data.peakFreq) delete sel.data.peakFreq;
         
@@ -928,7 +909,7 @@ export function initFrequencyHover({
         window.removeEventListener('mousemove', moveHandler);
         window.removeEventListener('mouseup', upHandler);
 
-        // 2025: 在 mouseup 後才進行完整分析
+        // Calculate parameters only after resize ends
         const durationMs = (sel.data.endTime - sel.data.startTime) * 1000;
         const timeExp = getTimeExpansionMode();
         const judgeDurationMs = timeExp ? (durationMs / 10) : durationMs;
@@ -953,55 +934,54 @@ export function initFrequencyHover({
   function updateTooltipValues(sel, left, top, width, height) {
     const { data, tooltip } = sel;
     
-    const Flow = data.Flow;
-    const Fhigh = data.Fhigh;
-    const Bandwidth = Fhigh - Flow;
-    const Duration = (data.endTime - data.startTime);
-    
+    // Time Expansion parameters
     const timeExp = getTimeExpansionMode();
     const freqMul = timeExp ? 10 : 1;
     const timeDiv = timeExp ? 10 : 1;
     
-    let dispFhigh = Fhigh * freqMul;
-    let dispFlow = Flow * freqMul;
-    let dispBandwidth = Bandwidth * freqMul;
-    let dispDurationMs = (Duration * 1000) / timeDiv;
+    // Default values to '-' (No geometric fallback)
+    let dispFhigh = '-';
+    let dispFlow = '-';
+    let dispBandwidth = '-';
+    let dispDurationMs = '-';
     
     let dispPeak = '-';
     let dispChar = '-';
     let dispKnee = '-';
 
+    // Populate with batCall data if available
     if (data.batCall) {
       const call = data.batCall;
       
-      if (call.highFreq_kHz != null) dispFhigh = call.highFreq_kHz * freqMul;
-      if (call.lowFreq_kHz != null) dispFlow = call.lowFreq_kHz * freqMul;
-      if (call.bandwidth_kHz != null) dispBandwidth = call.bandwidth_kHz * freqMul;
-      if (call.duration_ms != null) dispDurationMs = call.duration_ms / timeDiv;
+      if (call.highFreq_kHz != null) dispFhigh = (call.highFreq_kHz * freqMul).toFixed(2);
+      if (call.lowFreq_kHz != null) dispFlow = (call.lowFreq_kHz * freqMul).toFixed(2);
+      if (call.bandwidth_kHz != null) dispBandwidth = (call.bandwidth_kHz * freqMul).toFixed(2);
+      if (call.duration_ms != null) dispDurationMs = (call.duration_ms / timeDiv).toFixed(2);
       
       if (call.peakFreq_kHz != null) dispPeak = (call.peakFreq_kHz * freqMul).toFixed(2);
       if (call.characteristicFreq_kHz != null) dispChar = (call.characteristicFreq_kHz * freqMul).toFixed(2);
       if (call.kneeFreq_kHz != null) dispKnee = (call.kneeFreq_kHz * freqMul).toFixed(2);
     } 
-    else if (data.peakFreq !== undefined) {
-      dispPeak = (data.peakFreq * freqMul).toFixed(2);
+
+    // Update label under the selection box with Geometric Duration
+    // (We maintain geometric duration here so the user can see the box size while resizing)
+    if (sel.durationLabel) {
+      const geometricDurationMs = (data.endTime - data.startTime) * 1000;
+      const displayLabelDuration = timeExp ? (geometricDurationMs / 10) : geometricDurationMs;
+      sel.durationLabel.textContent = `${displayLabelDuration.toFixed(1)} ms`;
     }
 
-    if (!tooltip) {
-      if (sel.durationLabel) sel.durationLabel.textContent = `${dispDurationMs.toFixed(1)} ms`;
-      return;
-    }
-    if (sel.durationLabel) sel.durationLabel.textContent = `${dispDurationMs.toFixed(1)} ms`;
+    if (!tooltip) return;
 
     const q = (selector) => tooltip.querySelector(selector);
     
-    if (q('.fhigh')) q('.fhigh').textContent = dispFhigh.toFixed(2);
-    if (q('.flow')) q('.flow').textContent = dispFlow.toFixed(2);
+    if (q('.fhigh')) q('.fhigh').textContent = dispFhigh;
+    if (q('.flow')) q('.flow').textContent = dispFlow;
     if (q('.fpeak')) q('.fpeak').textContent = dispPeak;
     if (q('.fchar')) q('.fchar').textContent = dispChar;
     if (q('.fknee')) q('.fknee').textContent = dispKnee;
-    if (q('.bandwidth')) q('.bandwidth').textContent = dispBandwidth.toFixed(2);
-    if (q('.duration')) q('.duration').textContent = dispDurationMs.toFixed(2);
+    if (q('.bandwidth')) q('.bandwidth').textContent = dispBandwidth;
+    if (q('.duration')) q('.duration').textContent = dispDurationMs;
   }
 
   function updateSelections() {
