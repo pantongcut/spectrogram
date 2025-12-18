@@ -1,9 +1,6 @@
 import { getTimeExpansionMode } from './fileState.js';
 import { getWavesurfer, getPlugin, getOrCreateWasmEngine, getAnalysisWasmEngine } from './wsManager.js';
 import { showCallAnalysisPopup, calculateSpectrumWithOverlap, findPeakFrequency } from './callAnalysisPopup.js';
-// [新增] 引入 defaultDetector 以進行詳細的蝙蝠叫聲分析
-import { defaultDetector } from './batCallDetector.js';
-// [新增] 引入 defaultDetector 以進行詳細的蝙蝠叫聲分析
 import { defaultDetector } from './batCallDetector.js';
 
 // ============================================================
