@@ -432,7 +432,6 @@ export function initFrequencyHover({
   });
 
   // 異步計算詳細的 Bat Call 參數
-  // [CRITICAL FIX] 確保使用與 Call Analysis Popup 完全相同的邏輯和引擎
   async function calculateBatCallParams(sel) {
     try {
       const ws = getWavesurfer();
@@ -458,7 +457,7 @@ export function initFrequencyHover({
       const rawAudioData = new Float32Array(decodedData.getChannelData(0).slice(startSample, endSample));
 
       // ============================================================
-      // [CRITICAL SYNC] 1. 從 window.__batCallControlsMemory 同步配置
+      // [CRITICAL FIX] 1. 從全局記憶體同步配置 (與 Popup 一致)
       // ============================================================
       const memory = window.__batCallControlsMemory || {};
       
@@ -482,14 +481,14 @@ export function initFrequencyHover({
       });
 
       // ============================================================
-      // [CRITICAL SYNC] 2. 注入 WASM Engine
-      // 確保使用與 Popup 相同的 FFT 運算核心 (解決 49.40 vs 49.49 問題)
+      // [CRITICAL FIX] 2. 注入 WASM Engine (解決 49.40 vs 49.49)
+      // 確保使用與 Popup 完全相同的 FFT 運算核心
       // ============================================================
       const analysisWasmEngine = getAnalysisWasmEngine();
       defaultDetector.wasmEngine = analysisWasmEngine;
 
       // ============================================================
-      // [CRITICAL SYNC] 3. 應用 Highpass Filter
+      // [CRITICAL FIX] 3. 應用 Highpass Filter (解決 Low/Start Freq 偏差)
       // ============================================================
       let audioDataForDetection = rawAudioData;
 
@@ -1247,12 +1246,31 @@ export function initFrequencyHover({
         selection._popupMutationObserver = mutationObserver;
 
         if (popupObj.popup && popupObj.popup.addEventListener) {
+          // [NEW] Listen for batCallDetectionCompleted to sync exact values
+          const batCallListener = (ev) => {
+            if (ev.detail && ev.detail.call) {
+              // Update selection data with the EXACT call object from popup
+              selection.data.batCall = ev.detail.call;
+              
+              // Force update the tooltip to match popup values
+              if (selection.tooltip) {
+                // Pass dummy values as updateTooltipValues now prioritizes batCall data
+                updateTooltipValues(selection, 0, 0, 0, 0);
+              }
+            }
+          };
+          
+          popupObj.popup.addEventListener('batCallDetectionCompleted', batCallListener);
+          selection._batCallDetectionListener = batCallListener;
+
+          // Keep peak listener as backup (though batCallListener supercedes it)
           const peakListener = (ev) => {
             try {
               const peakFreq = ev?.detail?.peakFreq;
               if (peakFreq !== null && peakFreq !== undefined) {
                 selection.data.peakFreq = peakFreq;
-                if (selection.tooltip && selection.tooltip.querySelector('.fpeak')) {
+                // Only update if no batCall data (to avoid conflict)
+                if (!selection.data.batCall && selection.tooltip && selection.tooltip.querySelector('.fpeak')) {
                   const freqMul = getTimeExpansionMode() ? 10 : 1;
                   selection.tooltip.querySelector('.fpeak').textContent = (peakFreq * freqMul).toFixed(1);
                 }
@@ -1269,7 +1287,7 @@ export function initFrequencyHover({
           const currentPeak = popupObj.getPeakFrequency && popupObj.getPeakFrequency();
           if (currentPeak !== null && currentPeak !== undefined) {
             selection.data.peakFreq = currentPeak;
-            if (selection.tooltip && selection.tooltip.querySelector('.fpeak')) {
+            if (!selection.data.batCall && selection.tooltip && selection.tooltip.querySelector('.fpeak')) {
               const freqMul = getTimeExpansionMode() ? 10 : 1;
               selection.tooltip.querySelector('.fpeak').textContent = (currentPeak * freqMul).toFixed(1);
             }
