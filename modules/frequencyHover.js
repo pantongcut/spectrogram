@@ -730,10 +730,11 @@ async function calculateBatCallParams(sel) {
     return tooltip;
   }
 
-  function createBtnGroup(sel, isShortSelection = false) {
+function createBtnGroup(sel, isShortSelection = false) {
     const group = document.createElement('div');
     group.className = 'selection-btn-group';
 
+    // 1. Close Button (現有代碼)
     const closeBtn = document.createElement('i');
     closeBtn.className = 'fa-solid fa-xmark selection-close-btn';
     closeBtn.title = 'Close selection';
@@ -753,6 +754,31 @@ async function calculateBatCallParams(sel) {
     group.appendChild(closeBtn);
 
     if (isShortSelection) {
+      // 1. Toggle Tooltip Button
+      const toggleTooltipBtn = document.createElement('i');
+      toggleTooltipBtn.className = 'fa-regular fa-square selection-toggle-tooltip-btn';
+      toggleTooltipBtn.title = 'Show/Hide Info';
+      
+      toggleTooltipBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (sel.tooltip) {
+          // 切換顯示狀態
+          if (sel.tooltip.style.display === 'none') {
+            sel.tooltip.style.display = 'block';
+          } else {
+            sel.tooltip.style.display = 'none';
+          }
+        }
+      });
+      
+      // 防止干擾 Hover 行為
+      toggleTooltipBtn.addEventListener('mousedown', (ev) => { ev.stopPropagation(); });
+      toggleTooltipBtn.addEventListener('mouseenter', () => { suppressHover = true; hideAll(); });
+      toggleTooltipBtn.addEventListener('mouseleave', () => { suppressHover = false; });
+
+      group.appendChild(toggleTooltipBtn);
+
+      // 2. Call Analysis Button
       const callAnalysisBtn = document.createElement('i');
       callAnalysisBtn.className = 'fa-solid fa-info selection-call-analysis-btn';
       callAnalysisBtn.title = 'Call analysis';
