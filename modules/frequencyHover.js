@@ -432,7 +432,7 @@ export function initFrequencyHover({
   });
 
   // 異步計算詳細的 Bat Call 參數
-  async function calculateBatCallParams(sel) {
+async function calculateBatCallParams(sel) {
     try {
       const ws = getWavesurfer();
       if (!ws) return null;
@@ -443,6 +443,7 @@ export function initFrequencyHover({
       const timeExp = getTimeExpansionMode();
       const judgeDurationMs = timeExp ? (durationMs / 10) : durationMs;
       
+      // Limit detailed calculation to short calls (same as popup logic)
       if (judgeDurationMs >= 100) return null;
 
       const sampleRate = window.__spectrogramSettings?.sampleRate || 256000;
@@ -454,13 +455,16 @@ export function initFrequencyHover({
       const decodedData = ws.getDecodedData();
       if (!decodedData) return null;
 
+      // Extract Raw Audio (Unfiltered)
       const rawAudioData = new Float32Array(decodedData.getChannelData(0).slice(startSample, endSample));
 
       // ============================================================
-      // [CRITICAL FIX] 1. 從全局記憶體同步配置 (與 Popup 一致)
+      // 1. 同步全局配置 (Sync Configuration)
+      // 確保使用與 Call Analysis Popup 完全一致的參數
       // ============================================================
       const memory = window.__batCallControlsMemory || {};
       
+      // Update detector config
       Object.assign(defaultDetector.config, {
         callThreshold_dB: memory.callThreshold_dB,
         highFreqThreshold_dB: memory.highFreqThreshold_dB,
@@ -471,9 +475,14 @@ export function initFrequencyHover({
         minCallDuration_ms: memory.minCallDuration_ms,
         fftSize: parseInt(memory.fftSize) || 1024,
         hopPercent: memory.hopPercent,
+        windowType: window.__spectrogramSettings?.windowType || 'hann', // Sync window type
+        
+        // Anti-Rebounce
         enableBackwardEndFreqScan: memory.enableBackwardEndFreqScan !== false,
         maxFrequencyDropThreshold_kHz: memory.maxFrequencyDropThreshold_kHz || 10,
         protectionWindowAfterPeak_ms: memory.protectionWindowAfterPeak_ms || 10,
+        
+        // Highpass Filter
         enableHighpassFilter: memory.enableHighpassFilter !== false,
         highpassFilterFreq_kHz: memory.highpassFilterFreq_kHz || 40,
         highpassFilterFreq_kHz_isAuto: memory.highpassFilterFreq_kHz_isAuto !== false,
@@ -481,21 +490,42 @@ export function initFrequencyHover({
       });
 
       // ============================================================
-      // [CRITICAL FIX] 2. 注入 WASM Engine (解決 49.40 vs 49.49)
-      // 確保使用與 Popup 完全相同的 FFT 運算核心
+      // 2. 注入 WASM Engine
       // ============================================================
       const analysisWasmEngine = getAnalysisWasmEngine();
       defaultDetector.wasmEngine = analysisWasmEngine;
 
       // ============================================================
-      // [CRITICAL FIX] 3. 應用 Highpass Filter (解決 Low/Start Freq 偏差)
+      // 3. 處理 Highpass Filter (Auto Mode Logic)
+      // 這是數值不一致的主要原因。Popup 會先計算 Peak Freq 來決定 Filter Freq，
+      // 這裡必須模仿該邏輯。
       // ============================================================
       let audioDataForDetection = rawAudioData;
 
       if (defaultDetector.config.enableHighpassFilter) {
-        // 使用記憶值或預設值。Tooltip 不進行 Pre-Peak 掃描以節省效能
-        const highpassFreq_Hz = (defaultDetector.config.highpassFilterFreq_kHz || 40) * 1000;
-        
+        let filterFreq_kHz = defaultDetector.config.highpassFilterFreq_kHz;
+
+        // 如果是 Auto 模式，先快速測量 Raw Audio 的 Peak Frequency
+        if (defaultDetector.config.highpassFilterFreq_kHz_isAuto) {
+          // 使用 measureDirectSelection 快速獲取未濾波數據的峰值
+          const tempAnalysis = defaultDetector.measureDirectSelection(
+            rawAudioData, 
+            sampleRate, 
+            Flow, 
+            Fhigh
+          );
+          
+          if (tempAnalysis && tempAnalysis.peakFreq_kHz) {
+            // 使用 Detector 的計算邏輯決定 Auto Frequency
+            filterFreq_kHz = defaultDetector.calculateAutoHighpassFilterFreq(tempAnalysis.peakFreq_kHz);
+            
+            // 重要：更新 Config 以便 detection 內部知道使用了什麼頻率
+            defaultDetector.config.highpassFilterFreq_kHz = filterFreq_kHz;
+          }
+        }
+
+        // 應用濾波器
+        const highpassFreq_Hz = filterFreq_kHz * 1000;
         audioDataForDetection = defaultDetector.applyHighpassFilter(
           rawAudioData, 
           highpassFreq_Hz, 
@@ -504,18 +534,25 @@ export function initFrequencyHover({
         );
       }
 
+      // ============================================================
+      // 4. 執行檢測 (Detect Calls)
+      // ============================================================
       const calls = await defaultDetector.detectCalls(
         audioDataForDetection, 
         sampleRate, 
         Flow,
         Fhigh,
-        { skipSNR: false }
+        { skipSNR: false } // 計算 SNR 以保持數據結構完整
       );
 
       if (calls && calls.length > 0) {
+        // 取第一個最顯著的 Call
         const bestCall = calls[0];
+        
+        // 更新到 selection data
         sel.data.batCall = bestCall;
         
+        // 立即更新 Tooltip 顯示
         if (sel.tooltip) {
           updateTooltipValues(sel, 0, 0, 0, 0);
         }
@@ -981,7 +1018,7 @@ export function initFrequencyHover({
     });
   }
   
-  function updateTooltipValues(sel, left, top, width, height) {
+function updateTooltipValues(sel, left, top, width, height) {
     const { data, tooltip } = sel;
     
     // Time Expansion parameters
@@ -989,7 +1026,7 @@ export function initFrequencyHover({
     const freqMul = timeExp ? 10 : 1;
     const timeDiv = timeExp ? 10 : 1;
     
-    // Default values to '-' (No geometric fallback)
+    // Default values
     let dispFhigh = '-';
     let dispFlow = '-';
     let dispBandwidth = '-';
@@ -1000,23 +1037,33 @@ export function initFrequencyHover({
     let dispKnee = '-';
 
     // Populate with batCall data if available
+    // 這裡的值現在會與 Popup 完全一致，因為計算邏輯與參數已同步
     if (data.batCall) {
       const call = data.batCall;
       
       if (call.highFreq_kHz != null) dispFhigh = (call.highFreq_kHz * freqMul).toFixed(2);
       if (call.lowFreq_kHz != null) dispFlow = (call.lowFreq_kHz * freqMul).toFixed(2);
-      if (call.bandwidth_kHz != null) dispBandwidth = (call.bandwidth_kHz * freqMul).toFixed(2);
-      if (call.duration_ms != null) dispDurationMs = (call.duration_ms / timeDiv).toFixed(2);
-      
       if (call.peakFreq_kHz != null) dispPeak = (call.peakFreq_kHz * freqMul).toFixed(2);
       if (call.characteristicFreq_kHz != null) dispChar = (call.characteristicFreq_kHz * freqMul).toFixed(2);
       if (call.kneeFreq_kHz != null) dispKnee = (call.kneeFreq_kHz * freqMul).toFixed(2);
-    } 
+      if (call.bandwidth_kHz != null) dispBandwidth = (call.bandwidth_kHz * freqMul).toFixed(2);
+      if (call.duration_ms != null) dispDurationMs = (call.duration_ms / timeDiv).toFixed(2);
+      
+    } else if (data.peakFreq != null) {
+        // Fallback if batCall detection failed but we have a raw peak
+        dispPeak = (data.peakFreq * freqMul).toFixed(2);
+    }
 
-    // Update label under the selection box with Geometric Duration
+    // Update label under the selection box
     if (sel.durationLabel) {
+      // Prefer precise call duration if available, otherwise geometric duration
       const geometricDurationMs = (data.endTime - data.startTime) * 1000;
-      const displayLabelDuration = timeExp ? (geometricDurationMs / 10) : geometricDurationMs;
+      let displayMs = geometricDurationMs;
+      
+      // Uncomment to use detected duration on label instead of geometric
+      // if (data.batCall && data.batCall.duration_ms) displayMs = data.batCall.duration_ms;
+      
+      const displayLabelDuration = timeExp ? (displayMs / 10) : displayMs;
       sel.durationLabel.textContent = `${displayLabelDuration.toFixed(1)} ms`;
     }
 
