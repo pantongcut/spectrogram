@@ -1816,39 +1816,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
 
   /**
    * 2025 ENHANCEMENT: Find Optimal Low Frequency Threshold
-   * 
-   * Automatically determines the best low frequency threshold from -24dB to -70dB
-   * by testing each threshold and detecting anomalies (frequency jumps > 2.5 kHz).
-   * 
-   * This method provides:
-   * - Consistent low frequency detection across different spectrogram conditions
-   * - Anti-rebounce compatibility (works with backward end frame scanning)
-   * - Automatic fallback to -24dB if no optimal point found
-   * - Anomaly detection logic identical to high frequency optimization
-   * 
-   * Testing sequence: -24, -25, -26, ..., -69, -70 dB
-   * 
-   * Anomaly detection:
-   * - Major jump (> 2 kHz): Stop immediately, use previous threshold
-   * - Large jump (1.5-2 kHz): First anomaly detection point
-   * - Check if anomaly is followed by 3+ consecutive normal values
-   * - If yes: ignore anomaly and continue
-   * - If no: use threshold just before anomaly
-   * 
-   * Anti-rebounce compatibility:
-   * - Uses last frame power spectrum (like low frequency measurement)
-   * - Works with backward endFreqScan detection
-   * - Maintains frequency boundary integrity
-   * 
-   * @param {Array} spectrogram - STFT spectrogram (time x frequency bins)
-   * @param {Array} freqBins - Frequency bin values (Hz)
-   * @param {number} flowKHz - Low frequency boundary (kHz)
-   * @param {number} fhighKHz - High frequency boundary (kHz)
-   * @param {number} callPeakPower_dB - Call peak power in dB (stable value)
-   * @returns {Object} {threshold, lowFreq_Hz, lowFreq_kHz, endFreq_Hz, endFreq_kHz, warning}
-   */
-  /**
-   * 2025 ENHANCEMENT: Find Optimal Low Frequency Threshold
    * Optimized with:
    * 1. "Restricted Scope Noise Floor" (Lower-Right Quadrant)
    * 2. "Reverse Narrowing / Ratcheting" (Locking forward progress)
