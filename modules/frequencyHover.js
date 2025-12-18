@@ -1,6 +1,10 @@
 import { getTimeExpansionMode } from './fileState.js';
 import { getWavesurfer, getPlugin, getOrCreateWasmEngine, getAnalysisWasmEngine } from './wsManager.js';
 import { showCallAnalysisPopup, calculateSpectrumWithOverlap, findPeakFrequency } from './callAnalysisPopup.js';
+// [新增] 引入 defaultDetector 以進行詳細的蝙蝠叫聲分析
+import { defaultDetector } from './batCallDetector.js';
+// [新增] 引入 defaultDetector 以進行詳細的蝙蝠叫聲分析
+import { defaultDetector } from './batCallDetector.js';
 
 // ============================================================
 // 全局 Call Analysis 窗口狀態管理
@@ -469,7 +473,9 @@ export function initFrequencyHover({
   });
 
   // 計算 selection area 內的峰值頻率
-  async function calculatePeakFrequency(sel) {
+  // [升級] 異步計算詳細的 Bat Call 參數
+  // 2025: 使用 defaultDetector.detectCalls 進行完整分析，包括頻率參數和特徵
+  async function calculateBatCallParams(sel) {
     try {
       const ws = getWavesurfer();
       if (!ws) return null;
@@ -484,66 +490,43 @@ export function initFrequencyHover({
       // 只有 displayTime < 100ms 時才計算
       if (judgeDurationMs >= 100) return null;
 
-      // 如果 Power Spectrum popup 已開啟且已有計算結果，優先使用 popup 的 peak（確保 tooltip 與 popup 一致）
-      if (sel.powerSpectrumPopup && sel.powerSpectrumPopup.isOpen && sel.powerSpectrumPopup.isOpen()) {
-        try {
-          const popupPeak = sel.powerSpectrumPopup.getPeakFrequency && sel.powerSpectrumPopup.getPeakFrequency();
-          if (popupPeak !== null && popupPeak !== undefined) {
-            sel.data.peakFreq = popupPeak;
-            if (sel.tooltip && sel.tooltip.querySelector('.fpeak')) {
-              const freqMul = timeExp ? 10 : 1;
-              sel.tooltip.querySelector('.fpeak').textContent = (popupPeak * freqMul).toFixed(1);
-            }
-            return popupPeak;
-          }
-        } catch (e) {
-          // ignore and fallback to calculating locally
-        }
-      }
-
-      // 獲取原始音頻緩衝
-      const decodedData = ws.getDecodedData();
-      if (!decodedData || !decodedData.getChannelData) return null;
-
-      // 使用與 Power Spectrum 完全相同的設置參數
-      const fftSize = 1024; // 與 Power Spectrum 相同固定為 1024
-      const windowType = window.__spectrogramSettings?.windowType || 'hann';
-      const overlap = window.__spectrogramSettings?.overlap || 'auto';
       const sampleRate = window.__spectrogramSettings?.sampleRate || 256000;
-
       const startSample = Math.floor(startTime * sampleRate);
       const endSample = Math.floor(endTime * sampleRate);
 
       if (endSample <= startSample) return null;
 
-      // 提取 crop 音頻數據
+      const decodedData = ws.getDecodedData();
+      if (!decodedData) return null;
+
+      // 提取音頻數據
       const audioData = new Float32Array(decodedData.getChannelData(0).slice(startSample, endSample));
 
-      // 使用 Power Spectrum 的完全相同方法計算頻譜 (包含 overlap 支持)
-      const spectrum = calculateSpectrumWithOverlap(
-        audioData,
-        sampleRate,
-        fftSize,
-        windowType,
-        overlap
+      // [核心改動] 使用 defaultDetector 進行完整的蝙蝠叫聲分析
+      // detectCalls 會返回完整的 call 物件，包含所有頻率參數和特徵
+      const calls = await defaultDetector.detectCalls(
+        audioData, 
+        sampleRate, 
+        Flow,      // kHz
+        Fhigh,     // kHz
+        { skipSNR: false } // 進行完整分析包含 SNR
       );
 
-      if (!spectrum) return null;
-
-      // 使用 Power Spectrum 完全相同的峰值尋找方法
-      const peakFreq = findPeakFrequency(spectrum, sampleRate, fftSize, Flow, Fhigh);
-
-      if (peakFreq !== null) {
-        sel.data.peakFreq = peakFreq;
-        if (sel.tooltip && sel.tooltip.querySelector('.fpeak')) {
-          const freqMul = timeExp ? 10 : 1;
-          const dispPeakFreq = peakFreq * freqMul;
-          sel.tooltip.querySelector('.fpeak').textContent = dispPeakFreq.toFixed(1);
+      if (calls && calls.length > 0) {
+        // 取第一個或最顯著的 call
+        const bestCall = calls[0];
+        
+        // 將分析結果存入 selection data
+        sel.data.batCall = bestCall;
+        
+        // 立即更新 tooltip 顯示
+        if (sel.tooltip) {
+          updateTooltipValues(sel, 0, 0, 0, 0);
         }
-        return peakFreq;
+        return bestCall;
       }
     } catch (err) {
-      console.warn('計算峰值頻率時出錯:', err);
+      console.warn('計算 Bat Call 參數時出錯:', err);
     }
     return null;
   }
@@ -618,11 +601,11 @@ export function initFrequencyHover({
       showSelectionContextMenu(e, selObj);
     });
 
-    // 如果 duration < 100ms，自動計算峰值頻率
-    // 使用判斷時間（已考慮 Time Expansion）
+    // 如果 duration < 100ms，自動計算詳細參數
+    // 使用新的 calculateBatCallParams 進行完整分析
     if (judgeDurationMs < 100) {
-      calculatePeakFrequency(selObj).catch(err => {
-        console.error('計算峰值頻率失敗:', err);
+      calculateBatCallParams(selObj).catch(err => {
+        console.error('計算詳細參數失敗:', err);
       });
     }
 
@@ -683,7 +666,8 @@ export function initFrequencyHover({
     const dispFlow = Flow * freqMul;
     const dispBandwidth = Bandwidth * freqMul;
     const dispDurationMs = (Duration * 1000) / timeDiv;
-    const dispSlope = dispDurationMs > 0 ? (dispBandwidth / dispDurationMs) : 0;
+    
+    // [更新 HTML] 增加 Freq.Char 和 Freq.Knee 欄位
     tooltip.innerHTML = `
       <table class="freq-tooltip-table">
         <tr>
@@ -699,16 +683,20 @@ export function initFrequencyHover({
           <td class="value"><span class="fpeak">-</span> kHz</td>
         </tr>
         <tr>
+          <td class="label">Freq.Char:</td>
+          <td class="value"><span class="fchar">-</span> kHz</td>
+        </tr>
+        <tr>
+          <td class="label">Freq.Knee:</td>
+          <td class="value"><span class="fknee">-</span> kHz</td>
+        </tr>
+        <tr>
           <td class="label">Bandwidth:</td>
           <td class="value"><span class="bandwidth">${dispBandwidth.toFixed(1)}</span> kHz</td>
         </tr>
         <tr>
           <td class="label">Duration:</td>
           <td class="value"><span class="duration">${dispDurationMs.toFixed(1)}</span> ms</td>
-        </tr>
-        <tr>  
-          <td class="label">Avg.Slope:</td>
-          <td class="value"><span class="slope">${dispSlope.toFixed(1)}</span> kHz/ms</td>
         </tr>
       </table>
       <div class="tooltip-close-btn">×</div>
@@ -979,15 +967,14 @@ export function initFrequencyHover({
         // 2025: 不在 resize 期間即時更新 Power Spectrum
         // 改為在 mouseup 時才進行完整更新，確保計算值精確
         // 這樣可以避免頻繁計算，提高性能
-
-        // 即時計算峰值，確保與 Power Spectrum 同步
+        // 即時計算詳細參數，確保與 Power Spectrum 同步
         const durationMs = (sel.data.endTime - sel.data.startTime) * 1000;
         const timeExp = getTimeExpansionMode();
         const judgeDurationMs = timeExp ? (durationMs / 10) : durationMs;
         
         if (judgeDurationMs < 100) {
-          calculatePeakFrequency(sel).catch(err => {
-            console.error('Resize 時計算峰值頻率失敗:', err);
+          calculateBatCallParams(sel).catch(err => {
+            console.error('Resize 時計算詳細參數失敗:', err);
           });
         }
       };
@@ -1022,21 +1009,24 @@ const upHandler = () => {
         window.removeEventListener('mousemove', moveHandler);
         window.removeEventListener('mouseup', upHandler);
 
-        // 當 resize 完成後，根據 Time Expansion 模式判斷是否重新計算峰值
+        // 當 resize 完成後，重新計算參數
         const durationMs = (sel.data.endTime - sel.data.startTime) * 1000;
         const timeExp = getTimeExpansionMode();
         const judgeDurationMs = timeExp ? (durationMs / 10) : durationMs;
         
         if (judgeDurationMs < 100) {
-          calculatePeakFrequency(sel).catch(err => {
-            console.error('Resize 後計算峰值頻率失敗:', err);
+          // 清除舊數據
+          if (sel.data.batCall) delete sel.data.batCall;
+          // 重新計算
+          calculateBatCallParams(sel).catch(err => {
+            console.error('Resize 後計算參數失敗:', err);
           });
         } else {
-          // 如果 resize 後超過 100ms，清除 peakFreq
-          if (sel.data.peakFreq !== undefined) {
-            delete sel.data.peakFreq;
-            if (sel.tooltip && sel.tooltip.querySelector('.fpeak')) {
-              sel.tooltip.querySelector('.fpeak').textContent = '-';
+          // 如果 resize 後超過 100ms，清除分析數據
+          if (sel.data.batCall) delete sel.data.batCall;
+          if (sel.data.peakFreq) delete sel.data.peakFreq;
+          // 觸發一次更新以恢復顯示幾何數據
+          updateTooltipValues(sel, 0, 0, 0, 0);
             }
           }
         }
@@ -1047,20 +1037,51 @@ const upHandler = () => {
     });
   }
   
+  // [重點修改] updateTooltipValues 函數
+  // 優先使用 sel.data.batCall 的數據，與 callAnalysisPopup 一致
   function updateTooltipValues(sel, left, top, width, height) {
     const { data, tooltip } = sel;
+    
+    // 預設幾何數據 (Fallback)
     const Flow = data.Flow;
     const Fhigh = data.Fhigh;
     const Bandwidth = Fhigh - Flow;
     const Duration = (data.endTime - data.startTime);
+    
+    // Time Expansion 處理
     const timeExp = getTimeExpansionMode();
     const freqMul = timeExp ? 10 : 1;
     const timeDiv = timeExp ? 10 : 1;
-    const dispFhigh = Fhigh * freqMul;
-    const dispFlow = Flow * freqMul;
-    const dispBandwidth = Bandwidth * freqMul;
-    const dispDurationMs = (Duration * 1000) / timeDiv;
-    const dispSlope = dispDurationMs > 0 ? (dispBandwidth / dispDurationMs) : 0;
+    
+    // 幾何顯示值
+    let dispFhigh = Fhigh * freqMul;
+    let dispFlow = Flow * freqMul;
+    let dispBandwidth = Bandwidth * freqMul;
+    let dispDurationMs = (Duration * 1000) / timeDiv;
+    
+    let dispPeak = '-';
+    let dispChar = '-';
+    let dispKnee = '-';
+
+    // [關鍵] 如果有詳細分析數據 (batCall)，優先使用
+    if (data.batCall) {
+      const call = data.batCall;
+      
+      // 使用分析後的頻率參數（已考慮 Time Expansion）
+      if (call.highFreq_kHz != null) dispFhigh = call.highFreq_kHz * freqMul;
+      if (call.lowFreq_kHz != null) dispFlow = call.lowFreq_kHz * freqMul;
+      if (call.bandwidth_kHz != null) dispBandwidth = call.bandwidth_kHz * freqMul;
+      if (call.duration_ms != null) dispDurationMs = call.duration_ms / timeDiv; // duration_ms 已經是 ms，只需除以 10
+      
+      // 特徵參數
+      if (call.peakFreq_kHz != null) dispPeak = (call.peakFreq_kHz * freqMul).toFixed(2);
+      if (call.characteristicFreq_kHz != null) dispChar = (call.characteristicFreq_kHz * freqMul).toFixed(2);
+      if (call.kneeFreq_kHz != null) dispKnee = (call.kneeFreq_kHz * freqMul).toFixed(2);
+    } 
+    // 相容舊有的 peakFreq 幾何計算 (如果 detectCalls 還沒跑完或失敗)
+    else if (data.peakFreq !== undefined) {
+      dispPeak = (data.peakFreq * freqMul).toFixed(2);
+    }
 
     if (!tooltip) {
       if (sel.durationLabel) sel.durationLabel.textContent = `${dispDurationMs.toFixed(1)} ms`;
@@ -1068,17 +1089,16 @@ const upHandler = () => {
     }
     if (sel.durationLabel) sel.durationLabel.textContent = `${dispDurationMs.toFixed(1)} ms`;
 
-    tooltip.querySelector('.fhigh').textContent = dispFhigh.toFixed(1);
-    tooltip.querySelector('.flow').textContent = dispFlow.toFixed(1);
-    tooltip.querySelector('.bandwidth').textContent = dispBandwidth.toFixed(1);
-    tooltip.querySelector('.duration').textContent = dispDurationMs.toFixed(1);
-    tooltip.querySelector('.slope').textContent = dispSlope.toFixed(1);
+    // 更新 DOM - 增加安全檢查
+    const q = (selector) => tooltip.querySelector(selector);
     
-    // Update F.peak if available
-    if (data.peakFreq !== undefined) {
-      const dispPeakFreq = data.peakFreq * freqMul;
-      tooltip.querySelector('.fpeak').textContent = dispPeakFreq.toFixed(1);
-    }
+    if (q('.fhigh')) q('.fhigh').textContent = dispFhigh.toFixed(2);
+    if (q('.flow')) q('.flow').textContent = dispFlow.toFixed(2);
+    if (q('.fpeak')) q('.fpeak').textContent = dispPeak;
+    if (q('.fchar')) q('.fchar').textContent = dispChar;
+    if (q('.fknee')) q('.fknee').textContent = dispKnee;
+    if (q('.bandwidth')) q('.bandwidth').textContent = dispBandwidth.toFixed(2);
+    if (q('.duration')) q('.duration').textContent = dispDurationMs.toFixed(2);
   }
 
   function updateSelections() {
