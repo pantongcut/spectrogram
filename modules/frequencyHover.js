@@ -718,10 +718,11 @@ async function calculateBatCallParams(sel) {
     `;
     tooltip.addEventListener('mouseenter', () => { isOverTooltip = true; suppressHover = true; hideAll(); });
     tooltip.addEventListener('mouseleave', () => { isOverTooltip = false; suppressHover = false; });
-    tooltip.querySelector('.tooltip-close-btn').addEventListener('click', () => {
-      removeSelection(sel);
-      isOverTooltip = false;
-      suppressHover = false;
+    tooltip.querySelector('.tooltip-close-btn').addEventListener('click', (e) => {
+      e.stopPropagation();            // 防止事件冒泡
+      tooltip.style.display = 'none'; // 僅隱藏 Tooltip，保留 Selection 區域
+      isOverTooltip = false;          // 重置滑鼠狀態
+      suppressHover = false;          // 恢復 Hover 線條顯示
     });
     viewer.appendChild(tooltip);
     enableDrag(tooltip);
