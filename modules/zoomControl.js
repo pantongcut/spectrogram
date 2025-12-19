@@ -23,41 +23,24 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     if (!document.getElementById(styleId)) {
       const style = document.createElement('style');
       style.id = styleId;
-      
-      // 獲取傳入 container 的 ID，在您的 main.js 中這對應 'spectrogram-only'
-      const containerId = container.id || 'spectrogram-only';
-
       style.textContent = `
-        /* 1. 解除外部容器的最小寬度限制 */
-        #${wrapperElement.id || 'viewer-wrapper'},
+        /* 關鍵修復：允許 Canvas 被 CSS 壓扁，不受原始 width 屬性撐大 */
+        #spectrogram-only, 
+        #spectrogram-only canvas,
         #viewer-container {
-           min-width: 0 !important;
-           max-width: none !important;
-        }
-
-        /* 2. 關鍵修復：針對 WaveSurfer 的內部 Wrapper (container 的直接子層) 
-           WaveSurfer 會在這裡寫死 width: xxxx px，導致 Zoom Out 時卡住。
-           我們強制它使用 100% 寬度，這樣它就會聽從父層 (#spectrogram-only) 的縮放。
-        */
-        #${containerId} > div, 
-        #${containerId} > ::shadow > div { /* 預防未來版本使用 ShadowDOM */
-           width: 100% !important;
-           max-width: none !important;
-           min-width: 0 !important;
-        }
-
-        /* 3. 確保 Canvas 跟隨 Wrapper 縮放 */
-        #${containerId}, 
-        #${containerId} canvas {
           min-width: 0 !important;
           max-width: none !important;
+        }
+
+        #spectrogram-only canvas {
           width: 100% !important;
-          /* height 保持由外部控制，不強制設為 100%，避免某些佈局高度塌陷 */
+          height: 100% !important;
+          /* 確保縮放時不會模糊，根據喜好可改為 pixelated */
           image-rendering: auto; 
           transform-origin: 0 0;
         }
 
-        /* 4. 移除 Scroll 行為干擾，確保 JS 控制的 Scroll 同步順暢 */
+        /* 移除 Scroll 行為干擾 */
         #${wrapperElement.id || 'viewer-wrapper'} {
           scroll-behavior: auto !important;
         }
@@ -181,8 +164,9 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     const viewportWidth = wrapperElement.clientWidth;
     const centerInViewport = viewportWidth / 2;
     const currentScrollLeft = wrapperElement.scrollLeft;
-    // 使用 getBoundingClientRect 確保拿到的是當前視覺寬度
-    const currentTotalWidth = container.getBoundingClientRect().width || 1;
+    
+    // 【關鍵修改】使用邏輯寬度，而不是視覺寬度
+    const currentTotalWidth = duration() * zoomLevel;
     
     // Pivot Ratio (0.0 to 1.0)
     const pivotRatio = (currentScrollLeft + centerInViewport) / currentTotalWidth;
@@ -201,8 +185,6 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     const dur = duration();
     const newTotalWidth = dur * newZoomLevel;
     
-    // 這行會觸發 CSS 寬度變化。
-    // 如果沒有上面的 min-width: 0 !important; CSS，Zoom Out 時這裡會無效。
     container.style.width = `${newTotalWidth}px`;
 
     // 4. Update Scroll Position (Sync)
