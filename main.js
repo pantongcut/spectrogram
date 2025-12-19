@@ -39,7 +39,7 @@ import { initDropdown } from './modules/dropdown.js';
 import { showMessageBox } from './modules/messageBox.js';
 import { initAutoIdPanel } from './modules/autoIdPanel.js';
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
-import { initPeakControl, isPeakModeActive } from './modules/peakControl.js';
+import { initPeakControl, isPeakModeActive, getPeakThreshold } from './modules/peakControl.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
 const spectrogramHeight = 800;
@@ -247,8 +247,8 @@ if (timeExpBtn) {
           },
           undefined,  // fftSamples (use default)
           undefined,  // windowFunc (use default)
-          undefined,  // peakMode (use default)
-          undefined,  // peakThreshold (use default)
+          isPeakModeActive(),  // peakMode (use default)
+          getPeakThreshold(),  // peakThreshold (use default)
           handleColorMapChange  // onColorMapChanged callback
         );
       }
@@ -667,8 +667,8 @@ duration = getWavesurfer().getDuration();
   },
   undefined,  // fftSamples (use default)
   undefined,  // windowFunc (use default)
-  undefined,  // peakMode (use default)
-  undefined,  // peakThreshold (use default)
+  isPeakModeActive(),  // peakMode (use default)
+  getPeakThreshold(),  // peakThreshold (use default)
   handleColorMapChange  // onColorMapChanged callback
 );
 }
@@ -1043,8 +1043,8 @@ getWavesurfer().on('decode', () => {
         },
         currentFftSize,
         currentWindowType,
-        undefined,
-        undefined,
+        isPeakModeActive(),
+        getPeakThreshold(),
         handleColorMapChange
       );
   }, 0);
@@ -1280,8 +1280,8 @@ function handleFftSize(size) {
     },
     currentFftSize,
     currentWindowType,
-    undefined,  // peakMode (use default)
-    undefined,  // peakThreshold (use default)
+    isPeakModeActive(),  // peakMode (use default)
+    getPeakThreshold(),  // peakThreshold (use default)
     handleColorMapChange  // onColorMapChanged callback
   );
 }
@@ -1307,8 +1307,8 @@ function handleWindowType(type) {
     },
     currentFftSize,
     currentWindowType,
-    undefined,  // peakMode (use default)
-    undefined,  // peakThreshold (use default)
+    isPeakModeActive(),  // peakMode (use default)
+    getPeakThreshold(),  // peakThreshold (use default)
     handleColorMapChange  // onColorMapChanged callback
   );
 }
@@ -1333,8 +1333,8 @@ restoreImageEnhancement(); // Restore brightness/contrast/gain settings
 },
 undefined,  // fftSamples (use default)
 undefined,  // windowFunc (use default)
-undefined,  // peakMode (use default)
-undefined,  // peakThreshold (use default)
+isPeakModeActive(),  // peakMode (use default)
+getPeakThreshold(),  // peakThreshold (use default)
 handleColorMapChange  // onColorMapChanged callback
 );
 }
@@ -1366,8 +1366,8 @@ restoreImageEnhancement(); // Restore brightness/contrast/gain settings
 },
 undefined,  // fftSamples (use default)
 undefined,  // windowFunc (use default)
-undefined,  // peakMode (use default)
-undefined,  // peakThreshold (use default)
+isPeakModeActive(),  // peakMode (use default)
+getPeakThreshold(),  // peakThreshold (use default)
 handleColorMapChange  // onColorMapChanged callback
 );
 }
@@ -1441,8 +1441,8 @@ clearTrashBtn.addEventListener('click', () => {
             },
             undefined,  // fftSamples (use default)
             undefined,  // windowFunc (use default)
-            undefined,  // peakMode (use default)
-            undefined,  // peakThreshold (use default)
+            isPeakModeActive(),  // peakMode (use default)
+            getPeakThreshold(),  // peakThreshold (use default)
             handleColorMapChange  // onColorMapChanged callback
           );
           showDropOverlay();
@@ -1508,7 +1508,7 @@ initPeakControl({
       currentFftSize,
       currentWindowType,
       isActive,
-      undefined,  // peakThreshold (use default)
+      getPeakThreshold(),  // peakThreshold (use default)
       handleColorMapChange  // onColorMapChanged callback
     );
   },
