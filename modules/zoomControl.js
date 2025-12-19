@@ -216,77 +216,82 @@ function applyZoom() {
   }
 
 // --- Wheel Zoom Logic ---
-function handleWheelZoom(e) {
+  function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
+    // 1. [錨點計算 Step A] 在任何改變發生前，鎖定當前的中心點比例
+    const viewportWidth = wrapperElement.clientWidth;
+    const currentScrollLeft = wrapperElement.scrollLeft;
+    
+    // 使用「邏輯寬度」而非 DOM 寬度，這樣更精確，不受渲染延遲影響
+    // 注意：這裡用當前的 zoomLevel
+    const currentTotalWidth = duration() * zoomLevel; 
+    
+    // 算出中心點在整段音訊中的相對位置 (0.0 ~ 1.0)
+    // 防呆：如果寬度為 0，比例設為 0
+    const centerRatio = currentTotalWidth > 0 
+      ? (currentScrollLeft + (viewportWidth / 2)) / currentTotalWidth
+      : 0;
+
+    // 2. 計算新的 Zoom Level
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
     
-    // 1. 計算 Pivot (維持滑鼠中心點)
-    // 必須使用當前被拉伸過的實際寬度 (getBoundingClientRect)
-    const currentRect = container.getBoundingClientRect();
-    const currentTotalWidth = currentRect.width || 1;
-    
-    const viewportWidth = wrapperElement.clientWidth;
-    const centerInViewport = viewportWidth / 2;
-    const currentScrollLeft = wrapperElement.scrollLeft;
-    const pivotRatio = (currentScrollLeft + centerInViewport) / currentTotalWidth;
-
-    // 2. 計算新的 Zoom Level
     const delta = -e.deltaY;
+    // 微調：縮放係數可以根據手感調整，1.05 代表每次滾動變大 5%
     const scaleFactor = 1 + (delta * 0.001); 
     
     let newZoomLevel = zoomLevel * scaleFactor;
     newZoomLevel = Math.min(Math.max(newZoomLevel, minZoomLevel), maxZoom);
 
-    // 避免微小抖動
+    // 避免無意義的計算
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
+    // 更新狀態
     zoomLevel = newZoomLevel;
     
-    // 3. 計算新的像素寬度
-    const dur = duration();
-    const newTotalWidth = dur * newZoomLevel;
+    // 3. 視覺變形 (Visual Stretch)
+    const newTotalWidth = duration() * zoomLevel;
     const newTotalWidthPx = `${newTotalWidth}px`;
     
-    // 確保 Shadow DOM 樣式存在
+    // 確保 Shadow DOM 樣式存在 (這是上一題的關鍵解法)
     _injectShadowDomStyles();
 
-    // A. 設定 Spectrogram 寬度 (container 是傳入的 spectrogram-only div)
+    // 設定寬度 (Spectrogram & Grid)
     container.style.width = newTotalWidthPx;
-
-    // B. 設定 Freq Grid 寬度 (明確抓取 DOM)
     const freqGrid = document.getElementById('freq-grid');
     if (freqGrid) {
       freqGrid.style.width = newTotalWidthPx;
     }
-    // --- 核心修復結束 ---
 
-    // 4. 同步 Scroll 位置
-    const targetScroll = (newTotalWidth * pivotRatio) - centerInViewport;
-    wrapperElement.scrollLeft = targetScroll;
+    // 4. [錨點計算 Step B] 立即校正 Scroll 位置
+    // 根據新的總寬度，利用之前的比例 (Ratio) 推算出新的中心點，再減去視窗的一半
+    const newScrollLeft = (newTotalWidth * centerRatio) - (viewportWidth / 2);
+    
+    // 這是瀏覽器同步行為，會立刻生效，讓使用者感覺畫面是「從中心放大」
+    wrapperElement.scrollLeft = newScrollLeft;
 
-    // 5. Debounce 重繪
+    // 5. Debounce Redraw (延遲重繪)
     if (wheelTimeout) {
       clearTimeout(wheelTimeout);
     }
 
     wheelTimeout = setTimeout(() => {
-      // 呼叫 wavesurfer zoom (這會重繪 spectrogram)
+      // 呼叫 wavesurfer zoom (高解析度重繪)
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // 再次校正 Scroll (避免重繪後的微小位移)
-        const finalWidth = duration() * zoomLevel;
-        const finalScroll = (finalWidth * pivotRatio) - centerInViewport;
+        // [雙重保險] 重繪後，DOM 可能會有微小變動，再次校正位置以防跳動
+        // 這裡必須再次計算，因為 ws.zoom() 可能會導致實際寬度與計算有些微 pixel 誤差
+        const finalTotalWidth = duration() * zoomLevel;
+        const finalScroll = (finalTotalWidth * centerRatio) - (viewportWidth / 2);
         wrapperElement.scrollLeft = finalScroll;
       }
       
-      // 呼叫外部 callback (這會重繪 freq-grid 的 canvas 解析度)
       applyZoomCallback();
       
-      // 保險起見：重繪後再次強制確保 style.width 正確
+      // 再次確保樣式正確
       container.style.width = `${duration() * zoomLevel}px`;
       if (freqGrid) {
          freqGrid.style.width = `${duration() * zoomLevel}px`;
@@ -294,7 +299,7 @@ function handleWheelZoom(e) {
 
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
-    }, 500); 
+    }, 500); // 500ms 後重繪
   }
 
   if (wrapperElement) {
