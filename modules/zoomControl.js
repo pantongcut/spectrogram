@@ -17,7 +17,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   let minZoomLevel = 250;
   let wheelTimeout = null;
 
-  // [CSS Fix] 強制瀏覽器允許容器小於 Canvas 的原始寬度
+// [CSS Fix] 強制瀏覽器允許容器小於 Canvas 的原始寬度
   function _injectCssForSmoothing() {
     const styleId = 'spectrogram-smooth-zoom-style';
     if (!document.getElementById(styleId)) {
@@ -27,12 +27,14 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
         /* 關鍵修復：允許 Canvas 被 CSS 壓扁，不受原始 width 屬性撐大 */
         #spectrogram-only, 
         #spectrogram-only canvas,
-        #viewer-container {
+        #viewer-container,
+        #freq-grid {   /* <--- 新增這裡：包含 Grid Canvas */
           min-width: 0 !important;
           max-width: none !important;
         }
 
-        #spectrogram-only canvas {
+        #spectrogram-only canvas,
+        #freq-grid {   /* <--- 新增這裡：強制 Grid 也跟隨容器寬度縮放 */
           width: 100% !important;
           height: 100% !important;
           /* 確保縮放時不會模糊，根據喜好可改為 pixelated */
@@ -157,11 +159,6 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
-    if (!container.style.width || container.style.width === '100%') {
-    const rect = container.getBoundingClientRect();
-    container.style.width = `${rect.width}px`;
-    }
-
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
     
@@ -169,9 +166,8 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     const viewportWidth = wrapperElement.clientWidth;
     const centerInViewport = viewportWidth / 2;
     const currentScrollLeft = wrapperElement.scrollLeft;
-    
-    // 【關鍵修改】使用邏輯寬度，而不是視覺寬度
-    const currentTotalWidth = duration() * zoomLevel;
+    // 使用 getBoundingClientRect 確保拿到的是當前視覺寬度
+    const currentTotalWidth = container.getBoundingClientRect().width || 1;
     
     // Pivot Ratio (0.0 to 1.0)
     const pivotRatio = (currentScrollLeft + centerInViewport) / currentTotalWidth;
@@ -190,6 +186,8 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     const dur = duration();
     const newTotalWidth = dur * newZoomLevel;
     
+    // 這行會觸發 CSS 寬度變化。
+    // 如果沒有上面的 min-width: 0 !important; CSS，Zoom Out 時這裡會無效。
     container.style.width = `${newTotalWidth}px`;
 
     // 4. Update Scroll Position (Sync)
