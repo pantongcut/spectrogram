@@ -215,21 +215,18 @@ function applyZoom() {
     applyZoom();
   }
 
-// --- Wheel Zoom Logic (Time-Based Anchoring) ---
+// --- Wheel Zoom Logic (Double-Commit Fix) ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
-    // 1. [錨點計算] 找出當前視窗中心點是「第幾秒」
+    // 1. [時間錨點計算] (這部分你的邏輯已經是對的，保持不變)
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
     
-    // 計算視窗中心點的像素位置 (相對於整個內容的左側)
+    // 計算當前視窗中心的「時間點 (秒)」
+    // 這裡必須用「目前的」zoomLevel，不能用 scrollWidth，因為 scrollWidth 可能因 clamping 而不準
     const centerPx = currentScrollLeft + (viewportWidth / 2);
-    
-    // 將像素轉換為時間 (秒)
-    // 公式: Time = Pixel / (PixelsPerSecond)
-    // 這裡使用舊的 zoomLevel
     const centerTime = centerPx / zoomLevel;
 
     // 2. 計算新的 Zoom Level
@@ -242,55 +239,65 @@ function applyZoom() {
     let newZoomLevel = zoomLevel * scaleFactor;
     newZoomLevel = Math.min(Math.max(newZoomLevel, minZoomLevel), maxZoom);
 
-    // 避免微小抖動
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
     zoomLevel = newZoomLevel;
     
-    // 3. 視覺變形 & 強制更新
+    // 3. 設定寬度
     const newTotalWidth = duration() * zoomLevel;
     const newTotalWidthPx = `${newTotalWidth}px`;
     
     _injectShadowDomStyles();
 
-    // 暫時關閉平滑滾動 (關鍵!)
+    // 暫時關閉平滑滾動，確保數值直接生效
     const originalScrollBehavior = wrapperElement.style.scrollBehavior;
     wrapperElement.style.scrollBehavior = 'auto';
 
-    // 設定寬度
     container.style.width = newTotalWidthPx;
     const freqGrid = document.getElementById('freq-grid');
     if (freqGrid) freqGrid.style.width = newTotalWidthPx;
 
-    // 🔥 強制 Reflow: 讓瀏覽器承認新的寬度
-    // 這是解決「觀察 1」的關鍵，必須讓瀏覽器知道現在可以滾得更遠了
-    const _forceReflow = wrapperElement.scrollWidth; 
+    // 🔥 強制 Reflow (雖然對 Shadow DOM 未必 100% 有效，但必須做)
+    const _force = container.offsetHeight; 
 
-    // 4. [錨點定位] 將「第幾秒」轉回新的像素位置
-    // 公式: NewPixel = Time * NewZoomLevel
+    // 4. [錨點定位 - 雙重提交]
+    
+    // 計算目標 ScrollLeft
     const newCenterPx = centerTime * newZoomLevel;
-    
-    // 推算出新的 ScrollLeft (中心點像素 - 視窗一半)
-    let newScrollLeft = newCenterPx - (viewportWidth / 2);
+    let targetScrollLeft = newCenterPx - (viewportWidth / 2);
+    // 簡單的防呆邊界檢查
+    targetScrollLeft = Math.max(0, targetScrollLeft);
 
-    // 🔥 邊界檢查 (Clamping Correction)
-    // 雖然瀏覽器會自動做，但我們自己算更保險，避免出現負數或溢出
-    const maxScroll = newTotalWidth - viewportWidth;
-    newScrollLeft = Math.max(0, Math.min(newScrollLeft, maxScroll));
-    
-    wrapperElement.scrollLeft = newScrollLeft;
+    // --- 第一次提交 (同步) ---
+    // 嘗試立即設定。如果瀏覽器夠快，這會直接生效，無閃爍。
+    wrapperElement.scrollLeft = targetScrollLeft;
 
-    // 5. Debounce Redraw
+    // --- 第二次提交 (非同步 - 關鍵修復) ---
+    // 使用 requestAnimationFrame 等待下一幀佈局完成
+    // 這是專門用來對抗 Shadow DOM 延遲和 Scroll Clamping 的大絕招
+    requestAnimationFrame(() => {
+      // 再次確認寬度已生效
+      if (wrapperElement.scrollWidth < newTotalWidth) {
+         // 極端情況：如果 RAF 時寬度還沒更新，再次強制設定寬度
+         container.style.width = newTotalWidthPx;
+      }
+      
+      // 再次強制設定 ScrollLeft
+      // 如果第一次被 Clamp 住，這一次會把它救回來
+      wrapperElement.scrollLeft = targetScrollLeft;
+      
+      // 還原 scroll behavior
+      wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
+    });
+
+    // 5. Debounce Redraw (延遲重繪)
     if (wheelTimeout) clearTimeout(wheelTimeout);
 
     wheelTimeout = setTimeout(() => {
-      wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
-
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // 重繪後的二次精確校正
-        // 因為 ws.zoom 可能會導致 duration 精確度變化，我們再算一次
+        // 重繪後的三次校正 (確保 Wavesurfer 內部渲染後的精確度)
         const finalCenterPx = centerTime * zoomLevel;
         const finalScroll = finalCenterPx - (viewportWidth / 2);
         wrapperElement.scrollLeft = finalScroll;
