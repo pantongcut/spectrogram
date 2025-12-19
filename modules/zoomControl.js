@@ -23,24 +23,41 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     if (!document.getElementById(styleId)) {
       const style = document.createElement('style');
       style.id = styleId;
+      
+      // 獲取傳入 container 的 ID，在您的 main.js 中這對應 'spectrogram-only'
+      const containerId = container.id || 'spectrogram-only';
+
       style.textContent = `
-        /* 關鍵修復：允許 Canvas 被 CSS 壓扁，不受原始 width 屬性撐大 */
-        #spectrogram-only, 
-        #spectrogram-only canvas,
+        /* 1. 解除外部容器的最小寬度限制 */
+        #${wrapperElement.id || 'viewer-wrapper'},
         #viewer-container {
-          min-width: 0 !important;
-          max-width: none !important;
+           min-width: 0 !important;
+           max-width: none !important;
         }
 
-        #spectrogram-only canvas {
+        /* 2. 關鍵修復：針對 WaveSurfer 的內部 Wrapper (container 的直接子層) 
+           WaveSurfer 會在這裡寫死 width: xxxx px，導致 Zoom Out 時卡住。
+           我們強制它使用 100% 寬度，這樣它就會聽從父層 (#spectrogram-only) 的縮放。
+        */
+        #${containerId} > div, 
+        #${containerId} > ::shadow > div { /* 預防未來版本使用 ShadowDOM */
+           width: 100% !important;
+           max-width: none !important;
+           min-width: 0 !important;
+        }
+
+        /* 3. 確保 Canvas 跟隨 Wrapper 縮放 */
+        #${containerId}, 
+        #${containerId} canvas {
+          min-width: 0 !important;
+          max-width: none !important;
           width: 100% !important;
-          height: 100% !important;
-          /* 確保縮放時不會模糊，根據喜好可改為 pixelated */
+          /* height 保持由外部控制，不強制設為 100%，避免某些佈局高度塌陷 */
           image-rendering: auto; 
           transform-origin: 0 0;
         }
 
-        /* 移除 Scroll 行為干擾 */
+        /* 4. 移除 Scroll 行為干擾，確保 JS 控制的 Scroll 同步順暢 */
         #${wrapperElement.id || 'viewer-wrapper'} {
           scroll-behavior: auto !important;
         }
