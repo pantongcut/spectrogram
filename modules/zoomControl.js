@@ -206,7 +206,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
       clearTimeout(wheelTimeout);
     }
 
-    // Wait until scrolling stops (e.g., 100ms) before redrawing the high-res spectrogram
+    // Wait until scrolling stops (e.g., 500ms) before redrawing the high-res spectrogram
     wheelTimeout = setTimeout(() => {
       
       if (ws) {
@@ -225,7 +225,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
       
-    }, 100); 
+    }, 500); 
   }
 
   if (wrapperElement) {
