@@ -59,6 +59,45 @@ function _injectCssForSmoothing() {
   }
   _injectCssForSmoothing();
 
+// [Shadow DOM Fix] 專門處理 Wavesurfer 內部的 Shadow DOM 樣式
+  function _injectShadowDomStyles() {
+    // 1. 找到 Shadow Host (通常是 spectrogram-only 的直接子元素 div)
+    const host = container.firstElementChild || container.querySelector('div');
+    
+    if (host && host.shadowRoot) {
+      // 檢查是否已經注入過樣式，避免重複
+      if (host.shadowRoot.getElementById('force-shrink-style')) return;
+
+      const style = document.createElement('style');
+      style.id = 'force-shrink-style';
+      style.textContent = `
+        /* 強制 Shadow DOM 內部的 wrapper 跟隨外部寬度 */
+        .wrapper {
+          width: 100% !important; /* 覆寫 inline style */
+          min-width: 0 !important;
+          max-width: none !important;
+        }
+        
+        .scroll {
+          width: 100% !important;
+        }
+
+        /* 確保內部的 Canvas 也跟隨拉伸 */
+        canvas {
+          width: 100% !important;
+          height: 100% !important;
+        }
+      `;
+      // 將樣式表「植入」到 Shadow DOM 內部
+      host.shadowRoot.appendChild(style);
+      console.log('Shadow DOM styles injected successfully.');
+    } else {
+      // 如果 Shadow DOM 還沒生成 (例如檔案剛加載)，可能需要稍後重試
+      // 這裡可以設個小 timeout 或在 zoom 時再次檢查
+      setTimeout(_injectShadowDomStyles, 100);
+    }
+  }
+
   function computeMaxZoomLevel() {
     const dur = duration();
     if (dur > 15000) return 1500;
@@ -98,6 +137,9 @@ function applyZoom() {
       ws.zoom(zoomLevel);
     }
     
+    // 確保 Shadow DOM 樣式存在 (以防 Wavesurfer 重建了 DOM)
+    _injectShadowDomStyles();
+
     const width = duration() * zoomLevel;
     const widthPx = `${width}px`;
 
@@ -208,9 +250,9 @@ function handleWheelZoom(e) {
     const newTotalWidth = dur * newZoomLevel;
     const newTotalWidthPx = `${newTotalWidth}px`;
     
-    // --- 核心修復開始 ---
-    // 直接控制兩個元素，不依賴父容器佈局，這是最穩的
-    
+    // 確保 Shadow DOM 樣式存在
+    _injectShadowDomStyles();
+
     // A. 設定 Spectrogram 寬度 (container 是傳入的 spectrogram-only div)
     container.style.width = newTotalWidthPx;
 
