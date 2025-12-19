@@ -215,24 +215,21 @@ function applyZoom() {
     applyZoom();
   }
 
-// --- Wheel Zoom Logic (Ratio Locking / Percentage Based) ---
+// --- Wheel Zoom Logic (Smart Wait-For-Ready) ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
     // ============================================================
-    // 1. [鎖定比例] 計算當前視窗中心點佔總長度的百分比 (0.0 ~ 1.0)
+    // 1. [錨點計算] 使用「時間 (秒)」作為絕對錨點
     // ============================================================
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
-    const currentScrollWidth = wrapperElement.scrollWidth;
-
-    // 防止除以 0
-    let centerRatio = 0;
-    if (currentScrollWidth > 0) {
-      // 公式：(左側捲動量 + 視窗一半) / 總滾動寬度
-      centerRatio = (currentScrollLeft + (viewportWidth / 2)) / currentScrollWidth;
-    }
+    
+    // 計算視窗中心點代表的是「第幾秒」
+    // 公式：(左側卷軸 + 視窗一半) / 舊的ZoomLevel
+    const centerPx = currentScrollLeft + (viewportWidth / 2);
+    const centerTime = centerPx / zoomLevel;
 
     // ============================================================
     // 2. 計算新的 Zoom Level
@@ -249,17 +246,19 @@ function applyZoom() {
     // 避免無意義的計算
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
+    // 更新全域變數
     zoomLevel = newZoomLevel;
     
     // ============================================================
-    // 3. 應用寬度變更
+    // 3. 設定新的寬度 (鋪路)
     // ============================================================
     const newTotalWidth = duration() * zoomLevel;
     const newTotalWidthPx = `${newTotalWidth}px`;
     
+    // 確保 Shadow DOM 樣式存在
     _injectShadowDomStyles();
 
-    // 暫時關閉平滑滾動，確保瞬移
+    // 暫時關閉平滑滾動
     const originalScrollBehavior = wrapperElement.style.scrollBehavior;
     wrapperElement.style.scrollBehavior = 'auto';
 
@@ -269,41 +268,53 @@ function applyZoom() {
     if (freqGrid) freqGrid.style.width = newTotalWidthPx;
 
     // ============================================================
-    // 4. [暴力執行] 強制維持比例 (The Enforcer)
+    // 4. [智能捲動] 等待跑道建成後再移動 (The Smart Waiter)
     // ============================================================
-    // 我們不只設定一次，而是連續設定幾次，對抗瀏覽器的 Clamping 和 Shadow DOM 延遲
     
-    let attemptCount = 0;
-    const maxAttempts = 5; // 連續強制執行 5 次 (約 80ms)
+    // 計算我們的目標位置 (像素)
+    const targetCenterPx = centerTime * newZoomLevel;
+    let targetScrollLeft = targetCenterPx - (viewportWidth / 2);
+    
+    // 邊界防呆
+    targetScrollLeft = Math.max(0, targetScrollLeft);
 
-    function enforcePosition() {
-        // 重新讀取當前的實際寬度 (因為它正在變大/變小)
-        const liveScrollWidth = wrapperElement.scrollWidth;
+    // 定義一個檢查函數
+    let attempts = 0;
+    function applyScrollWhenReady() {
+        // 取得當前瀏覽器「承認」的滾動寬度
+        const currentScrollWidth = wrapperElement.scrollWidth;
+
+        // 判斷條件：
+        // 如果現在的滾動寬度已經足夠容納我們的目標位置，
+        // 或者已經接近我們設定的新寬度 (容許少許誤差)，就執行捲動
+        // 注意：newTotalWidth 是邏輯寬度，currentScrollWidth 是 DOM 寬度
         
-        // 根據剛才鎖定的 ratio，算出現在該去哪裡
-        // 目標中心點像素 = 總寬度 * 比例
-        const targetCenterPx = liveScrollWidth * centerRatio;
-        
-        // 目標 ScrollLeft = 中心點 - 視窗一半
-        const targetScrollLeft = targetCenterPx - (viewportWidth / 2);
+        const isReady = currentScrollWidth >= newTotalWidth - 10 || currentScrollWidth > targetScrollLeft + viewportWidth;
 
-        // 強制設定
-        wrapperElement.scrollLeft = targetScrollLeft;
-
-        attemptCount++;
-        if (attemptCount < maxAttempts) {
-            requestAnimationFrame(enforcePosition);
-        } else {
-            // 結束後恢復 scroll behavior
+        if (isReady) {
+            // 時機成熟，執行捲動！
+            wrapperElement.scrollLeft = targetScrollLeft;
+            
+            // 恢復平滑滾動設定
             wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
+        } else {
+            // 還沒準備好 (DOM 還沒重繪)，下一幀再試
+            attempts++;
+            if (attempts < 10) { // 最多等 10 幀 (約 160ms)
+                requestAnimationFrame(applyScrollWhenReady);
+            } else {
+                // 超時強制執行 (死馬當活馬醫)
+                wrapperElement.scrollLeft = targetScrollLeft;
+                wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
+            }
         }
     }
 
-    // 啟動強制迴圈
-    enforcePosition();
+    // 啟動檢查
+    applyScrollWhenReady();
 
     // ============================================================
-    // 5. Debounce Redraw (延遲重繪)
+    // 5. Debounce Redraw (延遲高畫質重繪)
     // ============================================================
     if (wheelTimeout) clearTimeout(wheelTimeout);
 
@@ -311,16 +322,13 @@ function applyZoom() {
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // 重繪完成後，再做最後一次精確校正
-        // 這是為了防止 wavesurfer 重繪後寬度有微小變化
-        const finalScrollWidth = wrapperElement.scrollWidth;
-        const finalTargetPx = finalScrollWidth * centerRatio;
-        wrapperElement.scrollLeft = finalTargetPx - (viewportWidth / 2);
+        // 重繪後做最後一次精確校正
+        const finalCenterPx = centerTime * zoomLevel;
+        wrapperElement.scrollLeft = finalCenterPx - (viewportWidth / 2);
       }
       
       applyZoomCallback();
       
-      // 保險：維持寬度一致
       const finalPx = `${duration() * zoomLevel}px`;
       container.style.width = finalPx;
       if (freqGrid) freqGrid.style.width = finalPx;
