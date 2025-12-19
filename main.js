@@ -18,7 +18,6 @@ getEffectiveColorMap,
 initScrollSync,
 setPeakMode,
 setPeakThreshold,
-getPeakThreshold,
 setSmoothMode,
 } from './modules/wsManager.js';
 
