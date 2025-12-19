@@ -1263,17 +1263,7 @@ async getFrequencies(t) {
 
         this.peakBandArrayPerChannel = [];
         
-            // [NEW] 1. 全局噪音基準 (-24dB)
-            const globalMaxLinear = this._wasmEngine.get_global_max();
-            const noiseFloorLinear = globalMaxLinear * 0.063; 
-
-            // [NEW] 2. 獲取使用者 Slider 值 (0.0 - 1.0)
             let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-            
-            // [關鍵修改] 3. 對 Slider 進行重映射 (Remapping)
-            // 將 0.0-1.0 的輸入映射到 0.60-0.99 的有效區間
-            // 這樣即使 slider 在 0，我們也過濾掉 60% 的低能量裙邊，避免 "滿圖紅點"
-            // 使用平方曲線 (Math.pow) 讓低數值區域的調節更細膩
             const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
             for (let e = 0; e < i; e++) {
@@ -1287,6 +1277,9 @@ async getFrequencies(t) {
                     this.gainDB,
                     this.rangeDB
                 );
+
+                const globalMaxLinear = this._wasmEngine.get_global_max();
+                const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
 
                 // 獲取線性幅度用於全局噪音過濾
                 const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
