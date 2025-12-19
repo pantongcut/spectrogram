@@ -25,23 +25,33 @@ function _injectCssForSmoothing() {
       const style = document.createElement('style');
       style.id = styleId;
       style.textContent = `
-        /* 關鍵修復：
-           只針對 spectrogram 和 freq-grid 解除最小寬度限制。
-           這允許它們在 JS 設定 style.width 變小時，能夠視覺上縮小。
-           不碰 #viewer-wrapper，保護 Scrollbar 樣式。
-        */
+        /* 1. 針對 Container 本身：解除限制 */
         #spectrogram-only,
         #freq-grid {
           min-width: 0 !important;
           max-width: none !important;
-          /* 確保 Canvas 不會被當作文字行內元素，避免莫名其妙的間距 */
-          display: block; 
+          display: block;
         }
 
-        /* 讓內部的 Canvas 永遠填滿它的容器 (#spectrogram-only div) */
-        #spectrogram-only canvas {
+        /* 2. 【關鍵修正】針對 Spectrogram 內部的「所有」層級：
+           Wavesurfer 會生成 <wave> 或 <div> wrapper，
+           我們必須強制它們全部 width: 100%，無視 inline style */
+        #spectrogram-only *, 
+        #spectrogram-only > div, 
+        #spectrogram-only > wave { 
+          width: 100% !important;
+          min-width: 0 !important;
+          max-width: none !important;
+          box-sizing: border-box !important; /* 避免 padding 撐大 */
+        }
+
+        /* 3. 針對 Canvas：確保拉伸且不模糊 */
+        #spectrogram-only canvas,
+        #freq-grid {
           width: 100% !important;
           height: 100% !important;
+          image-rendering: auto; 
+          transform-origin: 0 0;
         }
       `;
       document.head.appendChild(style);
