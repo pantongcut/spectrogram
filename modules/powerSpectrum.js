@@ -109,6 +109,10 @@ export function findPeakFrequencyFromSpectrum(spectrum, sampleRate, fftSize, flo
  * 繪製 Power Spectrum 圖表 (SVG 版本 - 2025 優化)
  * 使用 SVG 而非 Canvas，支持動態更新和 CSS 樣式
  */
+/**
+ * 繪製 Power Spectrum 圖表 (SVG 版本 - 2025 優化 - Theme Adapted)
+ * 使用 SVG 而非 Canvas，支持動態更新和 CSS 樣式
+ */
 export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKHz, fftSize, peakFreq) {
   if (!svg || !spectrum) return;
 
@@ -154,21 +158,16 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
   chartGroup.setAttribute('class', 'spectrum-chart');
 
   // ============================================================
-  // 繪製背景
+  // 繪製背景 (移除實體 rect，使用 CSS 控制容器背景)
   // ============================================================
-  const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-  background.setAttribute('width', width);
-  background.setAttribute('height', height);
-  background.setAttribute('fill', '#ffffff');
-  chartGroup.appendChild(background);
+  // 舊代碼: const background = ... (已移除，讓 CSS var(--bg-tertiary) 生效)
 
   // ============================================================
-  // 繪製網格線
+  // 繪製網格線 (顏色由 CSS .spectrum-grid 控制)
   // ============================================================
   const gridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   gridGroup.setAttribute('class', 'spectrum-grid');
-  gridGroup.setAttribute('stroke', '#e0e0e0');
-  gridGroup.setAttribute('stroke-width', '0.5');
+  // 移除硬編碼 stroke, stroke-width 保留或移至 CSS
 
   const freqSteps = 5;
   for (let i = 1; i < freqSteps; i++) {
@@ -195,12 +194,11 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
   chartGroup.appendChild(gridGroup);
 
   // ============================================================
-  // 繪製坐標軸
+  // 繪製坐標軸 (顏色由 CSS .spectrum-axes 控制)
   // ============================================================
   const axisGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   axisGroup.setAttribute('class', 'spectrum-axes');
-  axisGroup.setAttribute('stroke', '#000000');
-  axisGroup.setAttribute('stroke-width', '2');
+  // 移除硬編碼 stroke
 
   // Y 軸
   const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -221,26 +219,24 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
   chartGroup.appendChild(axisGroup);
 
   // ============================================================
-  // 繪製坐標軸刻度和標籤
+  // 繪製坐標軸刻度和標籤 (顏色由 CSS .spectrum-labels 控制)
   // ============================================================
   const labelsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   labelsGroup.setAttribute('class', 'spectrum-labels');
-  labelsGroup.setAttribute('fill', '#000000');
-  labelsGroup.setAttribute('font-family', 'Arial');
-  labelsGroup.setAttribute('font-size', '12');
+  // 移除硬編碼 fill
 
   // X 軸標籤（頻率）
   for (let i = 0; i <= freqSteps; i++) {
     const freq = flowKHz + (fhighKHz - flowKHz) * (i / freqSteps);
     const x = leftPadding + (plotWidth * i) / freqSteps;
     
-    // 刻度線
+    // 刻度線 (使用 CSS 變量)
     const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
     tick.setAttribute('x1', x);
     tick.setAttribute('y1', topPadding + plotHeight);
     tick.setAttribute('x2', x);
     tick.setAttribute('y2', topPadding + plotHeight + 5);
-    tick.setAttribute('stroke', '#000000');
+    tick.setAttribute('stroke', 'var(--text-primary)'); // 使用變量
     tick.setAttribute('stroke-width', '1');
     labelsGroup.appendChild(tick);
 
@@ -265,7 +261,7 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
     tick.setAttribute('y1', y);
     tick.setAttribute('x2', leftPadding);
     tick.setAttribute('y2', y);
-    tick.setAttribute('stroke', '#000000');
+    tick.setAttribute('stroke', 'var(--text-primary)'); // 使用變量
     tick.setAttribute('stroke-width', '1');
     labelsGroup.appendChild(tick);
 
@@ -306,7 +302,7 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
   // 繪製 Power Spectrum 曲線
   // ============================================================
   
-  // 計算 peakFreq 對應的 dB 值
+  // 計算 peakFreq 對應的 dB 值 (保持原有邏輯)
   let peakDbValue = null;
   if (peakFreq !== null && peakFreq >= flowKHz && peakFreq <= fhighKHz) {
     const peakFreqHz = peakFreq * 1000;
@@ -331,7 +327,7 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
     pointsToRender.push({ bin: i, freqHz, db, isPeakPoint: false });
   }
 
-  // 如果 peakFreq 不在 bin 邊界上，插入一個該位置的點
+  // 插入峰值點
   if (peakDbValue !== null && peakFreq !== null) {
     const peakFreqHz = peakFreq * 1000;
     let insertIndex = 0;
@@ -374,12 +370,11 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
     }
   }
 
-  // 繪製曲線
+  // 繪製曲線 (顏色由 CSS .spectrum-curve 控制)
   const curve = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   curve.setAttribute('d', pathData);
   curve.setAttribute('fill', 'none');
-  curve.setAttribute('stroke', '#0066cc');
-  curve.setAttribute('stroke-width', '1.5');
+  // 移除硬編碼 stroke, stroke-width (已在 CSS .spectrum-curve 中定義)
   curve.setAttribute('stroke-linecap', 'round');
   curve.setAttribute('stroke-linejoin', 'round');
   curve.setAttribute('class', 'spectrum-curve');
@@ -405,7 +400,7 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
   chartGroup.appendChild(curveGroup);
 
   // ============================================================
-  // 添加交互層 - 透明的點用於滑鼠懸停交互
+  // 添加交互層
   // ============================================================
   const interactiveGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
   interactiveGroup.setAttribute('class', 'spectrum-interactive');
@@ -423,7 +418,6 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
     const x = leftPadding + freqPercent * plotWidth;
     const y = topPadding + plotHeight - normalizedDb * plotHeight;
 
-    // 創建透明圓點用於交互（半徑 6px）
     const interactivePoint = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     interactivePoint.setAttribute('cx', x);
     interactivePoint.setAttribute('cy', y);
@@ -432,7 +426,6 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
     interactivePoint.setAttribute('stroke', 'none');
     interactivePoint.setAttribute('class', 'spectrum-interactive-point');
     
-    // 儲存點的資訊
     const pointData = {
       freqHz: point.freqHz,
       freqKHz: point.freqHz / 1000,
@@ -472,30 +465,23 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
   // 設置基於 X 座標的自動檢測交互 (支持鎖定功能)
   // ============================================================
   
-  // 狀態管理：鎖定點的資訊
   let lockedPoint = null;
   let isLocked = false;
   
-  // 添加整個 SVG 容器的滑鼠移動監聽
   svg.addEventListener('mousemove', (event) => {
-    // 如果已鎖定，跳過自動檢測交互
     if (isLocked) return;
-    // 獲取滑鼠在 SVG 中的位置
     const rect = svg.getBoundingClientRect();
     const svgX = event.clientX - rect.left;
     const svgY = event.clientY - rect.top;
     
-    // 檢查滑鼠是否在圖表區域內
     if (svgX < leftPadding || svgX > leftPadding + plotWidth || 
         svgY < topPadding || svgY > topPadding + plotHeight) {
-      // 滑鼠不在圖表區域，清空
       while (helperGroup.firstChild) {
         helperGroup.removeChild(helperGroup.firstChild);
       }
       return;
     }
     
-    // 根據 X 座標找到最接近的交互點
     let closestPoint = null;
     let minDistance = Infinity;
     
@@ -507,55 +493,55 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
       }
     }
     
-    // 如果找到了接近的點，繪製輔助線和提示框
-    if (closestPoint && minDistance < 15) {  // 檢測範圍 15px
-      // 清空舊的輔助線
+    if (closestPoint && minDistance < 15) {
       while (helperGroup.firstChild) {
         helperGroup.removeChild(helperGroup.firstChild);
       }
       
-      // 繪製垂直線（連接到 X 軸）
+      // 繪製垂直線
       const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       vLine.setAttribute('x1', closestPoint.x);
       vLine.setAttribute('y1', closestPoint.y);
       vLine.setAttribute('x2', closestPoint.x);
       vLine.setAttribute('y2', topPadding + plotHeight);
-      vLine.setAttribute('stroke', '#999999');
+      vLine.setAttribute('stroke', 'var(--text-secondary)');
       vLine.setAttribute('stroke-width', '1');
       vLine.setAttribute('stroke-dasharray', '3,3');
       vLine.setAttribute('class', 'spectrum-guide-line');
       helperGroup.appendChild(vLine);
       
-      // 繪製水平線（連接到 Y 軸）
+      // 繪製水平線
       const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
       hLine.setAttribute('x1', leftPadding);
       hLine.setAttribute('y1', closestPoint.y);
       hLine.setAttribute('x2', closestPoint.x);
       hLine.setAttribute('y2', closestPoint.y);
-      hLine.setAttribute('stroke', '#999999');
+      hLine.setAttribute('stroke', 'var(--text-secondary)');
       hLine.setAttribute('stroke-width', '1');
       hLine.setAttribute('stroke-dasharray', '3,3');
       hLine.setAttribute('class', 'spectrum-guide-line');
       helperGroup.appendChild(hLine);
       
-      // 繪製交互點圓形（透明圓點）
+      // 繪製交互點圓形 (Unlocked)
       const interactiveCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       interactiveCircle.setAttribute('cx', closestPoint.x);
       interactiveCircle.setAttribute('cy', closestPoint.y);
       interactiveCircle.setAttribute('r', '4');
-      // 根據鎖定狀態設置顏色
       if (isLocked) {
+        // Locked style (Red)
         interactiveCircle.setAttribute('fill', 'rgba(255, 0, 0, 0.3)');
         interactiveCircle.setAttribute('stroke', '#ff0000');
       } else {
-        interactiveCircle.setAttribute('fill', 'rgba(0, 102, 204, 0.3)');
-        interactiveCircle.setAttribute('stroke', '#0066cc');
+        // Unlocked style (Theme Color)
+        interactiveCircle.setAttribute('fill', 'var(--paravalue-color)');
+        interactiveCircle.setAttribute('fill-opacity', '0.3');
+        interactiveCircle.setAttribute('stroke', 'var(--paravalue-color)');
       }
       interactiveCircle.setAttribute('stroke-width', '1');
       interactiveCircle.setAttribute('class', 'spectrum-highlight-point');
       helperGroup.appendChild(interactiveCircle);
       
-      // 創建提示框文字（頻率）- 放在懸停點正上方 15px
+      // 創建提示框文字（頻率）
       const tooltipFreq = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       tooltipFreq.setAttribute('x', closestPoint.x);
       tooltipFreq.setAttribute('y', closestPoint.y - 25);
@@ -564,7 +550,7 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
       tooltipFreq.setAttribute('font-family', "'Noto Sans HK'", 'sans-serif');
       tooltipFreq.setAttribute('font-size', '12');
       tooltipFreq.setAttribute('font-weight', 'bold');
-      tooltipFreq.setAttribute('fill', '#000000');
+      // 移除硬編碼 fill, 使用 class .spectrum-tooltip-text-freq (CSS 定義)
       tooltipFreq.setAttribute('class', 'spectrum-tooltip-text-freq');
       tooltipFreq.textContent = closestPoint.freqKHz.toFixed(2) + ' kHz';
       helperGroup.appendChild(tooltipFreq);
@@ -578,21 +564,19 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
       tooltipDb.setAttribute('font-family', "'Noto Sans HK'", 'sans-serif');
       tooltipDb.setAttribute('font-size', '12');
       tooltipDb.setAttribute('font-weight', 'bold');
-      tooltipDb.setAttribute('fill', '#0066cc');
+      // 移除硬編碼 fill
+      tooltipDb.setAttribute('fill', 'var(--paravalue-color)'); 
       tooltipDb.setAttribute('class', 'spectrum-tooltip-text-db');
       tooltipDb.textContent = closestPoint.db.toFixed(1) + ' dB';
       helperGroup.appendChild(tooltipDb);
     } else {
-      // 沒有接近的點，清空顯示
       while (helperGroup.firstChild) {
         helperGroup.removeChild(helperGroup.firstChild);
       }
     }
   });
   
-  // 滑鼠離開 SVG 時清空
   svg.addEventListener('mouseleave', () => {
-    // 如果未鎖定，則清空顯示；如果已鎖定，保持顯示
     if (!isLocked) {
       while (helperGroup.firstChild) {
         helperGroup.removeChild(helperGroup.firstChild);
@@ -608,10 +592,8 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
     const svgX = event.clientX - rect.left;
     const svgY = event.clientY - rect.top;
     
-    // 檢查滑鼠是否在圖表區域內
     if (svgX < leftPadding || svgX > leftPadding + plotWidth || 
         svgY < topPadding || svgY > topPadding + plotHeight) {
-      // 滑鼠不在圖表區域，如果已鎖定則解除鎖定
       if (isLocked) {
         isLocked = false;
         lockedPoint = null;
@@ -623,7 +605,6 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
     }
     
     if (!isLocked) {
-      // 當前未鎖定，尋找最接近的點進行鎖定
       let closestPoint = null;
       let minDistance = Infinity;
       
@@ -635,41 +616,39 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
         }
       }
       
-      // 如果找到了接近的點，進行鎖定
       if (closestPoint && minDistance < 15) {
         isLocked = true;
         lockedPoint = closestPoint;
         
-        // 清空舊的輔助線
         while (helperGroup.firstChild) {
           helperGroup.removeChild(helperGroup.firstChild);
         }
         
-        // 繪製垂直線（連接到 X 軸）
+        // 繪製垂直線
         const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         vLine.setAttribute('x1', closestPoint.x);
         vLine.setAttribute('y1', closestPoint.y);
         vLine.setAttribute('x2', closestPoint.x);
         vLine.setAttribute('y2', topPadding + plotHeight);
-        vLine.setAttribute('stroke', '#999999');
+        vLine.setAttribute('stroke', 'var(--text-secondary)');
         vLine.setAttribute('stroke-width', '1');
         vLine.setAttribute('stroke-dasharray', '3,3');
         vLine.setAttribute('class', 'spectrum-guide-line');
         helperGroup.appendChild(vLine);
         
-        // 繪製水平線（連接到 Y 軸）
+        // 繪製水平線
         const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         hLine.setAttribute('x1', leftPadding);
         hLine.setAttribute('y1', closestPoint.y);
         hLine.setAttribute('x2', closestPoint.x);
         hLine.setAttribute('y2', closestPoint.y);
-        hLine.setAttribute('stroke', '#999999');
+        hLine.setAttribute('stroke', 'var(--text-secondary)');
         hLine.setAttribute('stroke-width', '1');
         hLine.setAttribute('stroke-dasharray', '3,3');
         hLine.setAttribute('class', 'spectrum-guide-line');
         helperGroup.appendChild(hLine);
         
-        // 繪製交互點圓形（透明圓點） - 紅色
+        // 繪製交互點圓形 (Locked - Red)
         const interactiveCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
         interactiveCircle.setAttribute('cx', closestPoint.x);
         interactiveCircle.setAttribute('cy', closestPoint.y);
@@ -680,7 +659,7 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
         interactiveCircle.setAttribute('class', 'spectrum-highlight-point');
         helperGroup.appendChild(interactiveCircle);
         
-        // 創建提示框文字（頻率）- 放在懸停點正上方 15px
+        // 提示框文字（頻率）
         const tooltipFreq = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         tooltipFreq.setAttribute('x', closestPoint.x);
         tooltipFreq.setAttribute('y', closestPoint.y - 25);
@@ -689,12 +668,11 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
         tooltipFreq.setAttribute('font-family', "'Noto Sans HK'", 'sans-serif');
         tooltipFreq.setAttribute('font-size', '12');
         tooltipFreq.setAttribute('font-weight', 'bold');
-        tooltipFreq.setAttribute('fill', '#000000');
         tooltipFreq.setAttribute('class', 'spectrum-tooltip-text-freq');
         tooltipFreq.textContent = closestPoint.freqKHz.toFixed(2) + ' kHz';
         helperGroup.appendChild(tooltipFreq);
         
-        // 創建提示框文字（dB）
+        // 提示框文字（dB）
         const tooltipDb = document.createElementNS('http://www.w3.org/2000/svg', 'text');
         tooltipDb.setAttribute('x', closestPoint.x);
         tooltipDb.setAttribute('y', closestPoint.y - 10);
@@ -703,13 +681,12 @@ export function drawPowerSpectrumSVG(svg, spectrum, sampleRate, flowKHz, fhighKH
         tooltipDb.setAttribute('font-family', "'Noto Sans HK'", 'sans-serif');
         tooltipDb.setAttribute('font-size', '12');
         tooltipDb.setAttribute('font-weight', 'bold');
-        tooltipDb.setAttribute('fill', '#0066cc');
+        tooltipDb.setAttribute('fill', 'var(--paravalue-color)');
         tooltipDb.setAttribute('class', 'spectrum-tooltip-text-db');
         tooltipDb.textContent = closestPoint.db.toFixed(1) + ' dB';
         helperGroup.appendChild(tooltipDb);
       }
     } else {
-      // 當前已鎖定，解除鎖定
       isLocked = false;
       lockedPoint = null;
       while (helperGroup.firstChild) {
