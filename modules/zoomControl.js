@@ -215,40 +215,37 @@ function applyZoom() {
     applyZoom();
   }
 
-// --- Wheel Zoom Logic ---
+// --- Wheel Zoom Logic (Final Fix for Anchoring) ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
-    // 1. [錨點計算 Step A] 在任何改變發生前，鎖定當前的中心點比例
+    // 1. [錨點計算 Step A] 鎖定當前視角
+    // 使用 getBoundingClientRect 獲取「當前視覺上的絕對寬度」，這比數學計算更準確
+    const currentRect = container.getBoundingClientRect();
+    const currentVisualWidth = currentRect.width || 1;
+    
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
     
-    // 使用「邏輯寬度」而非 DOM 寬度，這樣更精確，不受渲染延遲影響
-    // 注意：這裡用當前的 zoomLevel
-    const currentTotalWidth = duration() * zoomLevel; 
-    
-    // 算出中心點在整段音訊中的相對位置 (0.0 ~ 1.0)
-    // 防呆：如果寬度為 0，比例設為 0
-    const centerRatio = currentTotalWidth > 0 
-      ? (currentScrollLeft + (viewportWidth / 2)) / currentTotalWidth
-      : 0;
+    // 計算滑鼠所在的中心點，佔當前總寬度的百分比 (Ratio)
+    // 這裡我們以「視窗中心」為錨點 (若想以滑鼠游標為錨點，需用 e.clientX 計算 offset)
+    const centerOffset = currentScrollLeft + (viewportWidth / 2);
+    const centerRatio = centerOffset / currentVisualWidth;
 
     // 2. 計算新的 Zoom Level
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
     
     const delta = -e.deltaY;
-    // 微調：縮放係數可以根據手感調整，1.05 代表每次滾動變大 5%
     const scaleFactor = 1 + (delta * 0.001); 
     
     let newZoomLevel = zoomLevel * scaleFactor;
     newZoomLevel = Math.min(Math.max(newZoomLevel, minZoomLevel), maxZoom);
 
-    // 避免無意義的計算
+    // 避免微小抖動
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
-    // 更新狀態
     zoomLevel = newZoomLevel;
     
     // 3. 視覺變形 (Visual Stretch)
@@ -265,11 +262,15 @@ function applyZoom() {
       freqGrid.style.width = newTotalWidthPx;
     }
 
+    // 🔥【關鍵修正】強制瀏覽器立刻重算佈局 (Force Layout / Reflow)
+    // 讀取 offsetWidth 會強迫瀏覽器立刻應用上面的 width 設定。
+    // 如果不加這行，下面的 scrollLeft 會被限制在「舊寬度」的範圍內，導致畫面右移。
+    const _forceReflow = container.offsetWidth; 
+
     // 4. [錨點計算 Step B] 立即校正 Scroll 位置
-    // 根據新的總寬度，利用之前的比例 (Ratio) 推算出新的中心點，再減去視窗的一半
+    // 因為已經強制 Reflow，現在 scrollLeft 可以安全地設定到更遠的位置
     const newScrollLeft = (newTotalWidth * centerRatio) - (viewportWidth / 2);
     
-    // 這是瀏覽器同步行為，會立刻生效，讓使用者感覺畫面是「從中心放大」
     wrapperElement.scrollLeft = newScrollLeft;
 
     // 5. Debounce Redraw (延遲重繪)
@@ -278,20 +279,18 @@ function applyZoom() {
     }
 
     wheelTimeout = setTimeout(() => {
-      // 呼叫 wavesurfer zoom (高解析度重繪)
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // [雙重保險] 重繪後，DOM 可能會有微小變動，再次校正位置以防跳動
-        // 這裡必須再次計算，因為 ws.zoom() 可能會導致實際寬度與計算有些微 pixel 誤差
+        // 重繪後的二次校正 (修正 pixel 誤差)
         const finalTotalWidth = duration() * zoomLevel;
+        // 同樣需要強制 Reflow 以防萬一，但通常這時已經穩定了
         const finalScroll = (finalTotalWidth * centerRatio) - (viewportWidth / 2);
         wrapperElement.scrollLeft = finalScroll;
       }
       
       applyZoomCallback();
       
-      // 再次確保樣式正確
       container.style.width = `${duration() * zoomLevel}px`;
       if (freqGrid) {
          freqGrid.style.width = `${duration() * zoomLevel}px`;
@@ -299,7 +298,7 @@ function applyZoom() {
 
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
-    }, 500); // 500ms 後重繪
+    }, 500); 
   }
 
   if (wrapperElement) {
