@@ -157,6 +157,11 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
+    if (!container.style.width || container.style.width === '100%') {
+    const rect = container.getBoundingClientRect();
+    container.style.width = `${rect.width}px`;
+    }
+
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
     
