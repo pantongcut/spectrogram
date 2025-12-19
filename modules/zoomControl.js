@@ -137,17 +137,14 @@ function applyZoom() {
       ws.zoom(zoomLevel);
     }
     
-    // 確保 Shadow DOM 樣式
     _injectShadowDomStyles();
 
     const width = duration() * zoomLevel;
     const widthPx = `${width}px`;
 
-    // 修正：同時設定 viewerContainer
-    const viewerContainer = document.getElementById('viewer-container') || container.parentElement;
-    if (viewerContainer) viewerContainer.style.width = widthPx;
-    
+    // 只設定子元素
     container.style.width = widthPx;
+    
     const freqGrid = document.getElementById('freq-grid');
     if (freqGrid) {
       freqGrid.style.width = widthPx;
@@ -218,22 +215,21 @@ function applyZoom() {
     applyZoom();
   }
 
-// --- Wheel Zoom Logic (Fixed for Anchoring & Clamping) ---
+// --- Wheel Zoom Logic (Reverted Container, Fixed Layout Thrashing) ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
-    // 1. [錨點計算] 使用純數學公式，避免 DOM 渲染延遲造成的數值誤差
+    // 1. [錨點計算] 鎖定當前視角
+    // 使用 scrollWidth 來計算比例是最穩定的，因為它是 Scrollbar 真正的參考依據
+    // 獲取 Zoom 前的滾動寬度
+    const oldScrollWidth = wrapperElement.scrollWidth; 
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
-    
-    // 計算當前邏輯寬度 (數學值)
-    const currentMathWidth = duration() * zoomLevel;
-    
-    // 計算滑鼠視窗中心點相對於總長度的比例 (Ratio)
-    // 如果是第一次加載 (width=0)，比例設為 0
-    const centerRatio = currentMathWidth > 0 
-      ? (currentScrollLeft + (viewportWidth / 2)) / currentMathWidth
+
+    // 計算視窗中心點相對於「整個可滾動區域」的比例
+    const centerRatio = oldScrollWidth > 0 
+      ? (currentScrollLeft + (viewportWidth / 2)) / oldScrollWidth
       : 0;
 
     // 2. 計算新的 Zoom Level
@@ -258,13 +254,13 @@ function applyZoom() {
     // 確保 Shadow DOM 樣式存在
     _injectShadowDomStyles();
 
-    // 🔥【關鍵修正 A】取得 Viewer Container (Wrapper 的直接子元素)
-    // 我們必須直接撐大這個容器，Wrapper 才會立刻知道能滾動到哪裡
-    const viewerContainer = document.getElementById('viewer-container') || container.parentElement || container;
+    // 🔥【關鍵修正 1】暫時關閉平滑滾動
+    // 這能防止瀏覽器在改變 scrollLeft 時產生延遲或動畫，確保「瞬移」到位
+    const originalScrollBehavior = wrapperElement.style.scrollBehavior;
+    wrapperElement.style.scrollBehavior = 'auto';
 
-    // 設定寬度：同時設定 Container、Spectrogram 和 Grid
-    // 這樣做是為了確保 DOM 結構由外而內都是正確的寬度
-    viewerContainer.style.width = newTotalWidthPx; 
+    // 🔥【關鍵修正 2】只調整子元素寬度 (Revert 回原本的邏輯)
+    // 這樣做可以讓 #viewer-container 自動撐大，Scrollbar 才會正常運作
     container.style.width = newTotalWidthPx;
     
     const freqGrid = document.getElementById('freq-grid');
@@ -272,13 +268,14 @@ function applyZoom() {
       freqGrid.style.width = newTotalWidthPx;
     }
 
-    // 🔥【關鍵修正 B】強制 Wrapper 重算滾動區域 (Force Layout)
-    // 讀取 scrollWidth 會迫使瀏覽器承認上面的 style.width 設定
-    const _forceReflow = wrapperElement.scrollWidth; 
+    // 🔥【關鍵修正 3】強制讀取新的 scrollWidth (Force Layout / Reflow)
+    // 這行代碼看起來沒做什麼，但讀取 scrollWidth 會迫使瀏覽器立刻計算完上面的 width 設定
+    // 確保 wrapperElement 知道自己已經變寬了
+    const newScrollWidth = wrapperElement.scrollWidth; 
 
     // 4. [錨點定位] 立即校正 Scroll 位置
-    // 因為 Wrapper 已經知道變寬了，這裡的數值就不會被 Clamp 住
-    const newScrollLeft = (newTotalWidth * centerRatio) - (viewportWidth / 2);
+    // 使用剛讀取到的 newScrollWidth 進行精確定位
+    const newScrollLeft = (newScrollWidth * centerRatio) - (viewportWidth / 2);
     
     wrapperElement.scrollLeft = newScrollLeft;
 
@@ -288,20 +285,22 @@ function applyZoom() {
     }
 
     wheelTimeout = setTimeout(() => {
+      // 恢復原本的 scroll behavior
+      wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
+
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // 重繪後的二次校正 (修正微小誤差)
-        const finalTotalWidth = duration() * zoomLevel;
-        const finalScroll = (finalTotalWidth * centerRatio) - (viewportWidth / 2);
+        // 重繪後的二次校正
+        const finalScrollWidth = wrapperElement.scrollWidth;
+        const finalScroll = (finalScrollWidth * centerRatio) - (viewportWidth / 2);
         wrapperElement.scrollLeft = finalScroll;
       }
       
       applyZoomCallback();
       
-      // 保險：重繪後再次確認寬度
+      // 確保寬度一致
       const finalPx = `${duration() * zoomLevel}px`;
-      viewerContainer.style.width = finalPx; // 別忘了這個
       container.style.width = finalPx;
       if (freqGrid) freqGrid.style.width = finalPx;
 
