@@ -1263,87 +1263,87 @@ async getFrequencies(t) {
 
         this.peakBandArrayPerChannel = [];
         
-        // [NEW] 獲取全局最大值 (Linear Magnitude) 用於 -24dB 噪音過濾
-        // -24dB 約等於線性值的 0.063 (10^(-24/20))
-        const globalMaxLinear = this._wasmEngine.get_global_max();
-        const noiseFloorLinear = globalMaxLinear * 0.063; 
+            // [NEW] 1. 全局噪音基準 (-24dB)
+            const globalMaxLinear = this._wasmEngine.get_global_max();
+            const noiseFloorLinear = globalMaxLinear * 0.063; 
 
-        // 獲取使用者設定的 Slider 閾值 (0.0 - 1.0)
-        // 在自適應模式下，這代表 "相對於局部最大值的百分比"
-        const userThresholdRatio = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-
-        for (let e = 0; e < i; e++) {
-            const s = t.getChannelData(e)
-              , channelFrames = []
-              , channelPeakLists = []; // 改為儲存 Arrays (支援多點/harmonics)
+            // [NEW] 2. 獲取使用者 Slider 值 (0.0 - 1.0)
+            let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
             
-            // 1. 計算完整的 U8 頻譜 (用於繪圖)
-            const fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
-                s,
-                o,
-                this.gainDB,
-                this.rangeDB
-            );
+            // [關鍵修改] 3. 對 Slider 進行重映射 (Remapping)
+            // 將 0.0-1.0 的輸入映射到 0.60-0.99 的有效區間
+            // 這樣即使 slider 在 0，我們也過濾掉 60% 的低能量裙邊，避免 "滿圖紅點"
+            // 使用平方曲線 (Math.pow) 讓低數值區域的調節更細膩
+            const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
-            // 2. 獲取每幀的線性峰值幅度 (用於精確的噪音判斷)
-            // 我們傳入 0.0 以獲取所有幀的原始最大值，不預先過濾
-            const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
-            
-            // 計算維度
-            const numFilters = this._wasmEngine.get_num_filters();
-            const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
-            const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
-            
-            // 3. 逐幀處理 (Frame-by-Frame Adaptive Processing)
-            // 這相當於以每個 FFT window (約幾毫秒) 為單位進行分析，比 20ms 更精細平滑
-            for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
-                // 3.1 切割出該幀的圖像數據 (0-255)
-                const frameStartIdx = frameIdx * outputSize;
-                const outputFrame = fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize);
-                channelFrames.push(outputFrame);
+            for (let e = 0; e < i; e++) {
+                const s = t.getChannelData(e)
+                  , channelFrames = []
+                  , channelPeakLists = [];
+                
+                const fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
+                    s,
+                    o,
+                    this.gainDB,
+                    this.rangeDB
+                );
 
-                if (this.options && this.options.peakMode) {
-                    const localMaxLinear = frameMaxMagnitudes[frameIdx];
+                // 獲取線性幅度用於全局噪音過濾
+                const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
+                
+                const numFilters = this._wasmEngine.get_num_filters();
+                const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
+                const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
+                
+                for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
+                    const frameStartIdx = frameIdx * outputSize;
+                    const outputFrame = fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize);
+                    channelFrames.push(outputFrame);
 
-                    // [Rule 1: 全局噪音過濾]
-                    // 如果該幀最強訊號低於 Global Max - 24dB，則視為全噪音，不標記任何 Peak
-                    if (localMaxLinear < noiseFloorLinear) {
-                        channelPeakLists.push([]); // Push empty list
-                        continue; 
-                    }
+                    if (this.options && this.options.peakMode) {
+                        const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
-                    // [Rule 2: 局部自適應閾值]
-                    // 找出該幀在圖像層面 (0-255) 的最大值
-                    let localMaxU8 = 0;
-                    for(let k=0; k < outputSize; k++) {
-                        if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
-                    }
-
-                    // 閾值截止線 = 局部最大值 * 使用者設定的百分比
-                    // 這樣即便在較弱的叫聲片段，只要超過背景一定比例，也會顯示 Peak
-                    const cutoffU8 = localMaxU8 * userThresholdRatio;
-
-                    const framePeaks = [];
-                    for(let k=0; k < outputSize; k++) {
-                        // 收集所有超過截止線的點 (顯示基頻 + 諧波)
-                        if (outputFrame[k] >= cutoffU8 && outputFrame[k] > 10) { // 加一個極低值過濾避免全黑背景雜訊
-                            framePeaks.push({
-                                bin: k,
-                                magnitude: outputFrame[k],
-                                isMainPeak: outputFrame[k] === localMaxU8 // 標記是否為最強點
-                            });
+                        // [Rule 1] 全局噪音過濾 (-24dB)
+                        // 低於此強度的片段直接略過
+                        if (localMaxLinear < noiseFloorLinear) {
+                            channelPeakLists.push([]); 
+                            continue; 
                         }
+
+                        // [Rule 2] 局部自適應閾值
+                        let localMaxU8 = 0;
+                        for(let k=0; k < outputSize; k++) {
+                            if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
+                        }
+
+                        // [關鍵修改] 使用調整後的 effectiveThreshold 計算截止線
+                        // 例如：Slider 40% -> effectiveThreshold 約 0.7 -> 只保留最強的 30% 區域
+                        const cutoffU8 = localMaxU8 * effectiveThreshold;
+
+                        const framePeaks = [];
+                        
+                        // 優化：如果 localMaxU8 太小（例如全黑背景中的微小波動），直接忽略
+                        if (localMaxU8 > 10) { 
+                            for(let k=0; k < outputSize; k++) {
+                                if (outputFrame[k] >= cutoffU8) {
+                                    framePeaks.push({
+                                        bin: k,
+                                        magnitude: outputFrame[k],
+                                        isMainPeak: outputFrame[k] === localMaxU8
+                                    });
+                                }
+                            }
+                        }
+                        channelPeakLists.push(framePeaks);
                     }
-                    channelPeakLists.push(framePeaks);
                 }
+                
+                if (this.options && this.options.peakMode) {
+                    this.peakBandArrayPerChannel.push(channelPeakLists);
+                }
+                h.push(channelFrames)
             }
-            
-            if (this.options && this.options.peakMode) {
-                this.peakBandArrayPerChannel.push(channelPeakLists);
-            }
-            h.push(channelFrames)
-        }
-        return h
+            return h
     }
     
     freqType(t) {
