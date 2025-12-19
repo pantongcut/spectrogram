@@ -12,7 +12,7 @@ let currentWindowType = 'hann';
 let currentPeakMode = false;
 let currentPeakThreshold = 0.4;
 let currentSmoothMode = true;
-let analysisWasmEngine = null;  // [CRITICAL] Dedicated WASM engine for bat call analysis (FFT 1024)
+let analysisWasmEngine = null;
 
 export function initWavesurfer({
   container,
@@ -42,6 +42,9 @@ export function createSpectrogramPlugin({
   peakMode = false,
   peakThreshold = 0.4,
 }) {
+  // [DEBUG] 打印創建插件時的參數，確認 wsManager 收到的值是否正確
+  console.log(`[wsManager] Creating Plugin -> PeakMode: ${peakMode}, Threshold: ${peakThreshold}`);
+
   const baseOptions = {
     labels: false,
     height,
@@ -68,17 +71,16 @@ export function replacePlugin(
   frequencyMin = 10,
   frequencyMax = 128,
   overlapPercent = null,
-  onRendered = null,  // ✅ 傳入 callback
+  onRendered = null,
   fftSamples = currentFftSize,
   windowFunc = currentWindowType,
   peakMode = currentPeakMode,
   peakThreshold = currentPeakThreshold,
-  onColorMapChanged = null  // 新增：色彩圖變更 callback
+  onColorMapChanged = null
 ) {
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
 
-  // ✅ 改進：完全清理舊 plugin 和 canvas
   const oldCanvas = container.querySelector("canvas");
   if (oldCanvas) {
     oldCanvas.remove();
@@ -86,17 +88,21 @@ export function replacePlugin(
 
   if (plugin?.destroy) {
     plugin.destroy();
-    plugin = null;  // ✅ 確保 plugin 引用被清空
+    plugin = null;
   }
 
-  // ✅ 強制重新設置 container 寬度為預設值（避免殘留的大尺寸）
   container.style.width = '100%';
 
+  // 更新內部狀態
   currentColorMap = colorMap;
-
   currentFftSize = fftSamples;
   currentWindowType = windowFunc;
-  // If overlapPercent is undefined (auto mode), pass null to plugin so it dynamically calculates
+  
+  // [Fix] 確保 Peak 相關的全局狀態也被更新
+  // 這保證了 wsManager 的內部狀態與最後一次渲染的插件一致
+  currentPeakMode = peakMode;
+  currentPeakThreshold = peakThreshold;
+
   const noverlap = (overlapPercent !== null && overlapPercent !== undefined)
     ? Math.floor(fftSamples * (overlapPercent / 100))
     : null;
@@ -110,17 +116,15 @@ export function replacePlugin(
     noverlap,
     windowFunc,
     peakMode,
-    peakThreshold,
+    peakThreshold, // 這裡會傳遞正確的參數值
   });
 
-  // 如果提供了 onColorMapChanged callback，附加到 plugin 的 colorMapChanged 事件
   if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
     plugin.on('colorMapChanged', onColorMapChanged);
   }
 
   ws.registerPlugin(plugin);
 
-  // Apply saved smooth mode to the newly created plugin
   if (plugin && plugin.setSmoothMode) {
     plugin.setSmoothMode(currentSmoothMode);
   }
@@ -147,24 +151,14 @@ export function getCurrentColorMap() {
   return currentColorMap;
 }
 
-/**
- * Retrieves the currently active color map name.
- * Prioritizes the running plugin instance (in case user changed it via dropdown).
- * Fallbacks to the stored `currentColorMap` or default 'viridis'.
- */
 export function getEffectiveColorMap() {
-  // 1. Check active plugin instance first
   const activePlugin = getPlugin();
   if (activePlugin && activePlugin.colorMapName) {
     return activePlugin.colorMapName;
   }
-  
-  // 2. Fallback to stored state in wsManager
   if (currentColorMap) {
     return currentColorMap;
   }
-  
-  // 3. Default
   return 'viridis';
 }
 
@@ -212,16 +206,9 @@ export function initScrollSync({
   });
 }
 
-/**
- * Get or create a dedicated WASM engine for bat call analysis (FFT 1024)
- * This MUST use FFT 1024 to match the default behavior of legacy JS Goertzel algorithm
- * @returns {SpectrogramEngine|null} Dedicated analysis engine or null if WASM not available
- */
 export function getAnalysisWasmEngine() {
-  // Create only once and reuse for efficiency
   if (analysisWasmEngine === null || analysisWasmEngine === undefined) {
     try {
-      // [CRITICAL] Always use FFT 1024 for analysis (matches legacy JS default)
       analysisWasmEngine = new SpectrogramEngine(1024, 'hann', null);
       console.log("✅ [WASM Analysis] Created dedicated WASM Engine (FFT 1024) for bat call analysis");
     } catch (e) {
@@ -232,42 +219,29 @@ export function getAnalysisWasmEngine() {
   return analysisWasmEngine;
 }
 
-/**
- * Get or create a SpectrogramEngine instance for WASM-accelerated analysis
- * IMPORTANT: Automatically detects and uses the FFT size of the currently active Spectrogram plugin
- * to ensure frequency axis alignment between visualizer and detector.
- * @param {number} fftSize - Optional override FFT size (if not provided, uses plugin's FFT)
- * @param {string} windowFunc - Window function (default 'hann')
- * @returns {SpectrogramEngine|null} Returns SpectrogramEngine instance or null if WASM not available
- */
 export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
-  // Check if WASM module is available globally
   if (!globalThis._spectrogramWasm || !globalThis._spectrogramWasm.SpectrogramEngine) {
     console.warn('WASM module not available for bat call detection');
     return null;
   }
 
   try {
-    // [CRITICAL] If no FFT size provided, try to get it from the active Spectrogram plugin
     let effectiveFFTSize = fftSize;
     
     if (effectiveFFTSize === null || effectiveFFTSize === undefined) {
-      // Try to get FFT size from the current plugin
       if (plugin && typeof plugin.getFFTSize === 'function') {
         effectiveFFTSize = plugin.getFFTSize();
       } else if (plugin && plugin.fftSamples) {
         effectiveFFTSize = plugin.fftSamples;
       } else {
-        // Fallback to currentFftSize variable if available
         effectiveFFTSize = currentFftSize || 1024;
       }
     }
     
-    console.log(`[WASM Engine] Creating SpectrogramEngine with FFT size: ${effectiveFFTSize}`);
+    // console.log(`[WASM Engine] Creating SpectrogramEngine with FFT size: ${effectiveFFTSize}`);
     return new globalThis._spectrogramWasm.SpectrogramEngine(effectiveFFTSize, windowFunc, null);
   } catch (error) {
     console.warn('Failed to create WASM SpectrogramEngine:', error);
     return null;
   }
 }
-
