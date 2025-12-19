@@ -1323,6 +1323,68 @@ export class BatCallDetector {
     return result;
   }
 
+/**
+   * [2025 NEW] Calculate Precise Noise Floor using Histogram Mode
+   * Finds the most frequent dB value in the region (Mode), which accurately represents
+   * the background noise floor regardless of signal presence.
+   * * @param {Array} spectrogram - 2D array of power values
+   * @param {number} startFrame - Start frame index (inclusive)
+   * @param {number} endFrame - End frame index (inclusive)
+   * @param {number} startBin - Start frequency bin index (inclusive)
+   * @param {number} endBin - End frequency bin index (inclusive)
+   * @returns {number} Robust noise floor in dB
+   */
+  calculateHistogramNoiseFloor(spectrogram, startFrame, endFrame, startBin, endBin) {
+    // 1. 初始化直方圖 (假設 dB 範圍 -120 到 0，精度 1dB)
+    const minDbLimit = -120;
+    const maxDbLimit = 0;
+    const range = maxDbLimit - minDbLimit + 1;
+    const histogram = new Uint32Array(range);
+    
+    let validCount = 0;
+    
+    // 2. 填充直方圖 (Iterate Scope)
+    for (let f = startFrame; f <= endFrame; f++) {
+      if (f >= spectrogram.length) break;
+      const frame = spectrogram[f];
+      
+      for (let b = startBin; b <= endBin; b++) {
+        if (b >= frame.length) break;
+        
+        const val = frame[b];
+        // 忽略無效值或極小值
+        if (val > minDbLimit && val <= maxDbLimit) {
+          const binIndex = Math.floor(val - minDbLimit);
+          histogram[binIndex]++;
+          validCount++;
+        }
+      }
+    }
+    
+    if (validCount === 0) return -80; // Fallback default
+    
+    // 3. 尋找眾數 (Mode) - 出現次數最多的 dB 值
+    let maxCount = 0;
+    let modeIndex = 0;
+    
+    // 簡單平滑處理 (Moving Average 3-bins) 避免單點尖峰
+    for (let i = 1; i < range - 1; i++) {
+      const smoothedCount = histogram[i-1] + histogram[i] + histogram[i+1];
+      if (smoothedCount > maxCount) {
+        maxCount = smoothedCount;
+        modeIndex = i;
+      }
+    }
+    
+    const noiseMode_dB = modeIndex + minDbLimit;
+    
+    // 4. 計算 Noise Floor
+    // 經驗法則：Mode + 6dB 通常能過濾掉絕大多數隨機高斯白噪聲
+    const robustNoiseFloor_dB = noiseMode_dB + 6;
+    
+    return robustNoiseFloor_dB;
+  }
+
   /**
    * Find optimal High Threshold by testing range and detecting anomalies
    * 
@@ -1390,26 +1452,13 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
 
-    // 1b. Iterate within the restricted scope to find Min/Max dB
-    for (let f = 0; f <= validPeakFrameIdx; f++) {
-      const frame = spectrogram[f];
-      // Scan only from Peak Bin upwards to the top frequency
-      for (let b = peakBinIdx; b < frame.length; b++) {
-        const val = frame[b];
-        if (val < minDb) minDb = val;
-        if (val > maxDb) maxDb = val;
-      }
-    }
-
-    // Safety fallback if scan failed (e.g. empty range)
-    if (minDb === Infinity) {
-       minDb = -100;
-       maxDb = callPeakPower_dB;
-    }
-
-    // Formula: Min + (Range * 0.6)
-    const dynamicRange = maxDb - minDb;
-    const robustNoiseFloor_dB = minDb + dynamicRange * 0.6;
+    const robustNoiseFloor_dB = this.calculateHistogramNoiseFloor(
+      spectrogram,
+      0,                  // startFrame
+      validPeakFrameIdx,  // endFrame
+      peakBinIdx,         // startBin (從 Peak 往上)
+      numBins - 1         // endBin
+    );
     
     console.log('[findOptimalHighFrequencyThreshold] NOISE FLOOR CALCULATION (OPTIMIZED SCOPE):');
     console.log(`  Scope: Time[0-${validPeakFrameIdx}], Freq[Bin ${peakBinIdx}-${numBins-1}]`);
@@ -1863,24 +1912,13 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
 
-    // 1b. Iterate restricted scope (Lower-Right Quadrant)
-    for (let f = validPeakFrameIdx; f <= searchEndFrame; f++) {
-      const frame = spectrogram[f];
-      // Scan only from Bottom (0) up to Peak Bin
-      for (let b = 0; b <= peakBinIdx; b++) {
-        const val = frame[b];
-        if (val < minDb) minDb = val;
-        if (val > maxDb) maxDb = val;
-      }
-    }
-
-    if (minDb === Infinity) {
-       minDb = -100;
-       maxDb = callPeakPower_dB;
-    }
-
-    const dynamicRange = maxDb - minDb;
-    const robustNoiseFloor_dB = minDb + dynamicRange * 0.6;
+    const robustNoiseFloor_dB = this.calculateHistogramNoiseFloor(
+      spectrogram,
+      validPeakFrameIdx,  // startFrame
+      searchEndFrame,     // endFrame
+      0,                  // startBin (從底端開始)
+      peakBinIdx          // endBin (到 Peak 為止)
+    );
 
     console.log('[findOptimalLowFrequencyThreshold] CONFIGURATION:');
     console.log(`  Scope: Time[${validPeakFrameIdx}-${searchEndFrame}], Freq[Bin 0-${peakBinIdx}]`);
