@@ -1005,8 +1005,6 @@ function createPopupWindow() {
   svgContainer.style.width = '438px';
   svgContainer.style.height = '438px';
   svgContainer.style.position = 'relative';
-  svgContainer.style.backgroundColor = '#ffffff';
-  svgContainer.style.border = '1px solid #ccc';
   svgContainer.style.margin = '5px 5px 0px 5px';
   
   // 添加 Setting 按鈕
