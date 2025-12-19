@@ -211,7 +211,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
       applyZoomCallback();
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
-    }, 100); 
+    }, 500); 
   }
 
   if (wrapperElement) {
