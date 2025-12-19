@@ -1332,10 +1332,10 @@ export class BatCallDetector {
    * @param {number} endFrame - End frame index (inclusive)
    * @param {number} startBin - Start frequency bin index (inclusive)
    * @param {number} endBin - End frequency bin index (inclusive)
-   * @param {number} percentile - 0.0 to 1.0 (default 0.75 for 75th percentile)
+   * @param {number} percentile - 0.0 to 1.0 (default 0.85 for 85th percentile)
    * @returns {number} Robust noise floor in dB
    */
-  calculatePercentileNoiseFloor(spectrogram, startFrame, endFrame, startBin, endBin, percentile = 0.75) {
+  calculatePercentileNoiseFloor(spectrogram, startFrame, endFrame, startBin, endBin, percentile = 0.85) {
     const values = [];
     
     // 1. 收集範圍內的所有有效 dB 值
