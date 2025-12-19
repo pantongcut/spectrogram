@@ -1324,26 +1324,21 @@ export class BatCallDetector {
   }
 
 /**
-   * [2025 NEW] Calculate Precise Noise Floor using Histogram Mode
-   * Finds the most frequent dB value in the region (Mode), which accurately represents
-   * the background noise floor regardless of signal presence.
+   * [2025 NEW] Calculate Noise Floor using Percentile Method (Scheme 2)
+   * Sorts all power values in the region and picks the value at the specified percentile.
+   * This is signal-independent and robust against extreme peaks.
    * * @param {Array} spectrogram - 2D array of power values
    * @param {number} startFrame - Start frame index (inclusive)
    * @param {number} endFrame - End frame index (inclusive)
    * @param {number} startBin - Start frequency bin index (inclusive)
    * @param {number} endBin - End frequency bin index (inclusive)
+   * @param {number} percentile - 0.0 to 1.0 (default 0.75 for 75th percentile)
    * @returns {number} Robust noise floor in dB
    */
-  calculateHistogramNoiseFloor(spectrogram, startFrame, endFrame, startBin, endBin) {
-    // 1. 初始化直方圖 (假設 dB 範圍 -120 到 0，精度 1dB)
-    const minDbLimit = -120;
-    const maxDbLimit = 0;
-    const range = maxDbLimit - minDbLimit + 1;
-    const histogram = new Uint32Array(range);
+  calculatePercentileNoiseFloor(spectrogram, startFrame, endFrame, startBin, endBin, percentile = 0.75) {
+    const values = [];
     
-    let validCount = 0;
-    
-    // 2. 填充直方圖 (Iterate Scope)
+    // 1. 收集範圍內的所有有效 dB 值
     for (let f = startFrame; f <= endFrame; f++) {
       if (f >= spectrogram.length) break;
       const frame = spectrogram[f];
@@ -1352,37 +1347,25 @@ export class BatCallDetector {
         if (b >= frame.length) break;
         
         const val = frame[b];
-        // 忽略無效值或極小值
-        if (val > minDbLimit && val <= maxDbLimit) {
-          const binIndex = Math.floor(val - minDbLimit);
-          histogram[binIndex]++;
-          validCount++;
+        // 過濾掉 -Infinity 或極小的無意義值，避免影響統計
+        if (val > -150) {
+          values.push(val);
         }
       }
     }
     
-    if (validCount === 0) return -80; // Fallback default
+    if (values.length === 0) return -80; // Fallback
     
-    // 3. 尋找眾數 (Mode) - 出現次數最多的 dB 值
-    let maxCount = 0;
-    let modeIndex = 0;
+    // 2. 排序 (由小到大)
+    // 對於 JavaScript 引擎，數值陣列排序通常很快
+    values.sort((a, b) => a - b);
     
-    // 簡單平滑處理 (Moving Average 3-bins) 避免單點尖峰
-    for (let i = 1; i < range - 1; i++) {
-      const smoothedCount = histogram[i-1] + histogram[i] + histogram[i+1];
-      if (smoothedCount > maxCount) {
-        maxCount = smoothedCount;
-        modeIndex = i;
-      }
-    }
+    // 3. 取百分位數位置的值
+    // 75th percentile 代表：這個值比 75% 的點都要大（通常這覆蓋了所有背景底噪）
+    const index = Math.floor(values.length * percentile);
+    const clampedIndex = Math.max(0, Math.min(index, values.length - 1));
     
-    const noiseMode_dB = modeIndex + minDbLimit;
-    
-    // 4. 計算 Noise Floor
-    // 經驗法則：Mode + 6dB 通常能過濾掉絕大多數隨機高斯白噪聲
-    const robustNoiseFloor_dB = noiseMode_dB + 6;
-    
-    return robustNoiseFloor_dB;
+    return values[clampedIndex];
   }
 
   /**
@@ -1452,17 +1435,19 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
 
-    const robustNoiseFloor_dB = this.calculateHistogramNoiseFloor(
+    const robustNoiseFloor_dB = this.calculatePercentileNoiseFloor(
       spectrogram,
       0,                  // startFrame
       validPeakFrameIdx,  // endFrame
-      peakBinIdx,         // startBin (從 Peak 往上)
-      numBins - 1         // endBin
+      peakBinIdx,         // startBin
+      numBins - 1,        // endBin
+      0.75                // percentile (75%)
     );
     
-    console.log('[findOptimalHighFrequencyThreshold] NOISE FLOOR CALCULATION (OPTIMIZED SCOPE):');
+    console.log('[findOptimalHighFrequencyThreshold] NOISE FLOOR (PERCENTILE 75%):');
     console.log(`  Scope: Time[0-${validPeakFrameIdx}], Freq[Bin ${peakBinIdx}-${numBins-1}]`);
-    console.log(`  Peak Power (callPeakPower_dB): ${callPeakPower_dB.toFixed(2)} dB`);
+    console.log(`  Robust Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
+    console.log(`  Peak Power: ${callPeakPower_dB.toFixed(2)} dB`);
     console.log('');
     
     // Initial search limit: from 0 to peakFrameIdx
@@ -1910,15 +1895,18 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
 
-    const robustNoiseFloor_dB = this.calculateHistogramNoiseFloor(
+    // Scope: Time[PeakFrame -> End], Freq[0 -> PeakBin]
+    // 使用 0.75 (75th percentile)
+    const robustNoiseFloor_dB = this.calculatePercentileNoiseFloor(
       spectrogram,
       validPeakFrameIdx,  // startFrame
       searchEndFrame,     // endFrame
-      0,                  // startBin (從底端開始)
-      peakBinIdx          // endBin (到 Peak 為止)
+      0,                  // startBin
+      peakBinIdx,         // endBin
+      0.75                // percentile (75%)
     );
 
-    console.log('[findOptimalLowFrequencyThreshold] CONFIGURATION:');
+    console.log('[findOptimalLowFrequencyThreshold] NOISE FLOOR (PERCENTILE 75%):');
     console.log(`  Scope: Time[${validPeakFrameIdx}-${searchEndFrame}], Freq[Bin 0-${peakBinIdx}]`);
     console.log(`  Robust Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
     
