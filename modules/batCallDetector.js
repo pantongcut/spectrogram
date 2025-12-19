@@ -1323,51 +1323,6 @@ export class BatCallDetector {
     return result;
   }
 
-/**
-   * [2025 NEW] Calculate Noise Floor using Percentile Method (Scheme 2)
-   * Sorts all power values in the region and picks the value at the specified percentile.
-   * This is signal-independent and robust against extreme peaks.
-   * * @param {Array} spectrogram - 2D array of power values
-   * @param {number} startFrame - Start frame index (inclusive)
-   * @param {number} endFrame - End frame index (inclusive)
-   * @param {number} startBin - Start frequency bin index (inclusive)
-   * @param {number} endBin - End frequency bin index (inclusive)
-   * @param {number} percentile - 0.0 to 1.0 (default 0.85 for 85th percentile)
-   * @returns {number} Robust noise floor in dB
-   */
-  calculatePercentileNoiseFloor(spectrogram, startFrame, endFrame, startBin, endBin, percentile = 0.85) {
-    const values = [];
-    
-    // 1. 收集範圍內的所有有效 dB 值
-    for (let f = startFrame; f <= endFrame; f++) {
-      if (f >= spectrogram.length) break;
-      const frame = spectrogram[f];
-      
-      for (let b = startBin; b <= endBin; b++) {
-        if (b >= frame.length) break;
-        
-        const val = frame[b];
-        // 過濾掉 -Infinity 或極小的無意義值，避免影響統計
-        if (val > -150) {
-          values.push(val);
-        }
-      }
-    }
-    
-    if (values.length === 0) return -80; // Fallback
-    
-    // 2. 排序 (由小到大)
-    // 對於 JavaScript 引擎，數值陣列排序通常很快
-    values.sort((a, b) => a - b);
-    
-    // 3. 取百分位數位置的值
-    // 75th percentile 代表：這個值比 75% 的點都要大（通常這覆蓋了所有背景底噪）
-    const index = Math.floor(values.length * percentile);
-    const clampedIndex = Math.max(0, Math.min(index, values.length - 1));
-    
-    return values[clampedIndex];
-  }
-
   /**
    * Find optimal High Threshold by testing range and detecting anomalies
    * 
@@ -1435,19 +1390,32 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
 
-    const robustNoiseFloor_dB = this.calculatePercentileNoiseFloor(
-      spectrogram,
-      0,                  // startFrame
-      validPeakFrameIdx,  // endFrame
-      peakBinIdx,         // startBin
-      numBins - 1,        // endBin
-      0.75                // percentile (75%)
-    );
+    // 1b. Iterate within the restricted scope to find Min/Max dB
+    for (let f = 0; f <= validPeakFrameIdx; f++) {
+      const frame = spectrogram[f];
+      // Scan only from Peak Bin upwards to the top frequency
+      for (let b = peakBinIdx; b < frame.length; b++) {
+        const val = frame[b];
+        if (val < minDb) minDb = val;
+        if (val > maxDb) maxDb = val;
+      }
+    }
+
+    // Safety fallback if scan failed (e.g. empty range)
+    if (minDb === Infinity) {
+       minDb = -100;
+       maxDb = callPeakPower_dB;
+    }
+
+    // Formula: Min + (Range * 0.6)
+    const dynamicRange = maxDb - minDb;
+    const robustNoiseFloor_dB = minDb + dynamicRange * 0.6;
     
-    console.log('[findOptimalHighFrequencyThreshold] NOISE FLOOR (PERCENTILE 75%):');
+    console.log('[findOptimalHighFrequencyThreshold] NOISE FLOOR CALCULATION (OPTIMIZED SCOPE):');
     console.log(`  Scope: Time[0-${validPeakFrameIdx}], Freq[Bin ${peakBinIdx}-${numBins-1}]`);
-    console.log(`  Robust Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
-    console.log(`  Peak Power: ${callPeakPower_dB.toFixed(2)} dB`);
+    console.log(`  Min dB: ${minDb.toFixed(2)}, Max dB: ${maxDb.toFixed(2)}, Range: ${dynamicRange.toFixed(2)}`);
+    console.log(`  Robust Noise Floor: ${minDb.toFixed(2)} + ${dynamicRange.toFixed(2)} * 0.6 = ${robustNoiseFloor_dB.toFixed(2)} dB`);
+    console.log(`  Peak Power (callPeakPower_dB): ${callPeakPower_dB.toFixed(2)} dB`);
     console.log('');
     
     // Initial search limit: from 0 to peakFrameIdx
@@ -1895,18 +1863,26 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
     }
 
-    // Scope: Time[PeakFrame -> End], Freq[0 -> PeakBin]
-    // 使用 0.75 (75th percentile)
-    const robustNoiseFloor_dB = this.calculatePercentileNoiseFloor(
-      spectrogram,
-      validPeakFrameIdx,  // startFrame
-      searchEndFrame,     // endFrame
-      0,                  // startBin
-      peakBinIdx,         // endBin
-      0.75                // percentile (75%)
-    );
+    // 1b. Iterate restricted scope (Lower-Right Quadrant)
+    for (let f = validPeakFrameIdx; f <= searchEndFrame; f++) {
+      const frame = spectrogram[f];
+      // Scan only from Bottom (0) up to Peak Bin
+      for (let b = 0; b <= peakBinIdx; b++) {
+        const val = frame[b];
+        if (val < minDb) minDb = val;
+        if (val > maxDb) maxDb = val;
+      }
+    }
 
-    console.log('[findOptimalLowFrequencyThreshold] NOISE FLOOR (PERCENTILE 75%):');
+    if (minDb === Infinity) {
+       minDb = -100;
+       maxDb = callPeakPower_dB;
+    }
+
+    const dynamicRange = maxDb - minDb;
+    const robustNoiseFloor_dB = minDb + dynamicRange * 0.6;
+
+    console.log('[findOptimalLowFrequencyThreshold] CONFIGURATION:');
     console.log(`  Scope: Time[${validPeakFrameIdx}-${searchEndFrame}], Freq[Bin 0-${peakBinIdx}]`);
     console.log(`  Robust Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
     
