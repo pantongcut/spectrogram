@@ -1,9 +1,5 @@
 // modules/zoomControl.js
 
-/**
- * Zoom Control with Mouse-Anchored Center Stretching
- * 修正：以滑鼠位置為錨點，先視覺拉伸再重繪
- */
 export function initZoomControls(ws, container, duration, applyZoomCallback,
                                 wrapperElement, onBeforeZoom = null,
                                 onAfterZoom = null, isSelectionExpandMode = () => false,
@@ -16,9 +12,10 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   let zoomLevel = 500;
   let minZoomLevel = 250;
   let wheelTimeout = null;
-  let isZooming = false; // 追蹤是否正在 zoom
 
-  function _injectCssForSmoothing() {
+  // [CSS Fix] 強制瀏覽器允許容器小於 Canvas 的原始寬度
+  // 修正重點：加入 #freq-grid 讓網格層也能跟隨容器進行視覺上的拉伸縮放
+function _injectCssForSmoothing() {
     const styleId = 'spectrogram-smooth-zoom-style';
     if (!document.getElementById(styleId)) {
       const style = document.createElement('style');
@@ -29,7 +26,6 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
           min-width: 0 !important;
           max-width: none !important;
           display: block;
-          transition: none; /* 移除過渡動畫 */
         }
 
         #spectrogram-only *, 
@@ -48,18 +44,13 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
           image-rendering: auto; 
           transform-origin: 0 0;
         }
-
-        /* Zoom 過程中的視覺拉伸效果 */
-        .zoom-stretching #spectrogram-only,
-        .zoom-stretching #freq-grid {
-          transition: transform 0.1s ease-out;
-        }
       `;
       document.head.appendChild(style);
     }
   }
   _injectCssForSmoothing();
 
+// [Shadow DOM Fix] 專門處理 Wavesurfer 內部的 Shadow DOM 樣式
   function _injectShadowDomStyles() {
     const host = container.firstElementChild || container.querySelector('div');
     
@@ -69,8 +60,9 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
       const style = document.createElement('style');
       style.id = 'force-shrink-style';
       style.textContent = `
+        /* 強制 Shadow DOM 內部的 wrapper 跟隨外部寬度 */
         .wrapper {
-          width: 100% !important;
+          width: 100% !important; /* 覆寫 inline style */
           min-width: 0 !important;
           max-width: none !important;
         }
@@ -79,12 +71,14 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
           width: 100% !important;
         }
 
+        /* 確保內部的 Canvas 也跟隨拉伸 */
         canvas {
           width: 100% !important;
           height: 100% !important;
         }
       `;
       host.shadowRoot.appendChild(style);
+      console.log('Shadow DOM styles injected successfully.');
     } else {
       setTimeout(_injectShadowDomStyles, 100);
     }
@@ -104,6 +98,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   }
 
   function computeMinZoomLevel() {
+    // 確保 wrapper 有寬度，避免除以 0
     const visibleWidth = wrapperElement.clientWidth || 1000;
     const dur = duration();
     if (dur > 0) {
@@ -111,11 +106,12 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     }
   }
 
+// Helper：取得父容器 (統一控制寬度的地方)
   function getViewerContainer() {
     return document.getElementById('viewer-container') || container;
   }
 
-  function applyZoom() {
+function applyZoom() {
     computeMinZoomLevel();
     if (typeof onBeforeZoom === 'function') onBeforeZoom();
     
@@ -132,6 +128,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     const width = duration() * zoomLevel;
     const widthPx = `${width}px`;
 
+    // 只設定子元素
     container.style.width = widthPx;
     
     const freqGrid = document.getElementById('freq-grid');
@@ -204,24 +201,21 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     applyZoom();
   }
 
-  // --- Wheel Zoom Logic with Mouse-Anchored Center ---
+// --- Wheel Zoom Logic (Smart Wait-For-Ready) ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
     // ============================================================
-    // 1. 計算錨點：使用滑鼠在 viewport 中的位置
+    // 1. [錨點計算] 使用「時間 (秒)」作為絕對錨點
     // ============================================================
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
     
-    // 滑鼠相對於 viewport 的位置
-    const rect = wrapperElement.getBoundingClientRect();
-    const mouseXInViewport = e.clientX - rect.left;
-    
-    // 計算滑鼠指向的時間點（秒）
-    const mouseXInContent = currentScrollLeft + mouseXInViewport;
-    const anchorTime = mouseXInContent / zoomLevel;
+    // 計算視窗中心點代表的是「第幾秒」
+    // 公式：(左側卷軸 + 視窗一半) / 舊的ZoomLevel
+    const centerPx = currentScrollLeft + (viewportWidth / 2);
+    const centerTime = centerPx / zoomLevel;
 
     // ============================================================
     // 2. 計算新的 Zoom Level
@@ -235,112 +229,98 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     let newZoomLevel = zoomLevel * scaleFactor;
     newZoomLevel = Math.min(Math.max(newZoomLevel, minZoomLevel), maxZoom);
 
+    // 避免無意義的計算
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
-    const oldZoomLevel = zoomLevel;
+    // 更新全域變數
     zoomLevel = newZoomLevel;
     
     // ============================================================
-    // 3. 立即視覺拉伸（使用 CSS transform）
+    // 3. 設定新的寬度 (鋪路)
     // ============================================================
-    isZooming = true;
-    const visualScale = newZoomLevel / oldZoomLevel;
+    const newTotalWidth = duration() * zoomLevel;
+    const newTotalWidthPx = `${newTotalWidth}px`;
     
-    // 計算 transform-origin（滑鼠在內容中的位置百分比）
-    const originPercent = (mouseXInContent / (duration() * oldZoomLevel)) * 100;
-    
-    container.style.transformOrigin = `${originPercent}% 0`;
-    container.style.transform = `scaleX(${visualScale})`;
-    
-    const freqGrid = document.getElementById('freq-grid');
-    if (freqGrid) {
-      freqGrid.style.transformOrigin = `${originPercent}% 0`;
-      freqGrid.style.transform = `scaleX(${visualScale})`;
-    }
-
-    // ============================================================
-    // 4. 計算目標滾動位置
-    // ============================================================
-    const newTotalWidth = duration() * newZoomLevel;
-    const newMouseXInContent = anchorTime * newZoomLevel;
-    let targetScrollLeft = newMouseXInContent - mouseXInViewport;
-    
-    // 邊界處理
-    const maxScrollLeft = Math.max(0, newTotalWidth - viewportWidth);
-    targetScrollLeft = Math.max(0, Math.min(targetScrollLeft, maxScrollLeft));
+    // 確保 Shadow DOM 樣式存在
+    _injectShadowDomStyles();
 
     // 暫時關閉平滑滾動
     const originalScrollBehavior = wrapperElement.style.scrollBehavior;
     wrapperElement.style.scrollBehavior = 'auto';
 
-    // ============================================================
-    // 5. 設定新寬度並等待 DOM 更新
-    // ============================================================
-    _injectShadowDomStyles();
-    
-    const newTotalWidthPx = `${newTotalWidth}px`;
+    // 設定 DOM 寬度
     container.style.width = newTotalWidthPx;
+    const freqGrid = document.getElementById('freq-grid');
     if (freqGrid) freqGrid.style.width = newTotalWidthPx;
 
-    // 智能等待 DOM 更新後再滾動
+    // ============================================================
+    // 4. [智能捲動] 等待跑道建成後再移動 (The Smart Waiter)
+    // ============================================================
+    
+    // 計算我們的目標位置 (像素)
+    const targetCenterPx = centerTime * newZoomLevel;
+    let targetScrollLeft = targetCenterPx - (viewportWidth / 2);
+    
+    // 邊界防呆
+    targetScrollLeft = Math.max(0, targetScrollLeft);
+
+    // 定義一個檢查函數
     let attempts = 0;
     function applyScrollWhenReady() {
-      const currentScrollWidth = wrapperElement.scrollWidth;
-      const isReady = currentScrollWidth >= newTotalWidth - 10 || 
-                      currentScrollWidth > targetScrollLeft + viewportWidth;
+        // 取得當前瀏覽器「承認」的滾動寬度
+        const currentScrollWidth = wrapperElement.scrollWidth;
 
-      if (isReady) {
-        wrapperElement.scrollLeft = targetScrollLeft;
-        wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
-      } else {
-        attempts++;
-        if (attempts < 10) {
-          requestAnimationFrame(applyScrollWhenReady);
+        // 判斷條件：
+        // 如果現在的滾動寬度已經足夠容納我們的目標位置，
+        // 或者已經接近我們設定的新寬度 (容許少許誤差)，就執行捲動
+        // 注意：newTotalWidth 是邏輯寬度，currentScrollWidth 是 DOM 寬度
+        
+        const isReady = currentScrollWidth >= newTotalWidth - 10 || currentScrollWidth > targetScrollLeft + viewportWidth;
+
+        if (isReady) {
+            // 時機成熟，執行捲動！
+            wrapperElement.scrollLeft = targetScrollLeft;
+            
+            // 恢復平滑滾動設定
+            wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
         } else {
-          wrapperElement.scrollLeft = targetScrollLeft;
-          wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
+            // 還沒準備好 (DOM 還沒重繪)，下一幀再試
+            attempts++;
+            if (attempts < 10) { // 最多等 10 幀 (約 160ms)
+                requestAnimationFrame(applyScrollWhenReady);
+            } else {
+                // 超時強制執行 (死馬當活馬醫)
+                wrapperElement.scrollLeft = targetScrollLeft;
+                wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
+            }
         }
-      }
     }
 
+    // 啟動檢查
     applyScrollWhenReady();
 
     // ============================================================
-    // 6. Debounce 重繪（移除視覺拉伸，用真實內容替換）
+    // 5. Debounce Redraw (延遲高畫質重繪)
     // ============================================================
     if (wheelTimeout) clearTimeout(wheelTimeout);
 
     wheelTimeout = setTimeout(() => {
-      // 移除 transform，準備重繪
-      container.style.transform = '';
-      container.style.transformOrigin = '';
-      if (freqGrid) {
-        freqGrid.style.transform = '';
-        freqGrid.style.transformOrigin = '';
-      }
-
-      // 重繪 spectrogram
-      if (ws && typeof ws.zoom === 'function') {
+      if (ws) {
         ws.zoom(zoomLevel);
+        
+        // 重繪後做最後一次精確校正
+        const finalCenterPx = centerTime * zoomLevel;
+        wrapperElement.scrollLeft = finalCenterPx - (viewportWidth / 2);
       }
       
       applyZoomCallback();
       
-      // 重繪後精確校正滾動位置
-      const finalNewMouseXInContent = anchorTime * zoomLevel;
-      const finalScrollLeft = finalNewMouseXInContent - mouseXInViewport;
-      const finalMaxScrollLeft = Math.max(0, duration() * zoomLevel - viewportWidth);
-      wrapperElement.scrollLeft = Math.max(0, Math.min(finalScrollLeft, finalMaxScrollLeft));
-
-      // 確保寬度正確
       const finalPx = `${duration() * zoomLevel}px`;
       container.style.width = finalPx;
       if (freqGrid) freqGrid.style.width = finalPx;
 
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
-      
-      isZooming = false;
     }, 500); 
   }
 
