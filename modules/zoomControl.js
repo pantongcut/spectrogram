@@ -215,22 +215,22 @@ function applyZoom() {
     applyZoom();
   }
 
-// --- Wheel Zoom Logic (Reverted Container, Fixed Layout Thrashing) ---
+// --- Wheel Zoom Logic (Time-Based Anchoring) ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
-    // 1. [錨點計算] 鎖定當前視角
-    // 使用 scrollWidth 來計算比例是最穩定的，因為它是 Scrollbar 真正的參考依據
-    // 獲取 Zoom 前的滾動寬度
-    const oldScrollWidth = wrapperElement.scrollWidth; 
+    // 1. [錨點計算] 找出當前視窗中心點是「第幾秒」
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
-
-    // 計算視窗中心點相對於「整個可滾動區域」的比例
-    const centerRatio = oldScrollWidth > 0 
-      ? (currentScrollLeft + (viewportWidth / 2)) / oldScrollWidth
-      : 0;
+    
+    // 計算視窗中心點的像素位置 (相對於整個內容的左側)
+    const centerPx = currentScrollLeft + (viewportWidth / 2);
+    
+    // 將像素轉換為時間 (秒)
+    // 公式: Time = Pixel / (PixelsPerSecond)
+    // 這裡使用舊的 zoomLevel
+    const centerTime = centerPx / zoomLevel;
 
     // 2. 計算新的 Zoom Level
     computeMinZoomLevel();
@@ -247,59 +247,57 @@ function applyZoom() {
 
     zoomLevel = newZoomLevel;
     
-    // 3. 視覺變形 (Visual Stretch)
+    // 3. 視覺變形 & 強制更新
     const newTotalWidth = duration() * zoomLevel;
     const newTotalWidthPx = `${newTotalWidth}px`;
     
-    // 確保 Shadow DOM 樣式存在
     _injectShadowDomStyles();
 
-    // 🔥【關鍵修正 1】暫時關閉平滑滾動
-    // 這能防止瀏覽器在改變 scrollLeft 時產生延遲或動畫，確保「瞬移」到位
+    // 暫時關閉平滑滾動 (關鍵!)
     const originalScrollBehavior = wrapperElement.style.scrollBehavior;
     wrapperElement.style.scrollBehavior = 'auto';
 
-    // 🔥【關鍵修正 2】只調整子元素寬度 (Revert 回原本的邏輯)
-    // 這樣做可以讓 #viewer-container 自動撐大，Scrollbar 才會正常運作
+    // 設定寬度
     container.style.width = newTotalWidthPx;
-    
     const freqGrid = document.getElementById('freq-grid');
-    if (freqGrid) {
-      freqGrid.style.width = newTotalWidthPx;
-    }
+    if (freqGrid) freqGrid.style.width = newTotalWidthPx;
 
-    // 🔥【關鍵修正 3】強制讀取新的 scrollWidth (Force Layout / Reflow)
-    // 這行代碼看起來沒做什麼，但讀取 scrollWidth 會迫使瀏覽器立刻計算完上面的 width 設定
-    // 確保 wrapperElement 知道自己已經變寬了
-    const newScrollWidth = wrapperElement.scrollWidth; 
+    // 🔥 強制 Reflow: 讓瀏覽器承認新的寬度
+    // 這是解決「觀察 1」的關鍵，必須讓瀏覽器知道現在可以滾得更遠了
+    const _forceReflow = wrapperElement.scrollWidth; 
 
-    // 4. [錨點定位] 立即校正 Scroll 位置
-    // 使用剛讀取到的 newScrollWidth 進行精確定位
-    const newScrollLeft = (newScrollWidth * centerRatio) - (viewportWidth / 2);
+    // 4. [錨點定位] 將「第幾秒」轉回新的像素位置
+    // 公式: NewPixel = Time * NewZoomLevel
+    const newCenterPx = centerTime * newZoomLevel;
+    
+    // 推算出新的 ScrollLeft (中心點像素 - 視窗一半)
+    let newScrollLeft = newCenterPx - (viewportWidth / 2);
+
+    // 🔥 邊界檢查 (Clamping Correction)
+    // 雖然瀏覽器會自動做，但我們自己算更保險，避免出現負數或溢出
+    const maxScroll = newTotalWidth - viewportWidth;
+    newScrollLeft = Math.max(0, Math.min(newScrollLeft, maxScroll));
     
     wrapperElement.scrollLeft = newScrollLeft;
 
-    // 5. Debounce Redraw (延遲重繪)
-    if (wheelTimeout) {
-      clearTimeout(wheelTimeout);
-    }
+    // 5. Debounce Redraw
+    if (wheelTimeout) clearTimeout(wheelTimeout);
 
     wheelTimeout = setTimeout(() => {
-      // 恢復原本的 scroll behavior
       wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
 
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // 重繪後的二次校正
-        const finalScrollWidth = wrapperElement.scrollWidth;
-        const finalScroll = (finalScrollWidth * centerRatio) - (viewportWidth / 2);
+        // 重繪後的二次精確校正
+        // 因為 ws.zoom 可能會導致 duration 精確度變化，我們再算一次
+        const finalCenterPx = centerTime * zoomLevel;
+        const finalScroll = finalCenterPx - (viewportWidth / 2);
         wrapperElement.scrollLeft = finalScroll;
       }
       
       applyZoomCallback();
       
-      // 確保寬度一致
       const finalPx = `${duration() * zoomLevel}px`;
       container.style.width = finalPx;
       if (freqGrid) freqGrid.style.width = finalPx;
