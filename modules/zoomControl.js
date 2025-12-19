@@ -25,32 +25,36 @@ function _injectCssForSmoothing() {
       const style = document.createElement('style');
       style.id = styleId;
       style.textContent = `
-        /* 1. 允許被壓扁/拉長 (解除剛性限制) */
-        #spectrogram-only, 
-        #spectrogram-only canvas,
+        /* 1. 解除剛性限制，允許縮小 */
         #viewer-container,
-        #freq-grid {
+        #spectrogram-only,
+        #freq-grid,
+        #spectrogram-only canvas,
+        #spectrogram-only wave { /* 加入 wave 以防萬一 */
           min-width: 0 !important;
           max-width: none !important;
         }
 
-        /* 2. 僅針對 spectrogram 內部的 canvas 強制 100% (因為它是 container 的子元素) */
-        #spectrogram-only canvas {
+        /* 2. 核心修正：強制所有子元素填滿父容器 (#viewer-container) */
+        /* 這樣我們在 JS 只要改 viewer-container 的寬度，下面全部都會跟著動 */
+        #spectrogram-only,
+        #freq-grid {
+          width: 100% !important; /* 鎖定為父容器寬度，無視 inline style */
+          height: 100% !important;
+          display: block;
+        }
+
+        /* 3. 強制 Canvas 拉伸 (視覺變形效果) */
+        #spectrogram-only canvas,
+        #spectrogram-only wave,
+        #freq-grid {
           width: 100% !important;
           height: 100% !important;
           image-rendering: auto; 
           transform-origin: 0 0;
         }
-        
-        /* 3. freq-grid 必須由 JS 控制寬度，或者設為 absolute 跟隨內容。
-           這裡確保它不會模糊，但不強制 width: 100% !important，以免擋住 JS 修改 */
-        #freq-grid {
-          image-rendering: auto; 
-          transform-origin: 0 0;
-          /* 確保它是左對齊 */
-          display: block; 
-        }
 
+        /* 4. 確保 wrapper 滾動行為正常 */
         #${wrapperElement.id || 'viewer-wrapper'} {
           scroll-behavior: auto !important;
         }
@@ -82,13 +86,19 @@ function _injectCssForSmoothing() {
     }
   }
 
-function applyZoom() {
+// Helper：取得父容器 (統一控制寬度的地方)
+  function getViewerContainer() {
+    return document.getElementById('viewer-container') || container;
+  }
+
+  function applyZoom() {
     computeMinZoomLevel();
     if (typeof onBeforeZoom === 'function') onBeforeZoom();
     
     const maxZoom = computeMaxZoomLevel();
     zoomLevel = Math.min(Math.max(zoomLevel, minZoomLevel), maxZoom);
 
+    // 這裡只負責數據層面的 zoom
     if (ws && typeof ws.zoom === 'function' &&
         typeof ws.getDuration === 'function' && ws.getDuration() > 0) {
       ws.zoom(zoomLevel);
@@ -98,14 +108,9 @@ function applyZoom() {
     const width = duration() * zoomLevel;
     const widthPx = `${width}px`;
 
-    // 1. 設定 Container (spectrogram-only) 寬度
-    container.style.width = widthPx;
-
-    // 2. [新增] 同步設定 Freq Grid 寬度
-    const freqGrid = document.getElementById('freq-grid');
-    if (freqGrid) {
-      freqGrid.style.width = widthPx;
-    }
+    // 核心修正：直接改變父容器寬度，CSS 會讓內部所有元素自動跟隨 (100%)
+    const viewerContainer = getViewerContainer();
+    viewerContainer.style.width = widthPx;
 
     applyZoomCallback();
     if (typeof onAfterZoom === 'function') onAfterZoom();    
@@ -172,19 +177,23 @@ function applyZoom() {
     applyZoom();
   }
 
-  // --- Wheel Zoom Logic ---
-function handleWheelZoom(e) {
+// --- Wheel Zoom Logic ---
+  function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
     
+    // 取得操作對象 (父容器)
+    const viewerContainer = getViewerContainer();
+
     const viewportWidth = wrapperElement.clientWidth;
     const centerInViewport = viewportWidth / 2;
     const currentScrollLeft = wrapperElement.scrollLeft;
-    // 使用 getBoundingClientRect 確保拿到當前視覺寬度
-    const currentTotalWidth = container.getBoundingClientRect().width || 1;
+    
+    // 使用 viewerContainer 的實際寬度來計算比例
+    const currentTotalWidth = viewerContainer.getBoundingClientRect().width || 1;
     
     const pivotRatio = (currentScrollLeft + centerInViewport) / currentTotalWidth;
 
@@ -201,14 +210,10 @@ function handleWheelZoom(e) {
     const newTotalWidth = dur * newZoomLevel;
     const newTotalWidthPx = `${newTotalWidth}px`;
     
-    // 1. 視覺拉伸 Spectrogram Container
-    container.style.width = newTotalWidthPx;
-
-    // 2. [新增] 視覺拉伸 Freq Grid (讓網格線跟著變寬/變窄)
-    const freqGrid = document.getElementById('freq-grid');
-    if (freqGrid) {
-      freqGrid.style.width = newTotalWidthPx;
-    }
+    // 核心修正：只調整父容器寬度。
+    // 因為 CSS 設定了 #spectrogram-only 和 #freq-grid 為 width: 100% !important
+    // 所以它們會立刻跟著父容器縮放，不會有任何延遲或剛性限制。
+    viewerContainer.style.width = newTotalWidthPx;
 
     // Update Scroll
     const targetScroll = (newTotalWidth * pivotRatio) - centerInViewport;
@@ -222,21 +227,14 @@ function handleWheelZoom(e) {
     wheelTimeout = setTimeout(() => {
       if (ws) {
         ws.zoom(zoomLevel);
-        // 重繪後的校正
+        // 校正
         const finalWidth = duration() * zoomLevel;
         const finalScroll = (finalWidth * pivotRatio) - centerInViewport;
         wrapperElement.scrollLeft = finalScroll;
       }
       
-      // 注意：這裡通常會呼叫 drawGrid 之類的函數重繪 Canvas 內容
-      // 確保重繪時將 canvas.width 屬性 (解析度) 也更新，而不只是 style.width
       applyZoomCallback();
       
-      // [新增] 確保重繪後 Grid 的 style.width 還是正確的 (雖然後面 applyZoom 會處理，但雙重保險)
-      if (freqGrid) {
-         freqGrid.style.width = `${duration() * zoomLevel}px`;
-      }
-
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
     }, 500); 
