@@ -137,13 +137,16 @@ function applyZoom() {
       ws.zoom(zoomLevel);
     }
     
-    // 確保 Shadow DOM 樣式存在 (以防 Wavesurfer 重建了 DOM)
+    // 確保 Shadow DOM 樣式
     _injectShadowDomStyles();
 
     const width = duration() * zoomLevel;
     const widthPx = `${width}px`;
 
-    // 同步更新兩者
+    // 修正：同時設定 viewerContainer
+    const viewerContainer = document.getElementById('viewer-container') || container.parentElement;
+    if (viewerContainer) viewerContainer.style.width = widthPx;
+    
     container.style.width = widthPx;
     const freqGrid = document.getElementById('freq-grid');
     if (freqGrid) {
@@ -215,23 +218,23 @@ function applyZoom() {
     applyZoom();
   }
 
-// --- Wheel Zoom Logic (Final Fix for Anchoring) ---
+// --- Wheel Zoom Logic (Fixed for Anchoring & Clamping) ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
-    // 1. [錨點計算 Step A] 鎖定當前視角
-    // 使用 getBoundingClientRect 獲取「當前視覺上的絕對寬度」，這比數學計算更準確
-    const currentRect = container.getBoundingClientRect();
-    const currentVisualWidth = currentRect.width || 1;
-    
+    // 1. [錨點計算] 使用純數學公式，避免 DOM 渲染延遲造成的數值誤差
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
     
-    // 計算滑鼠所在的中心點，佔當前總寬度的百分比 (Ratio)
-    // 這裡我們以「視窗中心」為錨點 (若想以滑鼠游標為錨點，需用 e.clientX 計算 offset)
-    const centerOffset = currentScrollLeft + (viewportWidth / 2);
-    const centerRatio = centerOffset / currentVisualWidth;
+    // 計算當前邏輯寬度 (數學值)
+    const currentMathWidth = duration() * zoomLevel;
+    
+    // 計算滑鼠視窗中心點相對於總長度的比例 (Ratio)
+    // 如果是第一次加載 (width=0)，比例設為 0
+    const centerRatio = currentMathWidth > 0 
+      ? (currentScrollLeft + (viewportWidth / 2)) / currentMathWidth
+      : 0;
 
     // 2. 計算新的 Zoom Level
     computeMinZoomLevel();
@@ -252,23 +255,29 @@ function applyZoom() {
     const newTotalWidth = duration() * zoomLevel;
     const newTotalWidthPx = `${newTotalWidth}px`;
     
-    // 確保 Shadow DOM 樣式存在 (這是上一題的關鍵解法)
+    // 確保 Shadow DOM 樣式存在
     _injectShadowDomStyles();
 
-    // 設定寬度 (Spectrogram & Grid)
+    // 🔥【關鍵修正 A】取得 Viewer Container (Wrapper 的直接子元素)
+    // 我們必須直接撐大這個容器，Wrapper 才會立刻知道能滾動到哪裡
+    const viewerContainer = document.getElementById('viewer-container') || container.parentElement || container;
+
+    // 設定寬度：同時設定 Container、Spectrogram 和 Grid
+    // 這樣做是為了確保 DOM 結構由外而內都是正確的寬度
+    viewerContainer.style.width = newTotalWidthPx; 
     container.style.width = newTotalWidthPx;
+    
     const freqGrid = document.getElementById('freq-grid');
     if (freqGrid) {
       freqGrid.style.width = newTotalWidthPx;
     }
 
-    // 🔥【關鍵修正】強制瀏覽器立刻重算佈局 (Force Layout / Reflow)
-    // 讀取 offsetWidth 會強迫瀏覽器立刻應用上面的 width 設定。
-    // 如果不加這行，下面的 scrollLeft 會被限制在「舊寬度」的範圍內，導致畫面右移。
-    const _forceReflow = container.offsetWidth; 
+    // 🔥【關鍵修正 B】強制 Wrapper 重算滾動區域 (Force Layout)
+    // 讀取 scrollWidth 會迫使瀏覽器承認上面的 style.width 設定
+    const _forceReflow = wrapperElement.scrollWidth; 
 
-    // 4. [錨點計算 Step B] 立即校正 Scroll 位置
-    // 因為已經強制 Reflow，現在 scrollLeft 可以安全地設定到更遠的位置
+    // 4. [錨點定位] 立即校正 Scroll 位置
+    // 因為 Wrapper 已經知道變寬了，這裡的數值就不會被 Clamp 住
     const newScrollLeft = (newTotalWidth * centerRatio) - (viewportWidth / 2);
     
     wrapperElement.scrollLeft = newScrollLeft;
@@ -282,19 +291,19 @@ function applyZoom() {
       if (ws) {
         ws.zoom(zoomLevel);
         
-        // 重繪後的二次校正 (修正 pixel 誤差)
+        // 重繪後的二次校正 (修正微小誤差)
         const finalTotalWidth = duration() * zoomLevel;
-        // 同樣需要強制 Reflow 以防萬一，但通常這時已經穩定了
         const finalScroll = (finalTotalWidth * centerRatio) - (viewportWidth / 2);
         wrapperElement.scrollLeft = finalScroll;
       }
       
       applyZoomCallback();
       
-      container.style.width = `${duration() * zoomLevel}px`;
-      if (freqGrid) {
-         freqGrid.style.width = `${duration() * zoomLevel}px`;
-      }
+      // 保險：重繪後再次確認寬度
+      const finalPx = `${duration() * zoomLevel}px`;
+      viewerContainer.style.width = finalPx; // 別忘了這個
+      container.style.width = finalPx;
+      if (freqGrid) freqGrid.style.width = finalPx;
 
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
