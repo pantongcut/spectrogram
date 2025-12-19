@@ -1,11 +1,8 @@
 // modules/zoomControl.js
 
 /**
- * Zoom Control Optimized for "Center-Anchored" Visual Stretching.
- * * Behavior:
- * 1. During Zoom (Ctrl+Scroll): Changes CSS width immediately causing the browser to 
- * stretch the existing canvas image. Anchors strictly to the center of the viewport.
- * 2. After Zoom: Debounces the expensive redraw (ws.zoom) to prevent lag.
+ * Zoom Control with "Center-Anchored" Visual Stretching.
+ * Update: Fixes Zoom-Out "stuck" issue by overriding CSS min-width constraints.
  */
 export function initZoomControls(ws, container, duration, applyZoomCallback,
                                 wrapperElement, onBeforeZoom = null,
@@ -20,21 +17,30 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   let minZoomLevel = 250;
   let wheelTimeout = null;
 
-  // [CSS] Force smooth visual scaling and remove scroll lag
+  // [CSS Fix] 強制瀏覽器允許容器小於 Canvas 的原始寬度
   function _injectCssForSmoothing() {
     const styleId = 'spectrogram-smooth-zoom-style';
     if (!document.getElementById(styleId)) {
       const style = document.createElement('style');
       style.id = styleId;
       style.textContent = `
+        /* 關鍵修復：允許 Canvas 被 CSS 壓扁，不受原始 width 屬性撐大 */
+        #spectrogram-only, 
+        #spectrogram-only canvas,
+        #viewer-container {
+          min-width: 0 !important;
+          max-width: none !important;
+        }
+
         #spectrogram-only canvas {
           width: 100% !important;
           height: 100% !important;
-          /* Use linear interpolation for smoother stretching during zoom */
+          /* 確保縮放時不會模糊，根據喜好可改為 pixelated */
           image-rendering: auto; 
           transform-origin: 0 0;
         }
-        /* Prevents browser smooth-scrolling from fighting our precise math */
+
+        /* 移除 Scroll 行為干擾 */
         #${wrapperElement.id || 'viewer-wrapper'} {
           scroll-behavior: auto !important;
         }
@@ -58,14 +64,14 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
   }
 
   function computeMinZoomLevel() {
-    const visibleWidth = wrapperElement.clientWidth;
+    // 確保 wrapper 有寬度，避免除以 0
+    const visibleWidth = wrapperElement.clientWidth || 1000;
     const dur = duration();
     if (dur > 0) {
       minZoomLevel = Math.floor((visibleWidth - 2) / dur);
     }
   }
 
-  // Standard Button/API Zoom (Non-Wheel)
   function applyZoom() {
     computeMinZoomLevel();
     if (typeof onBeforeZoom === 'function') onBeforeZoom();
@@ -73,7 +79,6 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     const maxZoom = computeMaxZoomLevel();
     zoomLevel = Math.min(Math.max(zoomLevel, minZoomLevel), maxZoom);
 
-    // For button clicks, we redraw immediately
     if (ws && typeof ws.zoom === 'function' &&
         typeof ws.getDuration === 'function' && ws.getDuration() > 0) {
       ws.zoom(zoomLevel);
@@ -101,7 +106,6 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     if (zoomOutBtn) zoomOutBtn.disabled = zoomLevel <= minZoomLevel;
   }
 
-  // Button Listeners
   if (zoomInBtn) {
     zoomInBtn.onclick = () => {
       const maxZoom = computeMaxZoomLevel();
@@ -128,7 +132,6 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     };
   }
 
-  // Keyboard Shortcuts
   document.addEventListener('keydown', (e) => {
     if (!e.ctrlKey) return; 
     if (e.key === 'ArrowUp' && typeof onCtrlArrowUp === 'function') {
@@ -149,9 +152,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     applyZoom();
   }
 
-  /**
-   * Precise Center-Anchored Wheel Zoom Logic
-   */
+  // --- Wheel Zoom Logic ---
   function handleWheelZoom(e) {
     if (!e.ctrlKey) return; 
     e.preventDefault();
@@ -159,73 +160,58 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
     
-    // --- 1. Calculate Pivot Point (CENTER of Viewport) ---
-    // Instead of mouse position, we strictly use the visual center.
+    // 1. Calculate Pivot (Center of Viewport)
     const viewportWidth = wrapperElement.clientWidth;
     const centerInViewport = viewportWidth / 2;
-    
-    // Get current dimensions
     const currentScrollLeft = wrapperElement.scrollLeft;
-    // Use container width or current calculated width
+    // 使用 getBoundingClientRect 確保拿到的是當前視覺寬度
     const currentTotalWidth = container.getBoundingClientRect().width || 1;
     
-    // Calculate the "Time Ratio" at the center of the screen (0.0 - 1.0)
-    // Formula: (ScrollLeft + ViewportCenter) / TotalWidth
+    // Pivot Ratio (0.0 to 1.0)
     const pivotRatio = (currentScrollLeft + centerInViewport) / currentTotalWidth;
 
-    // --- 2. Calculate New Zoom Level ---
+    // 2. Calculate New Zoom
     const delta = -e.deltaY;
-    // Smoother scaling factor
     const scaleFactor = 1 + (delta * 0.001); 
     
     let newZoomLevel = zoomLevel * scaleFactor;
     newZoomLevel = Math.min(Math.max(newZoomLevel, minZoomLevel), maxZoom);
 
-    // Prevent micro-updates
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
-    // --- 3. Apply Visual Changes Immediately (Stretch Mode) ---
+    // 3. Apply Visual Stretch
     zoomLevel = newZoomLevel;
-
     const dur = duration();
     const newTotalWidth = dur * newZoomLevel;
     
-    // [KEY CHANGE]: Update CSS Width. 
-    // Since ws.zoom() is NOT called yet, the browser just stretches the existing canvas.
+    // 這行會觸發 CSS 寬度變化。
+    // 如果沒有上面的 min-width: 0 !important; CSS，Zoom Out 時這裡會無效。
     container.style.width = `${newTotalWidth}px`;
 
-    // --- 4. Synchronize Scroll to Maintain Center Anchor ---
-    // NewScroll = (NewWidth * OldCenterRatio) - CenterOffset
+    // 4. Update Scroll Position (Sync)
     const targetScroll = (newTotalWidth * pivotRatio) - centerInViewport;
-
-    // Apply scroll IMMEDIATELY to prevent visual jumping during the stretch
     wrapperElement.scrollLeft = targetScroll;
 
-    // --- 5. Debounce the Heavy Redraw ---
+    // 5. Debounce Redraw
     if (wheelTimeout) {
       clearTimeout(wheelTimeout);
     }
 
-    // Wait until scrolling stops (e.g., 500ms) before redrawing the high-res spectrogram
+    // 100ms 延遲讓視覺上有時間顯示拉伸效果
     wheelTimeout = setTimeout(() => {
-      
       if (ws) {
-        // Now we actually redraw the spectrogram at the new resolution
         ws.zoom(zoomLevel);
         
-        // Re-align perfectly one last time after the DOM update
-        // (WaveSurfer might slightly adjust pixel widths during render)
+        // Final Alignment correction
         const finalWidth = duration() * zoomLevel;
         const finalScroll = (finalWidth * pivotRatio) - centerInViewport;
         wrapperElement.scrollLeft = finalScroll;
       }
       
-      // Update axes, grids, and UI
       applyZoomCallback();
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
-      
-    }, 500); 
+    }, 100); 
   }
 
   if (wrapperElement) {
