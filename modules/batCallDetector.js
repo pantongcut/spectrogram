@@ -357,14 +357,10 @@ export class BatCallDetector {
     return null;
   }
   
-  /**
-   * Compute frequency trajectory for visualization
-   * [FIX] Added noise thresholding to avoid drawing lines through silence/background noise
-   */
 /**
    * Compute frequency trajectory for visualization
-   * [FIX 2025] Dynamic thresholding based on actual analysis parameters
-   * allows visualizing weak tails detected by optimal threshold algorithms.
+   * [FIX 2025] Dynamic thresholding WITHOUT global noise floor clamping.
+   * Trust the specific thresholds found by the optimal analysis algorithms.
    */
   computeFrequencyTrajectory(call) {
     if (!call || !call.spectrogram || !call.timeFrames) {
@@ -376,7 +372,7 @@ export class BatCallDetector {
     const timeFrames = call.timeFrames;
     const freqBins = call.freqBins;
 
-    // Calculate local max (Segment Peak Power)
+    // 1. Calculate Local Max (Segment Peak Power)
     let localMax = -Infinity;
     for (let f = 0; f < spectrogram.length; f++) {
       for (let b = 0; b < spectrogram[f].length; b++) {
@@ -387,9 +383,7 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // [FIX 2025] Dynamic Trajectory Threshold Calculation
-    // Instead of fixed -30dB, adapt to the thresholds actually used during detection.
-    // This ensures weak Start/End tails found by findOptimal... are visible.
+    // [CRITICAL FIX] Dynamic Trajectory Threshold
     // ============================================================
     let trajectoryThreshold;
 
@@ -400,39 +394,29 @@ export class BatCallDetector {
         const lowThreshRel = call.lowFreqThreshold_dB_used != null ? call.lowFreqThreshold_dB_used : -24;
 
         // 1. Pick the lowest (most permissive) threshold used for this call
-        //    (e.g., if lowFreq used -50dB and highFreq used -30dB, base it on -50dB)
+        //    If detection found signal at -60dB, we must visualize it at -60dB
         const lowestUsedThreshRel = Math.min(highThreshRel, lowThreshRel);
 
-        // 2. Add a visual buffer (e.g., -3dB) to prevent fragmentation at the exact edge
+        // 2. Add a visual buffer (-3dB) to prevent fragmentation at the exact edge
         trajectoryThreshold = localMax + lowestUsedThreshRel - 3;
+        
+        // [DEBUG LOG] Uncomment to verify threshold is low enough
+        // console.log(`[Trajectory] Peak: ${localMax.toFixed(1)}, UsedRel: ${lowestUsedThreshRel}, Threshold: ${trajectoryThreshold.toFixed(1)}`);
+
     } else {
-        // Fallback (e.g. Fast Mode or raw detection):
-        // Use a more permissive default than the old -30dB. 
-        // -45dB is usually safe to show weak calls without showing too much noise.
+        // Fallback (e.g. Fast Mode): Relaxed default
         trajectoryThreshold = localMax - 45;
     }
 
-    // [SAFETY] Noise Floor Check
-    // Prevent the line from drawing purely in the background noise
-    if (call.noiseFloor_dB !== null && call.noiseFloor_dB !== undefined) {
-        // Ensure we are at least slightly above the noise floor (e.g. +1dB)
-        const safeNoiseLimit = call.noiseFloor_dB + 1;
-        
-        // If our calculated threshold dips below noise floor, clamp it up
-        if (trajectoryThreshold < safeNoiseLimit) {
-            trajectoryThreshold = safeNoiseLimit;
-        }
-    } else {
-        // If no noise floor known, hard clamp at -80dB absolute to prevent errors
-        if (trajectoryThreshold < -80) trajectoryThreshold = -80;
+    // [MODIFIED SAFETY] Absolute Floor Check Only
+    // REMOVED the global noiseFloor_dB check because it truncates valid faint tails.
+    // Only protect against mathematical absurdity (e.g. -150dB).
+    if (trajectoryThreshold < -85) {
+        trajectoryThreshold = -85;
     }
 
-    // Debug log (optional, for tuning)
-    // console.log(`Trajectory Threshold: ${trajectoryThreshold.toFixed(1)} dB (Peak: ${localMax.toFixed(1)})`);
-    
-    // Loop frames to build trajectory
+    // 2. Generate Trajectory Points
     for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
-      const currentTime = timeFrames[frameIdx];
       const framePower = spectrogram[frameIdx];
       
       // Find peak frequency bin in this frame
@@ -446,13 +430,14 @@ export class BatCallDetector {
         }
       }
 
-      // [VISUAL FIX] If frame energy is below threshold, return null (break line)
+      // If the strongest point in this frame is below our dynamic threshold,
+      // it is truly silence/background. Break the line.
       if (maxPower < trajectoryThreshold) {
         trajectory.push(null);
         continue;
       }
 
-      // Apply parabolic interpolation for sub-bin precision
+      // Parabolic Interpolation for smooth frequency curve
       let freqHz = freqBins[peakBinIdx];
       
       if (peakBinIdx > 0 && peakBinIdx < framePower.length - 1) {
