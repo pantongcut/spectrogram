@@ -304,7 +304,7 @@ export async function runAutoDetection(sensitivityValue = detectionSensitivity) 
     detector.config.callThreshold_dB = sensitivityDB;
     detector.config.fftSize = ANALYSIS_FFT_SIZE;        // Fixed at 1024
     detector.config.windowType = ANALYSIS_WINDOW;       // Fixed at 'hann'
-    detector.config.enableBackwardEndFreqScan = false;   // Ensure Anti-rebounce enabled
+    detector.config.enableBackwardEndFreqScan = true;   // Ensure Anti-rebounce enabled
     
     // 5. Get audio data from decoded buffer
     const decodedData = ws.getDecodedData();

@@ -361,6 +361,11 @@ export class BatCallDetector {
    * Compute frequency trajectory for visualization
    * [FIX] Added noise thresholding to avoid drawing lines through silence/background noise
    */
+/**
+   * Compute frequency trajectory for visualization
+   * [FIX 2025] Dynamic thresholding based on actual analysis parameters
+   * allows visualizing weak tails detected by optimal threshold algorithms.
+   */
   computeFrequencyTrajectory(call) {
     if (!call || !call.spectrogram || !call.timeFrames) {
       return [];
@@ -371,7 +376,7 @@ export class BatCallDetector {
     const timeFrames = call.timeFrames;
     const freqBins = call.freqBins;
 
-    // Calculate local noise floor (simple estimate of segment maximum)
+    // Calculate local max (Segment Peak Power)
     let localMax = -Infinity;
     for (let f = 0; f < spectrogram.length; f++) {
       for (let b = 0; b < spectrogram[f].length; b++) {
@@ -381,9 +386,51 @@ export class BatCallDetector {
       }
     }
     
-    // Only record points with energy > (Peak - 30dB) to avoid drawing background noise
-    const trajectoryThreshold = localMax - 30;
+    // ============================================================
+    // [FIX 2025] Dynamic Trajectory Threshold Calculation
+    // Instead of fixed -30dB, adapt to the thresholds actually used during detection.
+    // This ensures weak Start/End tails found by findOptimal... are visible.
+    // ============================================================
+    let trajectoryThreshold;
+
+    // Check if we have specific thresholds from the analysis phase
+    if (call.lowFreqThreshold_dB_used != null || call.highFreqThreshold_dB_used != null) {
+        // Retrieve the relative thresholds used (defaults to -24 if missing)
+        const highThreshRel = call.highFreqThreshold_dB_used != null ? call.highFreqThreshold_dB_used : -24;
+        const lowThreshRel = call.lowFreqThreshold_dB_used != null ? call.lowFreqThreshold_dB_used : -24;
+
+        // 1. Pick the lowest (most permissive) threshold used for this call
+        //    (e.g., if lowFreq used -50dB and highFreq used -30dB, base it on -50dB)
+        const lowestUsedThreshRel = Math.min(highThreshRel, lowThreshRel);
+
+        // 2. Add a visual buffer (e.g., -3dB) to prevent fragmentation at the exact edge
+        trajectoryThreshold = localMax + lowestUsedThreshRel - 3;
+    } else {
+        // Fallback (e.g. Fast Mode or raw detection):
+        // Use a more permissive default than the old -30dB. 
+        // -45dB is usually safe to show weak calls without showing too much noise.
+        trajectoryThreshold = localMax - 45;
+    }
+
+    // [SAFETY] Noise Floor Check
+    // Prevent the line from drawing purely in the background noise
+    if (call.noiseFloor_dB !== null && call.noiseFloor_dB !== undefined) {
+        // Ensure we are at least slightly above the noise floor (e.g. +1dB)
+        const safeNoiseLimit = call.noiseFloor_dB + 1;
+        
+        // If our calculated threshold dips below noise floor, clamp it up
+        if (trajectoryThreshold < safeNoiseLimit) {
+            trajectoryThreshold = safeNoiseLimit;
+        }
+    } else {
+        // If no noise floor known, hard clamp at -80dB absolute to prevent errors
+        if (trajectoryThreshold < -80) trajectoryThreshold = -80;
+    }
+
+    // Debug log (optional, for tuning)
+    // console.log(`Trajectory Threshold: ${trajectoryThreshold.toFixed(1)} dB (Peak: ${localMax.toFixed(1)})`);
     
+    // Loop frames to build trajectory
     for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
       const currentTime = timeFrames[frameIdx];
       const framePower = spectrogram[frameIdx];
@@ -399,8 +446,7 @@ export class BatCallDetector {
         }
       }
 
-      // [VISUAL FIX] If frame energy is below threshold, it's likely background noise
-      // Return null as a break marker so drawing layer can skip this point
+      // [VISUAL FIX] If frame energy is below threshold, return null (break line)
       if (maxPower < trajectoryThreshold) {
         trajectory.push(null);
         continue;
