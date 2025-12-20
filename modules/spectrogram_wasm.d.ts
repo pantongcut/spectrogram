@@ -199,21 +199,6 @@ export class WaveformEngine {
 }
 
 /**
- * 計算 Power Spectrum (使用 FFT，支持 Overlap)
- * 
- * # Arguments
- * * `audio_data` - 音頻數據 (Float32Array)
- * * `sample_rate` - 採樣率 (Hz)
- * * `fft_size` - FFT 大小
- * * `window_type` - 窗函數類型 (hann, hamming, blackman, gauss, rectangular, triangular)
- * * `overlap_percent` - 重疊百分比 (0-99, 或 null/0 表示自動 75%)
- * 
- * # Returns
- * 頻域功率譜 (dB 值)
- */
-export function compute_power_spectrum(audio_data: Float32Array, sample_rate: number, fft_size: number, window_type: string, overlap_percent?: number | null): Float32Array;
-
-/**
  * 計算波形峰值用於可視化
  * 
  * 該函數對音頻通道進行下采樣，將其縮放為指定數量的峰值點。
@@ -233,22 +218,6 @@ export function compute_power_spectrum(audio_data: Float32Array, sample_rate: nu
 export function compute_wave_peaks(channel_data: Float32Array, num_peaks: number): Float32Array;
 
 /**
- * Detect segments in a spectrogram based on energy threshold
- *
- * # Arguments
- * * `spectrogram_flat` - Flattened spectrogram matrix (row-major, dB values)
- * * `num_cols` - Number of frequency bins (columns)
- * * `threshold_db` - Energy threshold in dB
- * * `sample_rate` - Sample rate in Hz
- * * `hop_size` - Hop size in samples
- * * `padding_ms` - Padding in milliseconds
- *
- * # Returns
- * Flattened array [start1, end1, start2, end2, ...] in seconds
- */
-export function detect_segments(spectrogram_flat: Float32Array, num_cols: number, threshold_db: number, sample_rate: number, hop_size: number, padding_ms: number): Float32Array;
-
-/**
  * 找到整個音頻緩衝區的全局最大值（用於標準化）
  * 
  * # Arguments
@@ -259,32 +228,14 @@ export function detect_segments(spectrogram_flat: Float32Array, num_cols: number
  */
 export function find_global_max(channel_data: Float32Array): number;
 
-/**
- * 從 Power Spectrum 中找到峰值頻率
- * 
- * # Arguments
- * * `spectrum` - Power Spectrum (dB 值)
- * * `sample_rate` - 採樣率
- * * `fft_size` - FFT 大小
- * * `flow_hz` - 最低頻率 (Hz)
- * * `fhigh_hz` - 最高頻率 (Hz)
- * 
- * # Returns
- * 峰值頻率 (Hz)，如果未找到返回 0
- */
-export function find_peak_frequency_from_spectrum(spectrum: Float32Array, sample_rate: number, fft_size: number, flow_hz: number, fhigh_hz: number): number;
-
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbg_spectrogramengine_free: (a: number, b: number) => void;
   readonly __wbg_waveformengine_free: (a: number, b: number) => void;
-  readonly compute_power_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly compute_wave_peaks: (a: number, b: number, c: number) => [number, number];
-  readonly detect_segments: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly find_global_max: (a: number, b: number) => number;
-  readonly find_peak_frequency_from_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly spectrogramengine_clear_filter_bank: (a: number) => void;
   readonly spectrogramengine_compute_spectrogram: (a: number, b: number, c: number, d: number) => [number, number];
   readonly spectrogramengine_compute_spectrogram_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];

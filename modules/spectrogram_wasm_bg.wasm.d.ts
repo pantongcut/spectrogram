@@ -3,11 +3,8 @@
 export const memory: WebAssembly.Memory;
 export const __wbg_spectrogramengine_free: (a: number, b: number) => void;
 export const __wbg_waveformengine_free: (a: number, b: number) => void;
-export const compute_power_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const compute_wave_peaks: (a: number, b: number, c: number) => [number, number];
-export const detect_segments: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
 export const find_global_max: (a: number, b: number) => number;
-export const find_peak_frequency_from_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
 export const spectrogramengine_clear_filter_bank: (a: number) => void;
 export const spectrogramengine_compute_spectrogram: (a: number, b: number, c: number, d: number) => [number, number];
 export const spectrogramengine_compute_spectrogram_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
