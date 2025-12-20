@@ -83,15 +83,35 @@ export function initAutoDetection(config) {
         return;
       }
 
-      // Get spectrogram data from lastRenderData
-      const spectrogramMatrix = plugin.lastRenderData;
-      if (!spectrogramMatrix || !Array.isArray(spectrogramMatrix) || spectrogramMatrix.length === 0) {
-        console.warn('[autoDetectionControl] ❌ No spectrogram data available in plugin.lastRenderData');
-        console.log('[autoDetectionControl] plugin.lastRenderData:', spectrogramMatrix);
+      // Get WaveSurfer instance and decoded audio data
+      const wavesurfer = getWavesurfer();
+      if (!wavesurfer) {
+        console.warn('[autoDetectionControl] ❌ No WaveSurfer instance available');
         return;
       }
 
-      console.log(`[autoDetectionControl] Spectrogram data available: ${spectrogramMatrix.length} frames x ${spectrogramMatrix[0]?.length || 0} bins`);
+      const decodedData = wavesurfer.getDecodedData();
+      if (!decodedData) {
+        console.warn('[autoDetectionControl] ❌ No decoded audio data available');
+        return;
+      }
+
+      // Get full spectrogram matrix from plugin.getFrequencies()
+      // This returns array of frames, each frame contains frequency bins
+      const spectrogramMatrix = await plugin.getFrequencies(decodedData);
+      if (!spectrogramMatrix || !Array.isArray(spectrogramMatrix) || spectrogramMatrix.length === 0) {
+        console.warn('[autoDetectionControl] ❌ No spectrogram data from getFrequencies()');
+        return;
+      }
+
+      // Get the first channel if multiple channels exist
+      let specData = spectrogramMatrix[0] || spectrogramMatrix;
+      if (!Array.isArray(specData) || specData.length === 0) {
+        console.warn('[autoDetectionControl] ❌ Invalid spectrogram data structure');
+        return;
+      }
+
+      console.log(`[autoDetectionControl] Spectrogram data available: ${specData.length} frames x ${specData[0]?.length || 0} bins`);
 
       // Get FFT parameters from plugin
       const fftSize = plugin.getFftSize?.() || 512;
@@ -100,7 +120,7 @@ export function initAutoDetection(config) {
 
       // Calculate peak max if not already calculated
       if (currentPeakMax === null) {
-        currentPeakMax = calculatePeakMax(spectrogramMatrix);
+        currentPeakMax = calculatePeakMax(specData);
       }
 
       // Calculate threshold in dB
@@ -117,9 +137,26 @@ export function initAutoDetection(config) {
         return;
       }
 
-      // Prepare flat spectrogram array
-      const flatArray = new Float32Array(spectrogramMatrix.flat());
-      const numCols = spectrogramMatrix[0]?.length || 128;
+      // Prepare flat spectrogram array from Uint8Array frames
+      let flatArray;
+      const numFrames = specData.length;
+      const numBins = specData[0]?.length || 128;
+      
+      if (specData[0] instanceof Uint8Array) {
+        // Convert Uint8Array frames to flat Float32Array
+        flatArray = new Float32Array(numFrames * numBins);
+        for (let i = 0; i < numFrames; i++) {
+          const frameData = specData[i];
+          for (let j = 0; j < numBins; j++) {
+            flatArray[i * numBins + j] = frameData[j];
+          }
+        }
+      } else {
+        // Assume already flat or array-like
+        flatArray = new Float32Array(specData.flat());
+      }
+      
+      const numCols = numBins;
 
       console.log(`[autoDetectionControl] Calling detect_segments with: flatArray.length=${flatArray.length}, numCols=${numCols}, threshold=${thresholdDb.toFixed(2)}, sampleRate=${sampleRate}, hopSize=${hopSize}`);
 
@@ -177,16 +214,33 @@ export function initAutoDetection(config) {
    * @returns {number} Peak maximum in dB
    */
   function calculatePeakMax(spectrogramValues) {
-    let max = -Infinity;
-    for (let i = 0; i < spectrogramValues.length; i++) {
-      for (let j = 0; j < spectrogramValues[i].length; j++) {
-        const val = spectrogramValues[i][j];
-        if (val > max) {
-          max = val;
+    // Spectrogram values should be Uint8Array (0-255 scale)
+    // We need to find the maximum value and convert to dB
+    
+    let maxU8 = 0;
+    if (Array.isArray(spectrogramValues) && spectrogramValues.length > 0) {
+      for (let i = 0; i < spectrogramValues.length; i++) {
+        if (spectrogramValues[i] && spectrogramValues[i].length > 0) {
+          for (let j = 0; j < spectrogramValues[i].length; j++) {
+            const val = spectrogramValues[i][j];
+            if (val > maxU8) {
+              maxU8 = val;
+            }
+          }
         }
       }
     }
-    return max === -Infinity ? 0 : max;
+    
+    // If we found a value, convert from U8 scale (0-255) to dB scale
+    // Assume default 80 dB range: 255 -> 0dB, 0 -> -80dB
+    if (maxU8 > 0) {
+      const rangeDB = 80;
+      const peakMaxDb = (maxU8 / 255.0) * rangeDB - rangeDB;
+      console.log(`[autoDetectionControl] calculatePeakMax: maxU8=${maxU8}, peakMaxDb=${peakMaxDb.toFixed(2)}`);
+      return peakMaxDb;
+    }
+    
+    return 0;
   }
 
   // Reset peak max when a new file is loaded
