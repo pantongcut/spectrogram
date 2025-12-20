@@ -1028,11 +1028,6 @@ class h extends s {
                         }
                     }
                 }
-
-                // [NEW] Draw Auto Detection Overlay if enabled and calls are available
-                if (this.options && this.options.peakMode && this.detectedCalls && this.detectedCalls.length > 0) {
-                    this.drawDetectionOverlay(canvasCtx, this.detectedCalls);
-                }
             }));
         }
         
@@ -1441,110 +1436,6 @@ async getFrequencies(t) {
             out.push(outArr);
         }
         return out
-    }
-
-    /**
-     * Set detected bat calls for overlay rendering
-     * @param {Array} calls - Array of detected call objects from BatCallDetector
-     */
-    setDetectedCalls(calls) {
-        this.detectedCalls = calls || [];
-        // Re-render if we have last render data
-        if (this.lastRenderData) {
-            this.drawSpectrogram(this.lastRenderData);
-        }
-    }
-
-    /**
-     * Draw detection overlay on canvas
-     * Renders visual representations of detected bat calls
-     * [VISUAL FIX] Improved rendering with break point handling and jump protection
-     */
-    drawDetectionOverlay(ctx, calls) {
-        if (!ctx || !calls || calls.length === 0) return;
-        
-        const sampleRate = this.buffer.sampleRate;
-        const height = this.canvas.height;
-        const width = this.canvas.width;
-        const totalDuration = this.buffer.duration;
-        
-        const viewMinHz = this.frequencyMin || 0;
-        const viewMaxHz = this.frequencyMax || (sampleRate / 2);
-        const viewRangeHz = viewMaxHz - viewMinHz;
-
-        // [STYLE CHANGE] Use vibrant orange/gold color for better visibility
-        // More visible against dark spectrogram background, good contrast with blue markers
-        ctx.lineWidth = 2.5; // Slightly thicker
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.strokeStyle = "rgba(255, 165, 0, 0.9)"; // Orange/Gold (previously cyan)
-
-        ctx.beginPath(); // Start path for entire overlay layer
-
-        calls.forEach(call => {
-            if (!call || !call.frequencyTrajectory) return;
-
-            // Check if call is visible in current view
-            if (call.endTime_s < 0 || call.startTime_s > totalDuration) {
-                return; // Call is outside view
-            }
-
-            let isLineActive = false;
-            let lastX = -1;
-            let lastY = -1;
-
-            // Draw frequency trajectory with break point handling
-            call.frequencyTrajectory.forEach((point) => {
-                // [VISUAL FIX] Handle break markers (null points)
-                // null indicates a gap where trajectory should be broken
-                if (!point) {
-                    isLineActive = false; // Next point will need moveTo
-                    return;
-                }
-
-                const x = (point.time_s / totalDuration) * width;
-                
-                // Map frequency to Y coordinate
-                let freqHz = point.freq_Hz;
-                if (!freqHz && point.freq_kHz) {
-                    freqHz = point.freq_kHz * 1000;
-                }
-                
-                // Skip out-of-view frequencies
-                if (freqHz < viewMinHz || freqHz > viewMaxHz) {
-                    isLineActive = false;
-                    return;
-                }
-                
-                const yFraction = (freqHz - viewMinHz) / viewRangeHz;
-                const y = height - (yFraction * height);
-                
-                // [VISUAL FIX] Jump protection
-                // Detect large discontinuities that suggest separate calls being incorrectly connected
-                // If Y-jump > 150px or X-jump > 50px (indicating different calls), break the line
-                if (isLineActive && lastY !== -1) {
-                    const yDiff = Math.abs(y - lastY);
-                    const xDiff = Math.abs(x - lastX);
-                    
-                    // Threshold: Y-axis jump > 150px OR X-axis jump > 50px indicates separate calls
-                    if (yDiff > 150 || xDiff > 50) {
-                        isLineActive = false; // Break connection
-                    }
-                }
-
-                if (!isLineActive) {
-                    ctx.moveTo(x, y);
-                    isLineActive = true;
-                } else {
-                    ctx.lineTo(x, y);
-                }
-                
-                lastX = x;
-                lastY = y;
-            });
-        });
-        
-        ctx.stroke(); // Draw all line segments at once for efficiency
     }
 }
 

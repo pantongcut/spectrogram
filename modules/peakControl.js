@@ -1,24 +1,24 @@
 /**
- * Auto Detection Control Module
- * Manages Auto Bat Call Detection mode toggle and detection sensitivity
+ * Peak Control Module
+ * 管理 Peak Mode 的切換和 Spectrogram 重新渲染
  */
 
-let autoDetectionActive = false;
-let detectionSensitivity = 0.5;  // Default: 0.5 (maps to -24dB threshold)
+let peakModeActive = false;
+let peakThreshold = 0.4;  // 默認閾值 40%
 let peakToolBarOpen = false;
 
 /**
- * Initialize Auto Detection Control
- * @param {Object} options - Configuration options
- * @param {string} options.peakBtnId - Auto Detect Button ID
- * @param {Function} options.onAutoDetectionToggled - Callback when detection is toggled (newState)
- * @param {Function} options.onSensitivityChanged - Callback when sensitivity changes (newSensitivity)
+ * 初始化 Peak Control
+ * @param {Object} options - 配置選項
+ * @param {string} options.peakBtnId - Peak Button 的 ID
+ * @param {Function} options.onPeakModeToggled - Peak mode 切換時的回調函數 (newState)
+ * @param {Function} options.onThresholdChanged - 閾值改變時的回調函數 (newThreshold)
  */
 export function initPeakControl(options = {}) {
   const {
     peakBtnId = 'peakBtn',
-    onAutoDetectionToggled = () => {},
-    onSensitivityChanged = () => {}
+    onPeakModeToggled = () => {},
+    onThresholdChanged = () => {}
   } = options;
 
   const peakBtn = document.getElementById(peakBtnId);
@@ -29,127 +29,126 @@ export function initPeakControl(options = {}) {
   const toolBar = document.getElementById('tool-bar');
 
   if (!peakBtn) {
-    console.warn(`[autoDetection] Button with ID "${peakBtnId}" not found`);
-    return { toggle: () => {}, isActive: () => autoDetectionActive };
+    console.warn(`[peakControl] Button with ID "${peakBtnId}" not found`);
+    return { toggle: () => {}, isActive: () => peakModeActive };
   }
 
-  // Auto Detect Button click - toggle toolbar visibility
+  // Peak Button 點擊事件 - 切換工具欄的顯示
   peakBtn.addEventListener('click', () => {
     if (peakModeToolBar) {
       peakModeToolBar.classList.toggle('open');
       peakToolBarOpen = peakModeToolBar.classList.contains('open');
-      updateAutoDetectionButtonUI();
+      updatePeakButtonUI();
     }
   });
 
-  // Monitor toolbar open/close
+  // 監聽 Peak Mode Tool Bar 的開啟/關閉
   if (peakModeToolBar) {
     const observer = new MutationObserver(() => {
       peakToolBarOpen = peakModeToolBar.classList.contains('open');
-      updateAutoDetectionButtonUI();
+      updatePeakButtonUI();
     });
     observer.observe(peakModeToolBar, { attributes: true, attributeFilter: ['class'] });
   }
 
-  // Monitor main toolbar open/close (for positioning)
+  // 監聽 Tool Bar 的開啟/關閉（用於協調定位）
   if (toolBar) {
     const observer = new MutationObserver(() => {
-      updateAutoDetectionButtonUI();
+      updatePeakButtonUI();
     });
     observer.observe(toolBar, { attributes: true, attributeFilter: ['class'] });
   }
 
-  // Auto Detection Toggle event
+  // Peak Mode Switch 事件
   if (peakModeSwitch) {
     peakModeSwitch.addEventListener('change', () => {
-      autoDetectionActive = peakModeSwitch.checked;
-      updateAutoDetectionButtonUI();
-      onAutoDetectionToggled(autoDetectionActive);
+      peakModeActive = peakModeSwitch.checked;
+      updatePeakButtonUI();
+      onPeakModeToggled(peakModeActive);
     });
   }
 
-  // Detection Sensitivity Slider event
-  // Slider range: 0.0 (Low/Strict) to 1.0 (High/Loose)
-  // Maps to dB thresholds: -10dB to -60dB with default -24dB at 0.5
+  // Peak Threshold Slider 事件
   if (peakThresholdSlider) {
     peakThresholdSlider.addEventListener('input', (e) => {
-      detectionSensitivity = parseFloat(e.target.value);
+      peakThreshold = parseFloat(e.target.value);
       if (peakThresholdVal) {
-        // Display as percentage for UI clarity
-        peakThresholdVal.textContent = Math.round(detectionSensitivity * 100) + '%';
+        peakThresholdVal.textContent = Math.round(peakThreshold * 100) + '%';
       }
-      // Trigger debounced sensitivity change event
-      onSensitivityChanged(detectionSensitivity);
+      // 修改：改為在 input 事件中即時更新 spectrogram
+      onThresholdChanged(peakThreshold);
     });
+
+    // 修改：移除了原本的 change 事件監聽器 (滑塊放開時更新)
   }
 
   return {
-    toggle: toggleAutoDetection,
-    isActive: () => autoDetectionActive,
-    getState: () => ({ autoDetectionActive, detectionSensitivity }),
-    getSensitivity: () => detectionSensitivity,
-    setSensitivity: (sensitivity) => {
-      detectionSensitivity = sensitivity;
-      if (peakThresholdSlider) peakThresholdSlider.value = sensitivity;
-      if (peakThresholdVal) peakThresholdVal.textContent = Math.round(sensitivity * 100) + '%';
+    toggle: togglePeakMode,
+    isActive: () => peakModeActive,
+    getState: () => ({ peakModeActive, peakThreshold }),
+    getThreshold: () => peakThreshold,
+    setThreshold: (threshold) => {
+      peakThreshold = threshold;
+      if (peakThresholdSlider) peakThresholdSlider.value = threshold;
+      if (peakThresholdVal) peakThresholdVal.textContent = Math.round(threshold * 100) + '%';
     }
   };
 }
 
 /**
- * Toggle Auto Detection state
+ * 切換 Peak Mode 狀態
  */
-function toggleAutoDetection() {
-  autoDetectionActive = !autoDetectionActive;
-  updateAutoDetectionButtonUI();
+function togglePeakMode() {
+  peakModeActive = !peakModeActive;
+  updatePeakButtonUI();
   
   const peakModeSwitch = document.getElementById('peakModeSwitch');
   if (peakModeSwitch) {
-    peakModeSwitch.checked = autoDetectionActive;
+    peakModeSwitch.checked = peakModeActive;
   }
 }
 
 /**
- * Update Auto Detect Button UI state
- * Status priority:
- * 1. Red: Auto Detection active (autoDetectionActive = true)
- * 2. Blue: Toolbar open but Auto Detection inactive (peakToolBarOpen = true)
- * 3. Gray: Default state
+ * 更新 Peak Button 的 UI 狀態
+ * 狀態優先級：
+ * 1. 紅色：Peak Mode 啟用（peakModeActive = true）
+ * 2. 藍色：Peak-Tool-bar 開啟但 Peak Mode 未啟用（peakToolBarOpen = true）
+ * 3. 灰色：默認狀態
  */
-function updateAutoDetectionButtonUI() {
+function updatePeakButtonUI() {
   const peakBtn = document.getElementById('peakBtn');
   if (!peakBtn) return;
 
-  // Remove all state classes
+  // 移除所有狀態類
   peakBtn.classList.remove('active', 'toolbar-open');
   
-  if (autoDetectionActive) {
-    // Status 1: Auto Detection active → Red
+  if (peakModeActive) {
+    // 狀態 1：Peak Mode 啟用 → 紅色
     peakBtn.classList.add('active');
-    peakBtn.title = 'Auto Bat Call Detection (Active)';
+    peakBtn.title = 'Peak Tracking Mode (Active';
   } else if (peakToolBarOpen) {
-    // Status 2: Toolbar open, Auto Detection inactive → Blue
+    // 狀態 2：Peak-Tool-bar 開啟，Peak Mode 未啟用 → 藍色
     peakBtn.classList.add('toolbar-open');
-    peakBtn.title = 'Auto Bat Call Detection (Toolbar Open)';
+    peakBtn.title = 'Peak Tracking Mode (Toolbar Open)';
   } else {
-    // Status 3: Default → Gray
-    peakBtn.title = 'Auto Bat Call Detection';
+    // 狀態 3：默認 → 灰色
+    peakBtn.title = 'Peak Tracking Mode';
   }
 }
 
 /**
- * Get Auto Detection active state
+ * 獲取 Peak Mode 的狀態
  */
 export function isPeakModeActive() {
-  return autoDetectionActive;
+  return peakModeActive;
 }
 
 /**
- * Set Auto Detection state
+ * 設置 Peak Mode 狀態
  */
 export function setPeakModeActive(active) {
-  autoDetectionActive = active;
-  updateAutoDetectionButtonUI();
+  peakModeActive = active;
+  updatePeakButtonUI();
   
   const peakModeSwitch = document.getElementById('peakModeSwitch');
   if (peakModeSwitch) {
@@ -158,24 +157,24 @@ export function setPeakModeActive(active) {
 }
 
 /**
- * Get Detection Sensitivity (mapped from 0.0 to 1.0)
+ * 獲取 Peak Threshold
  */
 export function getPeakThreshold() {
-  return detectionSensitivity;
+  return peakThreshold;
 }
 
 /**
- * Set Detection Sensitivity
+ * 設置 Peak Threshold
  */
-export function setPeakThreshold(sensitivity) {
-  detectionSensitivity = sensitivity;
+export function setPeakThreshold(threshold) {
+  peakThreshold = threshold;
   const peakThresholdSlider = document.getElementById('peakThresholdSlider');
   const peakThresholdVal = document.getElementById('peakThresholdVal');
   
   if (peakThresholdSlider) {
-    peakThresholdSlider.value = sensitivity;
+    peakThresholdSlider.value = threshold;
   }
   if (peakThresholdVal) {
-    peakThresholdVal.textContent = Math.round(sensitivity * 100) + '%';
+    peakThresholdVal.textContent = Math.round(threshold * 100) + '%';
   }
 }

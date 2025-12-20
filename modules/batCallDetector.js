@@ -336,155 +336,6 @@ export class BatCallDetector {
     this.goertzelEnergy = getGoertzelEnergyFunction();
     this.wasmEngine = wasmEngine;  // Optional WASM engine for performance optimization
   }
-
-  /**
-   * Set or update WASM engine for shared FFT calculation
-   * This allows reusing the same WASM engine across multiple detection runs
-   */
-  setWasmEngine(engine) {
-    this.wasmEngine = engine;
-    return this;
-  }
-
-  /**
-   * Get the WASM engine (creates one if not available)
-   */
-  getWasmEngine() {
-    if (this.wasmEngine) {
-      return this.wasmEngine;
-    }
-    // Could implement lazy initialization here if needed
-    return null;
-  }
-  
-/**
-   * Compute frequency trajectory for visualization
-   * [2025 FINAL FIX] Unrestricted Deep Visualization with Frequency Masking
-   * * Improvements:
-   * 1. FORCE DEEP THRESHOLD: Ignores analysis thresholds (-24dB) and forces -60dB visual range.
-   * 2. FREQUENCY MASKING: Only scans relevant frequency bands to prevent picking up loud low-freq noise
-   * when the bat signal is faint. This prevents the line from breaking or jumping.
-   * 3. REMOVED NOISE FLOOR CLAMP: Allows drawing signals that are "visually" distinct even if technically close to noise.
-   */
-  computeFrequencyTrajectory(call) {
-    if (!call || !call.spectrogram || !call.timeFrames) {
-      return [];
-    }
-
-    const trajectory = [];
-    const spectrogram = call.spectrogram;  // [timeFrame][freqBin]
-    const timeFrames = call.timeFrames;
-    const freqBins = call.freqBins;
-
-    // ============================================================
-    // 1. Calculate Local Peak Power of this Segment
-    // ============================================================
-    let localMax = -Infinity;
-    for (let f = 0; f < spectrogram.length; f++) {
-      for (let b = 0; b < spectrogram[f].length; b++) {
-        if (spectrogram[f][b] > localMax) {
-          localMax = spectrogram[f][b];
-        }
-      }
-    }
-    
-    // ============================================================
-    // 2. DEFINE FREQUENCY SEARCH MASK (CRITICAL FOR WEAK TAILS)
-    // If we look for faint signals (-60dB), we must ignore loud low-freq noise.
-    // Use the call's measured range +/- 15kHz as a search mask.
-    // ============================================================
-    let minScanBin = 0;
-    let maxScanBin = freqBins.length - 1;
-
-    if (call.lowFreq_kHz && call.highFreq_kHz) {
-        // Create a generous 15kHz buffer around the call
-        const margin_Hz = 15000; 
-        const minHz = (call.lowFreq_kHz * 1000) - margin_Hz;
-        const maxHz = (call.highFreq_kHz * 1000) + margin_Hz;
-
-        // Convert Hz to Bin Indices (Assuming linear bins)
-        const binWidth = freqBins[1] - freqBins[0];
-        const startFreq = freqBins[0];
-
-        if (binWidth > 0) {
-            minScanBin = Math.max(0, Math.floor((minHz - startFreq) / binWidth));
-            maxScanBin = Math.min(freqBins.length - 1, Math.ceil((maxHz - startFreq) / binWidth));
-        }
-    }
-
-    // ============================================================
-    // 3. FORCE DEEP VISUAL THRESHOLD
-    // Do NOT use _used thresholds. They are for measurement (conservative).
-    // Visualization needs to show everything the eye can see.
-    // ============================================================
-    // A dynamic range of 60dB covers almost all visible biological signal details
-    const trajectoryThreshold = localMax - 60;
-    
-    // Absolute safety floor only (prevent math errors)
-    const absoluteFloor = -100;
-
-    // ============================================================
-    // 4. Step-by-Step Frame Tracing with MASKED SCAN
-    // ============================================================
-    for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
-      const framePower = spectrogram[frameIdx];
-      
-      // Find the bin with maximum power IN THE RELEVANT BAND
-      let maxPower = -Infinity;
-      let peakBinIdx = -1;
-      
-      // OPTIMIZATION: Only scan within the frequency mask
-      for (let binIdx = minScanBin; binIdx <= maxScanBin; binIdx++) {
-        // Safety check index
-        if (binIdx >= framePower.length) break;
-
-        if (framePower[binIdx] > maxPower) {
-          maxPower = framePower[binIdx];
-          peakBinIdx = binIdx;
-        }
-      }
-
-      // ============================================================
-      // Validation: Check if peak qualifies as a trajectory point
-      // ============================================================
-      
-      // Check 1: Simple Threshold Check
-      if (maxPower < trajectoryThreshold || maxPower < absoluteFloor) {
-        trajectory.push(null); // Too faint to be signal
-        continue;
-      }
-      
-      // REMOVED Check 2 (Noise Floor + 3dB). 
-      // Reason: Weak tails often dip into the calculated noise floor but are visually valid.
-      // The Frequency Masking above protects us from picking up random noise elsewhere.
-
-      // ============================================================
-      // Parabolic Interpolation for sub-bin frequency precision
-      // ============================================================
-      let freqHz = freqBins[peakBinIdx];
-      
-      if (peakBinIdx > 0 && peakBinIdx < framePower.length - 1) {
-        const db0 = framePower[peakBinIdx - 1];
-        const db1 = framePower[peakBinIdx];
-        const db2 = framePower[peakBinIdx + 1];
-        
-        const a = (db2 - 2 * db1 + db0) / 2;
-        if (Math.abs(a) > 1e-10) {
-          const binCorrection = (db0 - db2) / (4 * a);
-          const binWidth = freqBins[1] - freqBins[0];
-          freqHz = freqBins[peakBinIdx] + binCorrection * binWidth;
-        }
-      }
-
-      trajectory.push({
-        time_s: timeFrames[frameIdx],
-        freq_Hz: freqHz,
-        power_dB: maxPower
-      });
-    }
-
-    return trajectory;
-  }
   
   /**
    * Calculate quality rating based on SNR value
@@ -718,8 +569,7 @@ export class BatCallDetector {
     const { powerMatrix, timeFrames, freqBins, freqResolution } = spectrogram;
     
     // Phase 1: Detect call boundaries using energy threshold
-    // [2025 ENHANCED] Pass sampleRate to enable 5ms padding calculation
-    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz, sampleRate);
+    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz);
     
     if (callSegments.length === 0) return [];
     
@@ -888,7 +738,7 @@ export class BatCallDetector {
    * @param {boolean} options.skipSNR - If true, skip expensive SNR calculation on first pass
    * @returns {Promise<Array>} Array of BatCall objects
    */
-  async detectCalls(audioData, sampleRate, flowKHz, fhighKHz, options = { skipSNR: false, fastMode: false, computeShapes: false }) {
+  async detectCalls(audioData, sampleRate, flowKHz, fhighKHz, options = { skipSNR: false }) {
     if (!audioData || audioData.length === 0) return [];
     
     // Generate high-resolution STFT spectrogram
@@ -898,8 +748,7 @@ export class BatCallDetector {
     const { powerMatrix, timeFrames, freqBins, freqResolution } = spectrogram;
     
     // Phase 1: Detect call boundaries using energy threshold
-    // [2025 ENHANCED] Pass sampleRate to enable 5ms padding calculation
-    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz, sampleRate);
+    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz);
     
     if (callSegments.length === 0) return [];
     
@@ -927,38 +776,15 @@ export class BatCallDetector {
       
       call.calculateDuration();
       
-      // [PERFORMANCE FIX] Fast Mode for Overlay (Deprecated for High Precision)
-      // If fastMode is true, skip all complex parameter measurements
-      // Only compute trajectory (which is all we need for visualization)
-      // NOTE: For parameter consistency with Selection Tool, fastMode should be false
-      if (options && options.fastMode) {
-        // Simplified frequency range estimation
-        call.lowFreq_kHz = flowKHz;
-        call.highFreq_kHz = fhighKHz;
-        
-        // Compute trajectory (only thing needed for visualization)
-        call.frequencyTrajectory = this.computeFrequencyTrajectory(call);
-        return call;
-      }
-      
-      // --- High Precision Analysis (when fastMode is false or not specified) ---
-      
-      // Verify: filter calls that don't meet minimum duration
+      // 驗證: 過濾不符合最小時長要求的 call
       if (call.duration_ms < this.config.minCallDuration_ms) {
-        return null;  // Mark as invalid, will be filtered out later
+        return null;  // 標記為無效，之後過濾掉
       }
       
-      // [CRITICAL ORDER] 1. Execute full parameter measurement FIRST
-      // This includes Anti-Rebounce detection which refines call.endTime_s
-      // The refined boundaries are essential for accurate trajectory visualization
+      // Measure frequency parameters from spectrogram
+      // This will calculate highFreq, lowFreq, peakFreq, startFreq, endFreq, etc.
       this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution);
       
-      // [CRITICAL ORDER] 2. Compute trajectory AFTER parameter measurement
-      // Now computeFrequencyTrajectory will respect the corrected endTime_s
-      // and automatically exclude the echo/rebounce tail from visualization
-      if (options && options.computeShapes) {
-        call.frequencyTrajectory = this.computeFrequencyTrajectory(call);
-      }
 
       call.Flow = call.lowFreq_kHz * 1000;   // Lowest freq in call (Hz)
       call.Fhigh = call.highFreq_kHz;        // Highest freq in call (kHz)
@@ -966,11 +792,6 @@ export class BatCallDetector {
       
       return call;
     }).filter(call => call !== null);  // 移除不符合條件的 call
-    
-    // [PERFORMANCE FIX] Fast Mode returns immediately, skips SNR calculation
-    if (options && options.fastMode) {
-        return calls;
-    }
     
     // ============================================================
     // 額外驗證：過濾誤檢測的噪音段
@@ -1270,13 +1091,11 @@ export class BatCallDetector {
    */
 
   
-/**
+  /**
    * Phase 1: Detect call segments using energy threshold
-   * [2025 ENHANCED] Now includes padding and segment merging for better fine-tuning
    * Returns: array of { startFrame, endFrame }
-   * @param {number} sampleRate - Sample rate in Hz (needed for frame duration calculation)
    */
-  detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz, sampleRate) {
+  detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz) {
     const { callThreshold_dB } = this.config;
     
     // Find global maximum power across entire spectrogram for threshold reference
@@ -1306,7 +1125,7 @@ export class BatCallDetector {
     }
     
     // Segment continuous active frames into call segments
-    const rawSegments = [];
+    const segments = [];
     let segmentStart = null;
     
     for (let frameIdx = 0; frameIdx < activeFrames.length; frameIdx++) {
@@ -1316,7 +1135,7 @@ export class BatCallDetector {
         }
       } else {
         if (segmentStart !== null) {
-          rawSegments.push({
+          segments.push({
             startFrame: segmentStart,
             endFrame: frameIdx - 1
           });
@@ -1327,43 +1146,13 @@ export class BatCallDetector {
     
     // Catch final segment if call extends to end
     if (segmentStart !== null) {
-      rawSegments.push({
+      segments.push({
         startFrame: segmentStart,
         endFrame: activeFrames.length - 1
       });
     }
     
-    // [2025 NEW] Apply Padding and Merge Overlapping Segments
-    // FIX: Increased PADDING_MS from 5 to 30. 
-    // This allows fine-tuning algorithms (Auto ID) to find faint Start/End tails 
-    // that are below the initial -24dB detection threshold.
-    const PADDING_MS = 30; // Captures even long, faint tails common in bat calls
-    
-    const hopSamples = Math.floor(this.config.fftSize * (this.config.hopPercent / 100));
-    const secPerFrame = hopSamples / sampleRate;
-    const framesToPad = Math.ceil((PADDING_MS / 1000) / secPerFrame);
-    
-    const paddedSegments = [];
-    for (const seg of rawSegments) {
-      // 確保不超出邊界
-      const expandedStart = Math.max(0, seg.startFrame - framesToPad);
-      const expandedEnd = Math.min(activeFrames.length - 1, seg.endFrame + framesToPad);
-      
-      // Check if this overlaps with the previous segment
-      if (paddedSegments.length > 0) {
-        const prev = paddedSegments[paddedSegments.length - 1];
-        // 如果 Padding 後導致重疊，則合併這兩個 Segment
-        if (expandedStart <= prev.endFrame) {
-          prev.endFrame = Math.max(prev.endFrame, expandedEnd);
-          continue;
-        }
-      }
-      
-      // No overlap, add as new segment
-      paddedSegments.push({ startFrame: expandedStart, endFrame: expandedEnd });
-    }
-    
-    return paddedSegments;
+    return segments;
   }
   
   /**

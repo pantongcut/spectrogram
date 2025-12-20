@@ -3,7 +3,6 @@
 import WaveSurfer from './wavesurfer.esm.js';
 import Spectrogram from './spectrogram.esm.js';
 import { SpectrogramEngine } from './spectrogram_wasm.js';
-import { BatCallDetector } from './batCallDetector.js';
 
 let ws = null;
 let plugin = null;
@@ -14,10 +13,6 @@ let currentPeakMode = false;
 let currentPeakThreshold = 0.4;
 let currentSmoothMode = true;
 let analysisWasmEngine = null;
-let cachedDetectedCalls = [];
-let detectionSensitivity = 0.5;
-let autoDetectionEnabled = false;
-let debounceTimeout = null;
 
 export function initWavesurfer({
   container,
@@ -249,149 +244,4 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
     console.warn('Failed to create WASM SpectrogramEngine:', error);
     return null;
   }
-}
-
-/**
- * Map sensitivity slider (0.0-1.0) to dB threshold
- * 0.0 = -10 dB (strict, low sensitivity)
- * 0.5 = -24 dB (default, standard)
- * 1.0 = -60 dB (loose, high sensitivity)
- */
-function mapSensitivityToDb(sensitivity) {
-  if (sensitivity < 0) sensitivity = 0;
-  if (sensitivity > 1) sensitivity = 1;
-  
-  // Linear interpolation: -10dB + sensitivity * (-50dB)
-  return -10 + (sensitivity * -50);
-}
-
-/**
- * Run Auto Detection asynchronously
- * This is the main orchestration point for the detection pipeline
- */
-export async function runAutoDetection(sensitivityValue = detectionSensitivity) {
-  if (!ws) {
-    console.warn('[AutoDetect] Wavesurfer not initialized');
-    return;
-  }
-  
-  try {
-    // 1. Map Slider (0.0 - 1.0) to Decibels
-    const sensitivityDB = mapSensitivityToDb(sensitivityValue);
-    
-    console.log(`[AutoDetect] Running with sensitivity: ${sensitivityDB.toFixed(1)} dB`);
-    
-    // [CRITICAL CHANGE] Use fixed Analysis Settings, NOT View Settings
-    // This ensures detection is consistent regardless of UI zoom level
-    const ANALYSIS_FFT_SIZE = 1024;
-    const ANALYSIS_WINDOW = 'hann';
-    
-    // 2. Get/Create WASM Engine with fixed settings
-    // This ensures the detector always runs at 1024 FFT regardless of zoom level
-    const wasmEngine = getOrCreateWasmEngine(ANALYSIS_FFT_SIZE, ANALYSIS_WINDOW);
-    if (!wasmEngine) {
-      console.warn('[AutoDetect] WASM Engine not available, falling back to basic detection');
-      return;
-    }
-    
-    // 3. Create detector instance
-    const detector = new BatCallDetector();
-    detector.setWasmEngine(wasmEngine);
-    
-    // 4. [CRITICAL FIX] Enforce Standard Analysis Settings
-    // Detector uses fixed, optimal settings to ensure consistency
-    // NOT dependent on currentFftSize or currentWindowType from the UI View
-    detector.config.callThreshold_dB = sensitivityDB;
-    detector.config.fftSize = ANALYSIS_FFT_SIZE;        // Fixed at 1024
-    detector.config.windowType = ANALYSIS_WINDOW;       // Fixed at 'hann'
-    detector.config.enableBackwardEndFreqScan = true;   // Ensure Anti-rebounce enabled
-    
-    // 5. Get audio data from decoded buffer
-    const decodedData = ws.getDecodedData();
-    if (!decodedData) {
-      console.warn('[AutoDetect] No decoded audio data available');
-      return;
-    }
-    
-    const audioData = decodedData.getChannelData(0);
-    const sampleRate = ws.options.sampleRate;
-    
-    if (!audioData || audioData.length === 0) {
-      console.warn('[AutoDetect] Audio data is empty');
-      return;
-    }
-    
-    // 6. [CRITICAL FIX] Run detection with High Precision
-    // We MUST disable fastMode to get accurate parameters and Anti-Rebounce protection
-    // This ensures visual consistency between Auto Detection and Selection Tool
-    const calls = await detector.detectCalls(audioData, sampleRate, 0, sampleRate / 2000, {
-      skipSNR: true,           // Still skip SNR to save some time
-      fastMode: false,         // [CRITICAL] Disable fast mode for parameter accuracy and echo removal
-      computeShapes: true      // Compute frequency trajectory for visualization
-    });
-    
-    // 7. Cache results
-    cachedDetectedCalls = calls || [];
-    console.log(`[AutoDetect] Detected ${cachedDetectedCalls.length} call segments`);
-    
-    // 8. Update spectrogram plugin with detected calls
-    if (plugin && typeof plugin.setDetectedCalls === 'function') {
-      plugin.setDetectedCalls(cachedDetectedCalls);
-      // Trigger re-render of overlay without recomputing FFT
-      plugin.render();
-    }
-    
-  } catch (error) {
-    console.error('[AutoDetect] Error during detection:', error);
-  }
-}
-
-/**
- * Debounced auto detection trigger
- * Prevents excessive recalculations during rapid slider changes
- */
-export function triggerAutoDetection(sensitivityValue = detectionSensitivity) {
-  if (!autoDetectionEnabled) return;
-  
-  // Clear previous timeout
-  if (debounceTimeout) {
-    clearTimeout(debounceTimeout);
-  }
-  
-  // Set new debounced call (300ms delay)
-  debounceTimeout = setTimeout(() => {
-    runAutoDetection(sensitivityValue);
-  }, 300);
-}
-
-/**
- * Enable/disable auto detection
- */
-export function setAutoDetectionEnabled(enabled) {
-  autoDetectionEnabled = enabled;
-  if (enabled && ws && ws.getDecodedData()) {
-    runAutoDetection(detectionSensitivity);
-  } else if (!enabled && plugin) {
-    // Clear detection overlay
-    cachedDetectedCalls = [];
-    plugin.setDetectedCalls([]);
-    plugin.render();
-  }
-}
-
-/**
- * Update detection sensitivity and trigger detection
- */
-export function setDetectionSensitivity(sensitivity) {
-  detectionSensitivity = sensitivity;
-  if (autoDetectionEnabled) {
-    triggerAutoDetection(sensitivity);
-  }
-}
-
-/**
- * Get cached detected calls
- */
-export function getDetectedCalls() {
-  return cachedDetectedCalls;
 }
