@@ -120,7 +120,18 @@ export function initAutoDetection(config) {
 
       // Calculate peak max if not already calculated
       if (currentPeakMax === null) {
+        // Debug: check the structure of specData
+        console.log(`[autoDetectionControl] specData type: ${typeof specData}`);
+        console.log(`[autoDetectionControl] specData[0] type: ${typeof specData[0]}`);
+        if (specData[0]) {
+          console.log(`[autoDetectionControl] specData[0] constructor: ${specData[0].constructor.name}`);
+          if (specData[0].length > 0) {
+            console.log(`[autoDetectionControl] specData[0][0] value: ${specData[0][0]} (type: ${typeof specData[0][0]})`);
+          }
+        }
+        
         currentPeakMax = calculatePeakMax(specData);
+        console.log(`[autoDetectionControl] calculatePeakMax returned: ${currentPeakMax}`);
       }
 
       // Calculate threshold in dB
@@ -181,10 +192,14 @@ export function initAutoDetection(config) {
       const duration = getDuration();
       const currentFreqMin = minFrequency;
       const currentFreqMax = maxFrequency;
+      
+      console.log(`[autoDetectionControl] Creating selections with freqRange: ${currentFreqMin}-${currentFreqMax} kHz, duration: ${duration}s`);
 
       for (let i = 0; i < segments.length; i += 2) {
         const startTime = segments[i];
         const endTime = segments[i + 1];
+        
+        console.log(`[autoDetectionControl] Segment ${Math.floor(i/2)}: time=${startTime.toFixed(3)}-${endTime.toFixed(3)}s, freqMin=${currentFreqMin}, freqMax=${currentFreqMax}`);
 
         // Only create selections within the current time range
         if (startTime < duration && endTime > 0) {
@@ -192,13 +207,19 @@ export function initAutoDetection(config) {
           const clampedEnd = Math.min(duration, endTime);
 
           if (clampedEnd - clampedStart > 0 && frequencyHoverControl) {
-            frequencyHoverControl.programmaticSelect(
+            console.log(`[autoDetectionControl] Calling programmaticSelect(${clampedStart.toFixed(3)}, ${clampedEnd.toFixed(3)}, ${currentFreqMin}, ${currentFreqMax})`);
+            const selection = frequencyHoverControl.programmaticSelect(
               clampedStart,
               clampedEnd,
               currentFreqMin,
               currentFreqMax
             );
+            console.log(`[autoDetectionControl] Selection created:`, selection);
+          } else {
+            console.log(`[autoDetectionControl] Skipped: clamped duration=${clampedEnd - clampedStart}, frequencyHoverControl=${!!frequencyHoverControl}`);
           }
+        } else {
+          console.log(`[autoDetectionControl] Skipped segment: startTime=${startTime} >= duration=${duration} or endTime=${endTime} <= 0`);
         }
       }
 
@@ -210,36 +231,62 @@ export function initAutoDetection(config) {
 
   /**
    * Calculate the global peak maximum from spectrogram values
-   * @param {Array<Array<number>>} spectrogramValues - 2D spectrogram array
+   * @param {Array} spectrogramValues - Spectrogram data (array of Uint8Array or 2D array)
    * @returns {number} Peak maximum in dB
    */
   function calculatePeakMax(spectrogramValues) {
-    // Spectrogram values should be Uint8Array (0-255 scale)
+    console.log(`[calculatePeakMax] Input type: ${spectrogramValues.constructor.name}, length: ${spectrogramValues.length}`);
+    
+    // Spectrogram values should be Uint8Array (0-255 scale) in array format
     // We need to find the maximum value and convert to dB
     
     let maxU8 = 0;
+    let scannedFrames = 0;
+    let scannedBins = 0;
+    
     if (Array.isArray(spectrogramValues) && spectrogramValues.length > 0) {
-      for (let i = 0; i < spectrogramValues.length; i++) {
-        if (spectrogramValues[i] && spectrogramValues[i].length > 0) {
-          for (let j = 0; j < spectrogramValues[i].length; j++) {
-            const val = spectrogramValues[i][j];
-            if (val > maxU8) {
-              maxU8 = val;
+      // Check if this is an array of Uint8Array (2D)
+      if (spectrogramValues[0] instanceof Uint8Array) {
+        // Multi-frame data: [[Uint8Array], [Uint8Array], ...]
+        for (let i = 0; i < spectrogramValues.length; i++) {
+          const frame = spectrogramValues[i];
+          if (frame && frame.length > 0) {
+            for (let j = 0; j < frame.length; j++) {
+              const val = frame[j];
+              if (val > maxU8) {
+                maxU8 = val;
+              }
+              scannedBins++;
             }
+            scannedFrames++;
           }
         }
+      } else if (spectrogramValues[0] instanceof Float32Array || typeof spectrogramValues[0] === 'number') {
+        // Single-frame data: [val1, val2, val3, ...] or Float32Array
+        for (let j = 0; j < spectrogramValues.length; j++) {
+          const val = spectrogramValues[j];
+          if (typeof val === 'number' && val > maxU8) {
+            maxU8 = val;
+          }
+        }
+        scannedFrames = 1;
+        scannedBins = spectrogramValues.length;
       }
     }
+    
+    console.log(`[calculatePeakMax] Scanned: ${scannedFrames} frames, ${scannedBins} bins total`);
+    console.log(`[calculatePeakMax] Max U8 value found: ${maxU8}`);
     
     // If we found a value, convert from U8 scale (0-255) to dB scale
     // Assume default 80 dB range: 255 -> 0dB, 0 -> -80dB
     if (maxU8 > 0) {
       const rangeDB = 80;
       const peakMaxDb = (maxU8 / 255.0) * rangeDB - rangeDB;
-      console.log(`[autoDetectionControl] calculatePeakMax: maxU8=${maxU8}, peakMaxDb=${peakMaxDb.toFixed(2)}`);
+      console.log(`[calculatePeakMax] Conversion: (${maxU8} / 255) * 80 - 80 = ${peakMaxDb.toFixed(2)} dB`);
       return peakMaxDb;
     }
     
+    console.log(`[calculatePeakMax] No data found or all zeros, returning 0`);
     return 0;
   }
 
