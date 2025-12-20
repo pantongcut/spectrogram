@@ -83,14 +83,15 @@ export function initAutoDetection(config) {
         return;
       }
 
-      // Get spectrogram data
-      const spectrogramData = plugin.getSpectrogram?.();
-      if (!spectrogramData || !spectrogramData.values) {
-        console.warn('[autoDetectionControl] ❌ No spectrogram data available');
+      // Get spectrogram data from lastRenderData
+      const spectrogramMatrix = plugin.lastRenderData;
+      if (!spectrogramMatrix || !Array.isArray(spectrogramMatrix) || spectrogramMatrix.length === 0) {
+        console.warn('[autoDetectionControl] ❌ No spectrogram data available in plugin.lastRenderData');
+        console.log('[autoDetectionControl] plugin.lastRenderData:', spectrogramMatrix);
         return;
       }
 
-      console.log(`[autoDetectionControl] Spectrogram data available: ${spectrogramData.values.length} frames x ${spectrogramData.values[0]?.length || 0} bins`);
+      console.log(`[autoDetectionControl] Spectrogram data available: ${spectrogramMatrix.length} frames x ${spectrogramMatrix[0]?.length || 0} bins`);
 
       // Get FFT parameters from plugin
       const fftSize = plugin.getFftSize?.() || 512;
@@ -99,7 +100,7 @@ export function initAutoDetection(config) {
 
       // Calculate peak max if not already calculated
       if (currentPeakMax === null) {
-        currentPeakMax = calculatePeakMax(spectrogramData.values);
+        currentPeakMax = calculatePeakMax(spectrogramMatrix);
       }
 
       // Calculate threshold in dB
@@ -117,8 +118,8 @@ export function initAutoDetection(config) {
       }
 
       // Prepare flat spectrogram array
-      const flatArray = new Float32Array(spectrogramData.values.flat());
-      const numCols = spectrogramData.values[0]?.length || 128;
+      const flatArray = new Float32Array(spectrogramMatrix.flat());
+      const numCols = spectrogramMatrix[0]?.length || 128;
 
       console.log(`[autoDetectionControl] Calling detect_segments with: flatArray.length=${flatArray.length}, numCols=${numCols}, threshold=${thresholdDb.toFixed(2)}, sampleRate=${sampleRate}, hopSize=${hopSize}`);
 
