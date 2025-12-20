@@ -973,6 +973,8 @@ scrollSourceId: 'viewer-container',
 scrollTargetId: 'time-axis-wrapper',
 });
 
+let autoDetectionInitialized = false;
+
 getWavesurfer().on('ready', () => {
     duration = getWavesurfer().getDuration();
     
@@ -992,6 +994,19 @@ getWavesurfer().on('ready', () => {
       freqHoverControl?.refreshHover();
       autoIdControl?.updateMarkers();
       updateSpectrogramSettingsText();
+      
+      // Initialize Auto Detection Control once after everything is ready
+      if (!autoDetectionInitialized && freqHoverControl) {
+        autoDetectionInitialized = true;
+        initAutoDetection({
+          frequencyHoverControl: freqHoverControl,
+          getDuration: () => duration,
+          getZoomLevel: () => zoomControl?.getZoomLevel?.() || 1,
+          spectrogramHeight,
+          minFrequency: currentFreqMin,
+          maxFrequency: currentFreqMax
+        });
+      }
     });
   });
 
@@ -1551,16 +1566,6 @@ autoIdControl = initAutoIdPanel({
   getFreqRange: () => ({ min: currentFreqMin, max: currentFreqMax }),
   hideHover: () => freqHoverControl?.hideHover(),
   refreshHover: () => freqHoverControl?.refreshHover()
-});
-
-// Initialize Auto Detection Control
-initAutoDetection({
-  frequencyHoverControl: freqHoverControl,
-  getDuration: () => duration,
-  getZoomLevel: () => zoomControl?.getZoomLevel?.() || 1,
-  spectrogramHeight,
-  minFrequency: currentFreqMin,
-  maxFrequency: currentFreqMax
 });
 
 freqMenuControl = initFreqContextMenu({

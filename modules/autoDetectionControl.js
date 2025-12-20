@@ -183,7 +183,7 @@ export function initAutoDetection(config) {
 
       console.log(`[autoDetectionControl] detect_segments returned ${segments.length} values (${Math.floor(segments.length / 2)} segments)`);
 
-      // Clear previous selections
+      // Clear previous selections - use the passed-in frequencyHoverControl
       if (frequencyHoverControl) {
         frequencyHoverControl.clearSelections();
       }
@@ -194,6 +194,7 @@ export function initAutoDetection(config) {
       const currentFreqMax = maxFrequency;
       
       console.log(`[autoDetectionControl] Creating selections with freqRange: ${currentFreqMin}-${currentFreqMax} kHz, duration: ${duration}s`);
+      console.log(`[autoDetectionControl] frequencyHoverControl available: ${!!frequencyHoverControl}`);
 
       for (let i = 0; i < segments.length; i += 2) {
         const startTime = segments[i];
@@ -237,8 +238,12 @@ export function initAutoDetection(config) {
   function calculatePeakMax(spectrogramValues) {
     console.log(`[calculatePeakMax] Input type: ${spectrogramValues.constructor.name}, length: ${spectrogramValues.length}`);
     
-    // Spectrogram values should be Uint8Array (0-255 scale) in array format
-    // We need to find the maximum value and convert to dB
+    // Spectrogram values are U8 (0-255) from compute_spectrogram_u8
+    // Need to convert back to dB using the same parameters
+    // Formula: dB = (U8 / 255.0) * rangeDB - gainDB
+    // Default: gainDB=20, rangeDB=80
+    // So: U8=255 -> dB = (255/255)*80 - 20 = 60
+    // And: U8=0 -> dB = 0 - 20 = -20
     
     let maxU8 = 0;
     let scannedFrames = 0;
@@ -278,16 +283,18 @@ export function initAutoDetection(config) {
     console.log(`[calculatePeakMax] Max U8 value found: ${maxU8}`);
     
     // If we found a value, convert from U8 scale (0-255) to dB scale
-    // Assume default 80 dB range: 255 -> 0dB, 0 -> -80dB
+    // Using the standard formula: dB = (U8 / 255.0) * rangeDB - gainDB
+    // Default gainDB=20, rangeDB=80
     if (maxU8 > 0) {
-      const rangeDB = 80;
-      const peakMaxDb = (maxU8 / 255.0) * rangeDB - rangeDB;
-      console.log(`[calculatePeakMax] Conversion: (${maxU8} / 255) * 80 - 80 = ${peakMaxDb.toFixed(2)} dB`);
+      const gainDB = 20;  // Default gain from spectrogram plugin
+      const rangeDB = 80;  // Default range from spectrogram plugin
+      const peakMaxDb = (maxU8 / 255.0) * rangeDB - gainDB;
+      console.log(`[calculatePeakMax] Conversion: (${maxU8} / 255) * ${rangeDB} - ${gainDB} = ${peakMaxDb.toFixed(2)} dB`);
       return peakMaxDb;
     }
     
-    console.log(`[calculatePeakMax] No data found or all zeros, returning 0`);
-    return 0;
+    console.log(`[calculatePeakMax] No data found or all zeros, returning -20 (minimum)`);
+    return -20;  // Return minimum dB when no data
   }
 
   // Reset peak max when a new file is loaded
