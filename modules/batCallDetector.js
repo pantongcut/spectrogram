@@ -359,11 +359,12 @@ export class BatCallDetector {
   
 /**
    * Compute frequency trajectory for visualization
-   * [2025 ENHANCED] Adaptive trajectory tracing with flexible thresholding
-   * 
-   * Strategy: Frame-by-frame peak tracking that respects the sensitivity of analysis algorithms
-   * Uses thresholds discovered during `findOptimalHighFrequencyThreshold` to ensure visual
-   * consistency with actual detection results.
+   * [2025 FINAL FIX] Unrestricted Deep Visualization with Frequency Masking
+   * * Improvements:
+   * 1. FORCE DEEP THRESHOLD: Ignores analysis thresholds (-24dB) and forces -60dB visual range.
+   * 2. FREQUENCY MASKING: Only scans relevant frequency bands to prevent picking up loud low-freq noise
+   * when the bat signal is faint. This prevents the line from breaking or jumping.
+   * 3. REMOVED NOISE FLOOR CLAMP: Allows drawing signals that are "visually" distinct even if technically close to noise.
    */
   computeFrequencyTrajectory(call) {
     if (!call || !call.spectrogram || !call.timeFrames) {
@@ -388,37 +389,55 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // 2. Determine Adaptive Threshold Based on Analysis Results
+    // 2. DEFINE FREQUENCY SEARCH MASK (CRITICAL FOR WEAK TAILS)
+    // If we look for faint signals (-60dB), we must ignore loud low-freq noise.
+    // Use the call's measured range +/- 15kHz as a search mask.
     // ============================================================
-    let effectiveThresholdRel = -55; // Default fallback for conservative visibility
-    
-    if (call.highFreqThreshold_dB_used != null || call.lowFreqThreshold_dB_used != null) {
-      // Use the actual thresholds discovered by the analysis algorithms
-      const h = call.highFreqThreshold_dB_used || -24;
-      const l = call.lowFreqThreshold_dB_used || -24;
-      // Pick the most sensitive (lowest/most permissive) threshold
-      // Add a visual buffer (-6dB) to ensure we see the full ridge
-      effectiveThresholdRel = Math.min(h, l) - 6;
-    }
-    
-    let trajectoryThreshold = localMax + effectiveThresholdRel;
-    
-    // Absolute safety floor: don't go below -85dB (mathematical absurdity protection)
-    if (trajectoryThreshold < -85) {
-      trajectoryThreshold = -85;
+    let minScanBin = 0;
+    let maxScanBin = freqBins.length - 1;
+
+    if (call.lowFreq_kHz && call.highFreq_kHz) {
+        // Create a generous 15kHz buffer around the call
+        const margin_Hz = 15000; 
+        const minHz = (call.lowFreq_kHz * 1000) - margin_Hz;
+        const maxHz = (call.highFreq_kHz * 1000) + margin_Hz;
+
+        // Convert Hz to Bin Indices (Assuming linear bins)
+        const binWidth = freqBins[1] - freqBins[0];
+        const startFreq = freqBins[0];
+
+        if (binWidth > 0) {
+            minScanBin = Math.max(0, Math.floor((minHz - startFreq) / binWidth));
+            maxScanBin = Math.min(freqBins.length - 1, Math.ceil((maxHz - startFreq) / binWidth));
+        }
     }
 
     // ============================================================
-    // 3. Step-by-Step Frame-by-Frame Tracing
+    // 3. FORCE DEEP VISUAL THRESHOLD
+    // Do NOT use _used thresholds. They are for measurement (conservative).
+    // Visualization needs to show everything the eye can see.
+    // ============================================================
+    // A dynamic range of 60dB covers almost all visible biological signal details
+    const trajectoryThreshold = localMax - 60;
+    
+    // Absolute safety floor only (prevent math errors)
+    const absoluteFloor = -100;
+
+    // ============================================================
+    // 4. Step-by-Step Frame Tracing with MASKED SCAN
     // ============================================================
     for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
       const framePower = spectrogram[frameIdx];
       
-      // Find the bin with maximum power in this frame
+      // Find the bin with maximum power IN THE RELEVANT BAND
       let maxPower = -Infinity;
       let peakBinIdx = -1;
       
-      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
+      // OPTIMIZATION: Only scan within the frequency mask
+      for (let binIdx = minScanBin; binIdx <= maxScanBin; binIdx++) {
+        // Safety check index
+        if (binIdx >= framePower.length) break;
+
         if (framePower[binIdx] > maxPower) {
           maxPower = framePower[binIdx];
           peakBinIdx = binIdx;
@@ -429,19 +448,16 @@ export class BatCallDetector {
       // Validation: Check if peak qualifies as a trajectory point
       // ============================================================
       
-      // Check 1: Peak must exceed the adaptive trajectory threshold
-      if (maxPower < trajectoryThreshold) {
-        trajectory.push(null); // Break in trajectory
+      // Check 1: Simple Threshold Check
+      if (maxPower < trajectoryThreshold || maxPower < absoluteFloor) {
+        trajectory.push(null); // Too faint to be signal
         continue;
       }
       
-      // Check 2: Safety check against pure background noise
-      // Only draw if significantly above noise floor (if known)
-      if (call.noiseFloor_dB != null && maxPower < call.noiseFloor_dB + 3) {
-        trajectory.push(null); // Skip pure noise
-        continue;
-      }
-      
+      // REMOVED Check 2 (Noise Floor + 3dB). 
+      // Reason: Weak tails often dip into the calculated noise floor but are visually valid.
+      // The Frequency Masking above protects us from picking up random noise elsewhere.
+
       // ============================================================
       // Parabolic Interpolation for sub-bin frequency precision
       // ============================================================
