@@ -39,6 +39,7 @@ import { showMessageBox } from './modules/messageBox.js';
 import { initAutoIdPanel } from './modules/autoIdPanel.js';
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
 import { initPeakControl, isPeakModeActive, getPeakThreshold } from './modules/peakControl.js';
+import { initAutoDetection } from './modules/autoDetectionControl.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
 const spectrogramHeight = 800;
@@ -1544,6 +1545,17 @@ autoIdControl = initAutoIdPanel({
   hideHover: () => freqHoverControl?.hideHover(),
   refreshHover: () => freqHoverControl?.refreshHover()
 });
+
+// Initialize Auto Detection Control
+initAutoDetection({
+  frequencyHoverControl: freqHoverControl,
+  getDuration: () => duration,
+  getZoomLevel: () => zoomControl?.getZoomLevel?.() || 1,
+  spectrogramHeight,
+  minFrequency: currentFreqMin,
+  maxFrequency: currentFreqMax
+});
+
 freqMenuControl = initFreqContextMenu({
   viewerId: 'viewer-container',
   wrapperId: 'viewer-wrapper',

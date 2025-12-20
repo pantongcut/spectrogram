@@ -233,6 +233,22 @@ export function compute_power_spectrum(audio_data: Float32Array, sample_rate: nu
 export function compute_wave_peaks(channel_data: Float32Array, num_peaks: number): Float32Array;
 
 /**
+ * Detect segments in a spectrogram based on energy threshold
+ *
+ * # Arguments
+ * * `spectrogram_flat` - Flattened spectrogram matrix (row-major, dB values)
+ * * `num_cols` - Number of frequency bins (columns)
+ * * `threshold_db` - Energy threshold in dB
+ * * `sample_rate` - Sample rate in Hz
+ * * `hop_size` - Hop size in samples
+ * * `padding_ms` - Padding in milliseconds
+ *
+ * # Returns
+ * Flattened array [start1, end1, start2, end2, ...] in seconds
+ */
+export function detect_segments(spectrogram_flat: Float32Array, num_cols: number, threshold_db: number, sample_rate: number, hop_size: number, padding_ms: number): Float32Array;
+
+/**
  * 找到整個音頻緩衝區的全局最大值（用於標準化）
  * 
  * # Arguments
@@ -266,6 +282,7 @@ export interface InitOutput {
   readonly __wbg_waveformengine_free: (a: number, b: number) => void;
   readonly compute_power_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly compute_wave_peaks: (a: number, b: number, c: number) => [number, number];
+  readonly detect_segments: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly find_global_max: (a: number, b: number) => number;
   readonly find_peak_frequency_from_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly spectrogramengine_clear_filter_bank: (a: number) => void;

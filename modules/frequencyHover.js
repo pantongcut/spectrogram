@@ -1393,6 +1393,45 @@ function updateTooltipValues(sel, left, top, width, height) {
       } else {
         wrapper.classList.remove('theme-light');
       }
+    },
+    programmaticSelect: (startTime, endTime, frequencyMin, frequencyMax) => {
+      // Create a selection programmatically without user interaction
+      if (!frequencyMin) frequencyMin = minFrequency;
+      if (!frequencyMax) frequencyMax = maxFrequency;
+      
+      const zoomLevel = getZoomLevel();
+      const duration = getDuration();
+      const actualWidth = duration * zoomLevel;
+      
+      // Calculate pixel positions
+      const leftPx = (startTime / duration) * actualWidth;
+      const rightPx = (endTime / duration) * actualWidth;
+      const widthPx = rightPx - leftPx;
+      
+      // Calculate vertical positions (frequency range)
+      const Fhigh = Math.max(frequencyMin, frequencyMax);
+      const Flow = Math.min(frequencyMin, frequencyMax);
+      const topPx = (1 - (Fhigh - minFrequency) / (maxFrequency - minFrequency)) * spectrogramHeight;
+      const heightPx = ((Fhigh - Flow) / (maxFrequency - minFrequency)) * spectrogramHeight;
+      
+      // Create the selection rect
+      const rectObj = document.createElement('div');
+      rectObj.className = 'selection-rect';
+      rectObj.style.left = `${leftPx}px`;
+      rectObj.style.top = `${topPx}px`;
+      rectObj.style.width = `${widthPx}px`;
+      rectObj.style.height = `${heightPx}px`;
+      
+      viewer.appendChild(rectObj);
+      
+      // Calculate bandwidth and duration
+      const Bandwidth = Fhigh - Flow;
+      const Duration = endTime - startTime;
+      
+      // Create the selection object
+      const newSel = createTooltip(leftPx, topPx, widthPx, heightPx, Fhigh, Flow, Bandwidth, Duration, rectObj, startTime, endTime);
+      
+      return newSel;
     }
   };
 }
