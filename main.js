@@ -19,6 +19,9 @@ initScrollSync,
 setPeakMode,
 setPeakThreshold,
 setSmoothMode,
+setAutoDetectionEnabled,
+setDetectionSensitivity,
+triggerAutoDetection,
 } from './modules/wsManager.js';
 
 import { initZoomControls } from './modules/zoomControl.js';
@@ -1486,10 +1489,13 @@ initMapPopup();
 // 初始化 Peak Control
 initPeakControl({
   peakBtnId: 'peakBtn',
-  onPeakModeToggled: (isActive) => {
-    // 設置 Peak Mode 狀態
+  onAutoDetectionToggled: (isActive) => {
+    // Set Peak Mode state
     setPeakMode(isActive);
-    // 重新創建 Spectrogram 插件以應用 Peak Mode
+    // Enable/disable auto detection
+    setAutoDetectionEnabled(isActive);
+    
+    // Recreate Spectrogram plugin to apply Auto Detection Mode
     replacePlugin(
       getEffectiveColorMap(),
       spectrogramHeight,
@@ -1507,33 +1513,15 @@ initPeakControl({
       currentFftSize,
       currentWindowType,
       isActive,
-      getPeakThreshold(),  // peakThreshold (use default)
+      getPeakThreshold(),  // detection sensitivity
       handleColorMapChange  // onColorMapChanged callback
     );
   },
-  onThresholdChanged: (threshold) => {
-    // 設置 Peak Threshold 並重新渲染
-    setPeakThreshold(threshold);
-    replacePlugin(
-      getEffectiveColorMap(),
-      spectrogramHeight,
-      currentFreqMin,
-      currentFreqMax,
-      getOverlapPercent(),
-      () => {
-        zoomControl.applyZoom();
-        renderAxes();
-        freqHoverControl?.refreshHover();
-        autoIdControl?.updateMarkers();
-        updateSpectrogramSettingsText();
-        restoreImageEnhancement(); // Restore brightness/contrast/gain settings
-      },
-      currentFftSize,
-      currentWindowType,
-      isPeakModeActive(),
-      threshold,
-      handleColorMapChange  // onColorMapChanged callback
-    );
+  onSensitivityChanged: (sensitivity) => {
+    // Update detection sensitivity and trigger debounced detection
+    setPeakThreshold(sensitivity);
+    setDetectionSensitivity(sensitivity);
+    triggerAutoDetection(sensitivity);
   }
 });
 

@@ -1028,6 +1028,11 @@ class h extends s {
                         }
                     }
                 }
+
+                // [NEW] Draw Auto Detection Overlay if enabled and calls are available
+                if (this.options && this.options.peakMode && this.detectedCalls && this.detectedCalls.length > 0) {
+                    this.drawDetectionOverlay(canvasCtx, this.detectedCalls);
+                }
             }));
         }
         
@@ -1436,6 +1441,92 @@ async getFrequencies(t) {
             out.push(outArr);
         }
         return out
+    }
+
+    /**
+     * Set detected bat calls for overlay rendering
+     * @param {Array} calls - Array of detected call objects from BatCallDetector
+     */
+    setDetectedCalls(calls) {
+        this.detectedCalls = calls || [];
+        // Re-render if we have last render data
+        if (this.lastRenderData) {
+            this.drawSpectrogram(this.lastRenderData);
+        }
+    }
+
+    /**
+     * Draw detection overlay on canvas
+     * Renders visual representations of detected bat calls
+     */
+    drawDetectionOverlay(ctx, calls) {
+        if (!ctx || !calls || calls.length === 0) return;
+        
+        const sampleRate = this.buffer.sampleRate;
+        const height = this.canvas.height;
+        const width = this.canvas.width;
+        const totalDuration = this.buffer.duration;
+        
+        const viewMinHz = this.frequencyMin || 0;
+        const viewMaxHz = this.frequencyMax || (sampleRate / 2);
+        const viewRangeHz = viewMaxHz - viewMinHz;
+
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        calls.forEach(call => {
+            if (!call) return;
+
+            // Check if call is visible in current view (optional optimization)
+            if (call.endTime_s < 0 || call.startTime_s > totalDuration) {
+                return; // Call is outside view
+            }
+
+            // Map time to canvas X coordinates
+            const startX = (call.startTime_s / totalDuration) * width;
+            const endX = (call.endTime_s / totalDuration) * width;
+
+            // Draw frequency trajectory if available
+            if (call.frequencyTrajectory && Array.isArray(call.frequencyTrajectory)) {
+                ctx.beginPath();
+                ctx.strokeStyle = "rgba(0, 255, 255, 0.85)"; // Cyan
+                
+                call.frequencyTrajectory.forEach((point, index) => {
+                    const x = (point.time_s / totalDuration) * width;
+                    
+                    // Map frequency to Y coordinate
+                    // Frequency should be in Hz
+                    let freqHz = point.freq_Hz;
+                    if (!freqHz && point.freq_kHz) {
+                        freqHz = point.freq_kHz * 1000;
+                    }
+                    
+                    if (freqHz < viewMinHz || freqHz > viewMaxHz) {
+                        return; // Skip out-of-view frequencies
+                    }
+                    
+                    const yFraction = (freqHz - viewMinHz) / viewRangeHz;
+                    const y = height - (yFraction * height);
+                    
+                    if (index === 0) {
+                        ctx.moveTo(x, y);
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                });
+                ctx.stroke();
+            } else {
+                // Fallback: Draw simple bounding box
+                if (call.lowFreq_Hz && call.highFreq_Hz) {
+                    const lowY = height - ((call.lowFreq_Hz - viewMinHz) / viewRangeHz) * height;
+                    const highY = height - ((call.highFreq_Hz - viewMinHz) / viewRangeHz) * height;
+                    
+                    ctx.strokeStyle = "rgba(0, 200, 255, 0.6)"; // Lighter cyan
+                    ctx.strokeRect(startX, highY, endX - startX, lowY - highY);
+                }
+            }
+        });
     }
 }
 

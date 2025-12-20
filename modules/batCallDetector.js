@@ -336,6 +336,81 @@ export class BatCallDetector {
     this.goertzelEnergy = getGoertzelEnergyFunction();
     this.wasmEngine = wasmEngine;  // Optional WASM engine for performance optimization
   }
+
+  /**
+   * Set or update WASM engine for shared FFT calculation
+   * This allows reusing the same WASM engine across multiple detection runs
+   */
+  setWasmEngine(engine) {
+    this.wasmEngine = engine;
+    return this;
+  }
+
+  /**
+   * Get the WASM engine (creates one if not available)
+   */
+  getWasmEngine() {
+    if (this.wasmEngine) {
+      return this.wasmEngine;
+    }
+    // Could implement lazy initialization here if needed
+    return null;
+  }
+  
+  /**
+   * Compute frequency trajectory for visualization
+   * Returns array of {time_s, freq_Hz} points representing the frequency ridge
+   */
+  computeFrequencyTrajectory(call) {
+    if (!call || !call.spectrogram || !call.timeFrames) {
+      return [];
+    }
+
+    const trajectory = [];
+    const spectrogram = call.spectrogram;  // [timeFrame][freqBin]
+    const timeFrames = call.timeFrames;
+    const freqBins = call.freqBins;
+
+    // For each time frame, find the peak frequency
+    for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
+      const framePower = spectrogram[frameIdx];
+      
+      // Find peak bin in this frame
+      let maxPower = -Infinity;
+      let peakBinIdx = 0;
+      
+      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
+        if (framePower[binIdx] > maxPower) {
+          maxPower = framePower[binIdx];
+          peakBinIdx = binIdx;
+        }
+      }
+
+      // Apply parabolic interpolation for sub-bin precision
+      let freqHz = freqBins[peakBinIdx];
+      
+      if (peakBinIdx > 0 && peakBinIdx < framePower.length - 1) {
+        const db0 = framePower[peakBinIdx - 1];
+        const db1 = framePower[peakBinIdx];
+        const db2 = framePower[peakBinIdx + 1];
+        
+        const a = (db2 - 2 * db1 + db0) / 2;
+        if (Math.abs(a) > 1e-10) {
+          const binCorrection = (db0 - db2) / (4 * a);
+          const binWidth = freqBins[1] - freqBins[0];
+          freqHz = freqBins[peakBinIdx] + binCorrection * binWidth;
+        }
+      }
+
+      trajectory.push({
+        time_s: timeFrames[frameIdx],
+        freq_Hz: freqHz,
+        power_dB: maxPower
+      });
+    }
+
+    return trajectory;
+  }
   
   /**
    * Calculate quality rating based on SNR value
@@ -785,6 +860,11 @@ export class BatCallDetector {
       // This will calculate highFreq, lowFreq, peakFreq, startFreq, endFreq, etc.
       this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution);
       
+      // [NEW] Compute frequency trajectory for visualization if requested
+      // This creates a ridge trace of peak frequencies over time
+      if (options && options.computeShapes) {
+        call.frequencyTrajectory = this.computeFrequencyTrajectory(call);
+      }
 
       call.Flow = call.lowFreq_kHz * 1000;   // Lowest freq in call (Hz)
       call.Fhigh = call.highFreq_kHz;        // Highest freq in call (kHz)
