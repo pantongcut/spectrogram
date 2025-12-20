@@ -292,10 +292,11 @@ export async function runAutoDetection(sensitivityValue = detectionSensitivity) 
     const detector = new BatCallDetector();
     detector.setWasmEngine(wasmEngine);
     
-    // 4. Update detector configuration
+    // 4. [CRITICAL FIX] Sync configuration settings to match Spectrogram View exactly
     detector.config.callThreshold_dB = sensitivityDB;
-    detector.config.fftSize = currentFftSize;
-    detector.config.windowType = currentWindowType;
+    detector.config.fftSize = currentFftSize;           // 同步 FFT Size
+    detector.config.windowType = currentWindowType;     // 同步 Window Function
+    detector.config.enableBackwardEndFreqScan = true;   // 確保開啟 Anti-rebounce
     
     // 5. Get audio data from decoded buffer
     const decodedData = ws.getDecodedData();
@@ -312,12 +313,13 @@ export async function runAutoDetection(sensitivityValue = detectionSensitivity) 
       return;
     }
     
-    // 6. Run detection with optimization flags
-    // [MODIFIED] Added fastMode: true for UI overlay (skip detailed parameters)
+    // 6. [CRITICAL FIX] Run detection with High Precision
+    // We MUST disable fastMode to get accurate parameters and Anti-Rebounce protection
+    // This ensures visual consistency between Auto Detection and Selection Tool
     const calls = await detector.detectCalls(audioData, sampleRate, 0, sampleRate / 2000, {
-      skipSNR: true,           // Skip SNR calculation for speed
-      fastMode: true,          // [NEW] Skip detailed parameters (Knee, Start/End refinement)
-      computeShapes: true      // We still need the shape (trajectory)
+      skipSNR: true,           // Still skip SNR to save some time
+      fastMode: false,         // [CRITICAL] Disable fast mode for parameter accuracy and echo removal
+      computeShapes: true      // Compute frequency trajectory for visualization
     });
     
     // 7. Cache results
