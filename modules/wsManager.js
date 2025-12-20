@@ -313,10 +313,11 @@ export async function runAutoDetection(sensitivityValue = detectionSensitivity) 
     }
     
     // 6. Run detection with optimization flags
+    // [MODIFIED] Added fastMode: true for UI overlay (skip detailed parameters)
     const calls = await detector.detectCalls(audioData, sampleRate, 0, sampleRate / 2000, {
-      skipSNR: true,           // Speed optimization: skip SNR calculation
-      computeShapes: true,     // Compute frequency trajectory for visualization
-      computeCharacteristic: true
+      skipSNR: true,           // Skip SNR calculation for speed
+      fastMode: true,          // [NEW] Skip detailed parameters (Knee, Start/End refinement)
+      computeShapes: true      // We still need the shape (trajectory)
     });
     
     // 7. Cache results

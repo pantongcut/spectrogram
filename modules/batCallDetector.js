@@ -359,7 +359,7 @@ export class BatCallDetector {
   
   /**
    * Compute frequency trajectory for visualization
-   * Returns array of {time_s, freq_Hz} points representing the frequency ridge
+   * [FIX] Added noise thresholding to avoid drawing lines through silence/background noise
    */
   computeFrequencyTrajectory(call) {
     if (!call || !call.spectrogram || !call.timeFrames) {
@@ -371,11 +371,23 @@ export class BatCallDetector {
     const timeFrames = call.timeFrames;
     const freqBins = call.freqBins;
 
-    // For each time frame, find the peak frequency
+    // Calculate local noise floor (simple estimate of segment maximum)
+    let localMax = -Infinity;
+    for (let f = 0; f < spectrogram.length; f++) {
+      for (let b = 0; b < spectrogram[f].length; b++) {
+        if (spectrogram[f][b] > localMax) {
+          localMax = spectrogram[f][b];
+        }
+      }
+    }
+    
+    // Only record points with energy > (Peak - 30dB) to avoid drawing background noise
+    const trajectoryThreshold = localMax - 30;
+
     for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
       const framePower = spectrogram[frameIdx];
       
-      // Find peak bin in this frame
+      // Find peak frequency bin in this frame
       let maxPower = -Infinity;
       let peakBinIdx = 0;
       
@@ -384,6 +396,13 @@ export class BatCallDetector {
           maxPower = framePower[binIdx];
           peakBinIdx = binIdx;
         }
+      }
+
+      // [VISUAL FIX] If frame energy is below threshold, it's likely background noise
+      // Return null as a break marker so drawing layer can skip this point
+      if (maxPower < trajectoryThreshold) {
+        trajectory.push(null);
+        continue;
       }
 
       // Apply parabolic interpolation for sub-bin precision
@@ -813,7 +832,7 @@ export class BatCallDetector {
    * @param {boolean} options.skipSNR - If true, skip expensive SNR calculation on first pass
    * @returns {Promise<Array>} Array of BatCall objects
    */
-  async detectCalls(audioData, sampleRate, flowKHz, fhighKHz, options = { skipSNR: false }) {
+  async detectCalls(audioData, sampleRate, flowKHz, fhighKHz, options = { skipSNR: false, fastMode: false, computeShapes: false }) {
     if (!audioData || audioData.length === 0) return [];
     
     // Generate high-resolution STFT spectrogram
@@ -851,9 +870,24 @@ export class BatCallDetector {
       
       call.calculateDuration();
       
-      // 驗證: 過濾不符合最小時長要求的 call
+      // [PERFORMANCE FIX] Fast Mode for Overlay
+      // If fastMode is true, skip all complex parameter measurements
+      // Only compute trajectory (which is all we need for visualization)
+      if (options && options.fastMode) {
+        // Simplified frequency range estimation
+        call.lowFreq_kHz = flowKHz;
+        call.highFreq_kHz = fhighKHz;
+        
+        // Compute trajectory (only thing needed for visualization)
+        call.frequencyTrajectory = this.computeFrequencyTrajectory(call);
+        return call;
+      }
+      
+      // --- Full analysis logic (only executed when NOT in fastMode) ---
+      
+      // Verify: filter calls that don't meet minimum duration
       if (call.duration_ms < this.config.minCallDuration_ms) {
-        return null;  // 標記為無效，之後過濾掉
+        return null;  // Mark as invalid, will be filtered out later
       }
       
       // Measure frequency parameters from spectrogram
@@ -872,6 +906,11 @@ export class BatCallDetector {
       
       return call;
     }).filter(call => call !== null);  // 移除不符合條件的 call
+    
+    // [PERFORMANCE FIX] Fast Mode returns immediately, skips SNR calculation
+    if (options && options.fastMode) {
+        return calls;
+    }
     
     // ============================================================
     // 額外驗證：過濾誤檢測的噪音段
