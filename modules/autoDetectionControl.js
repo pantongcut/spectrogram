@@ -74,158 +74,185 @@ export function initAutoDetection(config) {
   /**
    * Perform auto-detection based on current threshold
    */
-  async function performAutoDetection() {
+// autoDetectionControl.js - Revised performAutoDetection
+
+async function performAutoDetection() {
     console.log('[autoDetectionControl] ✅ performAutoDetection called');
-    try {
-      const plugin = getPlugin();
-      if (!plugin) {
-        console.warn('[autoDetectionControl] ❌ No spectrogram plugin available');
+
+    // 1. Get Audio Data & Spectrogram Data
+    // 優先嘗試從現有的 Spectrogram Plugin 獲取已計算的數據 (效能最佳)
+    const plugin = wsManager.getPlugin();
+    let flatArray = null;
+    let numCols = 0; // Frequency bins
+    let numRows = 0; // Time frames
+    let sampleRate = 0;
+    let fftSize = 0;
+    
+    // 獲取 Wavesurfer 解碼後的音訊數據 (用於參數參考或 Fallback)
+    const ws = wsManager.getWavesurfer();
+    if (!ws) return;
+    const decodedData = ws.getDecodedData();
+    if (!decodedData) {
+        console.warn('[autoDetectionControl] Audio not decoded yet');
         return;
-      }
-
-      // Get WaveSurfer instance and decoded audio data
-      const wavesurfer = getWavesurfer();
-      if (!wavesurfer) {
-        console.warn('[autoDetectionControl] ❌ No WaveSurfer instance available');
-        return;
-      }
-
-      const decodedData = wavesurfer.getDecodedData();
-      if (!decodedData) {
-        console.warn('[autoDetectionControl] ❌ No decoded audio data available');
-        return;
-      }
-
-      // Get FFT parameters from plugin BEFORE computing spectrogram
-      const fftSize = plugin.getFftSize?.() || 512;
-      const hopSize = plugin.getHopSize?.() || 256;
-      const sampleRate = plugin.getSampleRate?.() || 44100;
-
-      // CRITICAL: Get LINEAR MAGNITUDE spectrogram using compute_spectrogram()
-      // This gives us actual frequency bin magnitudes, not U8 visualization data
-      const wasmModule = globalThis._spectrogramWasm;
-      if (!wasmModule || !wasmModule.compute_spectrogram) {
-        console.warn('[autoDetectionControl] ❌ WASM compute_spectrogram not available');
-        return;
-      }
-
-      // Get audio data from first channel
-      const audioData = decodedData.getChannelData(0);
-      
-      // Calculate noverlap based on FFT size
-      let noverlap = Math.floor(fftSize * 0.75); // 75% overlap by default
-      if (plugin.noverlap !== undefined) {
-        noverlap = plugin.noverlap;
-      }
-      
-      console.log(`[autoDetectionControl] Computing linear magnitude spectrogram: fftSize=${fftSize}, noverlap=${noverlap}, hopSize=${hopSize}`);
-      
-      // Get linear magnitude spectrogram (NOT U8!)
-      const linearSpectrogram = wasmModule.compute_spectrogram(audioData, noverlap);
-      if (!linearSpectrogram || linearSpectrogram.length === 0) {
-        console.warn('[autoDetectionControl] ❌ No linear spectrogram data from WASM');
-        return;
-      }
-
-      const numBins = fftSize / 2; // Number of frequency bins in FFT
-      const numFrames = Math.floor(linearSpectrogram.length / numBins);
-      
-      console.log(`[autoDetectionControl] Linear spectrogram available: ${numFrames} frames x ${numBins} bins (total ${linearSpectrogram.length} values)`);
-
-      // Calculate peak max if not already calculated
-      if (currentPeakMax === null) {
-        currentPeakMax = calculatePeakMax(linearSpectrogram, fftSize);
-        console.log(`[autoDetectionControl] ✅ calculatePeakMax returned: ${currentPeakMax.toFixed(2)} dB`);
-      }
-
-      // Calculate threshold in dB
-      const sliderValue = parseInt(detectThresholdSlider.value);
-      const thresholdDb = currentPeakMax - (48 * (1 - sliderValue / 100));
-
-      console.log(`[autoDetectionControl] Peak Max: ${currentPeakMax.toFixed(2)} dB, Slider: ${sliderValue}%, Threshold: ${thresholdDb.toFixed(2)} dB`);
-
-      // CRITICAL: Convert dB threshold back to linear magnitude for WASM comparison
-      // The WASM function expects dB values in the spectrogram array
-      // But our linearSpectrogram contains linear magnitudes
-      // We need to convert the threshold back to match the domain
-      // Formula: linear = 10^(dB/20) for magnitude, or 10^(dB/10) for power
-      
-      // Since we're using power-based dB (10*log10), convert back:
-      const thresholdLinearPower = Math.pow(10, thresholdDb / 10);
-      
-      console.log(`[autoDetectionControl] Threshold conversion: ${thresholdDb.toFixed(2)} dB → ${thresholdLinearPower.toFixed(9)} linear power (normalized)`);
-
-      // Convert linear magnitude spectrogram to dB for WASM
-      // WASM expects dB values, so we need to convert our linear magnitudes
-      const dbSpectrogram = new Float32Array(linearSpectrogram.length);
-      for (let i = 0; i < linearSpectrogram.length; i++) {
-        const linearMag = linearSpectrogram[i];
-        const powerLinear = (linearMag * linearMag) / fftSize;
-        dbSpectrogram[i] = 10 * Math.log10(Math.max(powerLinear, 1e-16));
-      }
-
-      console.log(`[autoDetectionControl] Converted linear spectrogram to dB values. Sample: dbSpectrogram[0]=${dbSpectrogram[0].toFixed(2)} dB`);
-
-      // Get WASM detect_segments function
-      if (!wasmModule.detect_segments) {
-        console.warn('[autoDetectionControl] WASM detect_segments function not available');
-        return;
-      }
-
-      console.log(`[autoDetectionControl] Calling detect_segments with: flatArray.length=${dbSpectrogram.length}, numCols=${numBins}, threshold=${thresholdDb.toFixed(2)} dB, sampleRate=${sampleRate}, hopSize=${hopSize}`);
-
-      // Call WASM detection function with dB values
-      const segments = wasmModule.detect_segments(
-        dbSpectrogram,
-        numBins,
-        thresholdDb,
-        sampleRate,
-        hopSize,
-        5.0 // padding in milliseconds
-      );
-
-      console.log(`[autoDetectionControl] ✅ detect_segments returned ${segments.length} values (${Math.floor(segments.length / 2)} segments)`);
-
-      // Clear previous selections
-      if (frequencyHoverControl) {
-        frequencyHoverControl.clearSelections();
-      }
-
-      // Create selections for each detected segment
-      const duration = getDuration();
-      const currentFreqMin = minFrequency;
-      const currentFreqMax = maxFrequency;
-      
-      console.log(`[autoDetectionControl] Creating selections with freqRange: ${currentFreqMin}-${currentFreqMax} kHz, duration: ${duration}s`);
-      console.log(`[autoDetectionControl] frequencyHoverControl available: ${!!frequencyHoverControl}`);
-
-      for (let i = 0; i < segments.length; i += 2) {
-        const startTime = segments[i];
-        const endTime = segments[i + 1];
-        
-        // Only create selections within the current time range
-        if (startTime < duration && endTime > 0) {
-          const clampedStart = Math.max(0, startTime);
-          const clampedEnd = Math.min(duration, endTime);
-
-          if (clampedEnd - clampedStart > 0 && frequencyHoverControl) {
-            console.log(`[autoDetectionControl] Segment ${Math.floor(i/2)}: ${clampedStart.toFixed(3)}-${clampedEnd.toFixed(3)}s, freq: ${currentFreqMin}-${currentFreqMax} kHz`);
-            const selection = frequencyHoverControl.programmaticSelect(
-              clampedStart,
-              clampedEnd,
-              currentFreqMin,
-              currentFreqMax
-            );
-            console.log(`[autoDetectionControl] ✅ Selection created at [${clampedStart.toFixed(3)}, ${clampedEnd.toFixed(3)}]`);
-          }
-        }
-      }
-
-      console.log(`[autoDetectionControl] ✅ Created ${Math.floor(segments.length / 2)} selections`);
-    } catch (err) {
-      console.error('[autoDetectionControl] Error during auto-detection:', err);
     }
-  }
+    sampleRate = decodedData.sampleRate;
+
+    // 嘗試從 Plugin 提取數據
+    // 注意：不同的 Spectrogram 實作存放數據的變數名可能不同 (spectrogram, frequenciesData, etc.)
+    // 這裡假設是標準結構，如果你的 plugin 結構不同，請調整屬性名
+    if (plugin && plugin.spectrogram && plugin.spectrogram.length > 0) {
+        console.log('[autoDetectionControl] Using existing plugin data');
+        // plugin.spectrogram 通常是 Array of Uint8Array (0-255) 或 Float32Array
+        // 如果是 Uint8Array，這是已經 mapping 過顏色的數據，不適合做精確的物理運算
+        // 我們需要原始的 Magnitude 數據。
+        // 如果 plugin 沒有保留原始 magnitude，我們必須用 WASM 重算。
+        
+        // 檢查是否有原始數據 (rawSpectrogram or similar)
+        // 如果沒有，我們進入下方的 WASM 重算流程
+    }
+
+    // 如果無法從 Plugin 直接獲取原始 Magnitude，我們使用 WASM Engine 重算
+    // 這是最穩妥的方法，確保我們拿到的是 Linear Amplitude 用於計算 dB
+    if (!flatArray) {
+        const wasmEngine = wsManager.getOrCreateWasmEngine();
+        
+        // 檢查 WASM Engine 是否可用
+        if (wasmEngine) {
+            try {
+                const channelData = decodedData.getChannelData(0);
+                
+                // [關鍵修正] 檢查正確的方法名稱
+                // 通常是 compute() 或是在建構時傳入，這裡假設是用 compute
+                // 如果你的 Rust 方法叫 compute_spectrogram，請確保 bindgen 有導出它
+                // 如果沒有，我們嘗試標準的 compute 方法
+                
+                let spectrogramVec;
+                
+                if (typeof wasmEngine.compute_spectrogram === 'function') {
+                    spectrogramVec = wasmEngine.compute_spectrogram(channelData);
+                } else if (typeof wasmEngine.compute === 'function') {
+                    spectrogramVec = wasmEngine.compute(channelData);
+                } else {
+                     // 如果找不到計算方法，可能需要重新初始化 Engine 或檢查 API
+                     console.error('[autoDetectionControl] ❌ WASM engine has no compute method. Methods:', Object.getPrototypeOf(wasmEngine));
+                     return;
+                }
+
+                // 轉換 WASM Vector 到 JS Float32Array
+                // 注意：這取決於你的 WASM 回傳什麼。如果是指針，需要 unsafe view。
+                // 假設它回傳的是 JS 側的 Float32Array 副本
+                flatArray = spectrogramVec; 
+                
+                // 獲取維度資訊
+                // 假設 engine 有 getters
+                fftSize = wsManager.getCurrentFftSize ? wsManager.getCurrentFftSize() : 1024;
+                numCols = fftSize / 2 + 1; // Standard FFT bins
+                numRows = flatArray.length / numCols;
+                
+                console.log(`[autoDetectionControl] Computed new spectrogram: ${numRows} x ${numCols}`);
+
+            } catch (e) {
+                console.error('[autoDetectionControl] Error computing spectrogram via WASM:', e);
+                return;
+            }
+        } else {
+             console.error('[autoDetectionControl] ❌ WASM engine not initialized');
+             return;
+        }
+    }
+
+    if (!flatArray) {
+        console.error('[autoDetectionControl] Failed to acquire spectrogram data');
+        return;
+    }
+
+    // 2. Calculate Peak Max (Correct Physics Logic)
+    // 模擬 BatCallDetector 的算法：20 * log10(magnitude)
+    // 我們需要遍歷整個陣列找出最大的 dB 值
+    
+    let maxDB = -1000;
+    // 為了效能，可以抽樣檢查，但為了準確度，建議檢查全部 (使用簡單的 for loop)
+    // 注意：flatArray 應該是 Linear Magnitude
+    
+    for (let i = 0; i < flatArray.length; i++) {
+        const mag = flatArray[i];
+        // 防止 log(0)
+        if (mag > 0.00000001) {
+             const db = 20 * Math.log10(mag);
+             if (db > maxDB) maxDB = db;
+        }
+    }
+    
+    // 如果訊號太弱或全靜音
+    if (maxDB < -999) maxDB = -100;
+
+    // 3. Calculate Threshold
+    // Logic: Slider 50% = -24dB relative to Peak
+    // Slider 100% = 0dB relative to Peak (Threshold = Peak)
+    // Slider 0% = -48dB relative to Peak
+    const sliderVal = parseInt(detectThresholdSlider.value, 10);
+    const dropDB = 48 * (1 - sliderVal / 100); 
+    const thresholdDB = maxDB - dropDB;
+    
+    // Convert Threshold back to Linear for WASM comparison
+    // 因為 WASM 裡面的數據是 Linear 的，我們傳 Linear Threshold 進去比對最快
+    const linearThreshold = Math.pow(10, thresholdDB / 20);
+
+    console.log(`[autoDetectionControl] Peak: ${maxDB.toFixed(2)} dB, Slider: ${sliderVal}, Threshold: ${thresholdDB.toFixed(2)} dB (Linear: ${linearThreshold.toExponential(4)})`);
+
+    // 4. Call WASM Detection Logic
+    // 確保 wsManager 有提供調用 detect_segments 的方法
+    // 這裡我們直接使用全局的 WASM 模組函數，或者掛載在 wsManager 上的 helper
+    
+    if (!globalThis._spectrogramWasm || !globalThis._spectrogramWasm.detect_segments) {
+        console.error('[autoDetectionControl] ❌ detect_segments function not found in WASM module');
+        return;
+    }
+
+    const paddingMs = 5.0; // 5ms padding
+    // Hop size (overlap) calculation
+    // 假設 standard overlap 50% 或從 wsManager 獲取
+    // 為了安全，重新計算 hopSize
+    const hopSize = Math.floor(sampleRate / (sampleRate / (fftSize / 2))); // 粗略估算，最好從 wsManager 拿準確的
+    // 實際上 Spectrogram 繪製通常是 FFT size, Hop size = FFT / 2 (若無 overlap 設定)
+    // 這裡假設 hopSize = fftSize / 2 (50% overlap is standard)
+    const exactHopSize = fftSize / 2; 
+
+    try {
+        const segments = globalThis._spectrogramWasm.detect_segments(
+            flatArray,
+            numCols,
+            linearThreshold, // Pass LINEAR threshold
+            sampleRate,
+            fftSize,
+            exactHopSize, // hop_size
+            paddingMs
+        );
+
+        console.log(`[autoDetectionControl] Detected ${segments.length / 2} segments`);
+
+        // 5. Generate Selections
+        frequencyHoverControl.clearSelections();
+        
+        // Spectrogram 的頻率範圍 (UI 顯示範圍)
+        const freqMin = wsManager.getPlugin().options.frequencyMin / 1000 || 10;
+        const freqMax = wsManager.getPlugin().options.frequencyMax / 1000 || 128;
+
+        for (let i = 0; i < segments.length; i += 2) {
+            const start = segments[i];
+            const end = segments[i+1];
+            
+            // 呼叫 frequencyHover.js 的 programmaticSelect
+            if (frequencyHoverControl && frequencyHoverControl.programmaticSelect) {
+                frequencyHoverControl.programmaticSelect(start, end, freqMin, freqMax);
+            }
+        }
+        
+    } catch (e) {
+        console.error('[autoDetectionControl] Error during WASM detection:', e);
+    }
+}
 
   /**
    * Calculate the global peak maximum from linear magnitude spectrogram
