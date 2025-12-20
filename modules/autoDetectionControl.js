@@ -41,7 +41,9 @@ export function initAutoDetection(config) {
       autoDetectBtn.classList.remove('active');
       autoDetectModeToolBar.style.display = 'none';
       autoDetectSwitch.checked = false;
-      frequencyHoverControl.clearSelections();
+      if (frequencyHoverControl) {
+        frequencyHoverControl.clearSelections();
+      }
     }
   });
 
@@ -60,7 +62,9 @@ export function initAutoDetection(config) {
     if (e.target.checked) {
       performAutoDetection();
     } else {
-      frequencyHoverControl.clearSelections();
+      if (frequencyHoverControl) {
+        frequencyHoverControl.clearSelections();
+      }
     }
   });
 
@@ -120,7 +124,9 @@ export function initAutoDetection(config) {
       );
 
       // Clear previous selections
-      frequencyHoverControl.clearSelections();
+      if (frequencyHoverControl) {
+        frequencyHoverControl.clearSelections();
+      }
 
       // Create selections for each detected segment
       const duration = getDuration();
@@ -136,7 +142,7 @@ export function initAutoDetection(config) {
           const clampedStart = Math.max(0, startTime);
           const clampedEnd = Math.min(duration, endTime);
 
-          if (clampedEnd - clampedStart > 0) {
+          if (clampedEnd - clampedStart > 0 && frequencyHoverControl) {
             frequencyHoverControl.programmaticSelect(
               clampedStart,
               clampedEnd,
@@ -174,13 +180,19 @@ export function initAutoDetection(config) {
   // Reset peak max when a new file is loaded
   document.addEventListener('fileLoaded', () => {
     currentPeakMax = null;
-    frequencyHoverControl.clearSelections();
+    if (frequencyHoverControl) {
+      frequencyHoverControl.clearSelections();
+    }
   });
 
   return {
     isActive: () => isAutoDetectModeActive,
     performDetection: performAutoDetection,
-    clearSelections: () => frequencyHoverControl.clearSelections(),
+    clearSelections: () => {
+      if (frequencyHoverControl) {
+        frequencyHoverControl.clearSelections();
+      }
+    },
     setActive: (active) => {
       isAutoDetectModeActive = active;
       if (active) {
@@ -190,7 +202,9 @@ export function initAutoDetection(config) {
         autoDetectBtn.classList.remove('active');
         autoDetectModeToolBar.style.display = 'none';
         autoDetectSwitch.checked = false;
-        frequencyHoverControl.clearSelections();
+        if (frequencyHoverControl) {
+          frequencyHoverControl.clearSelections();
+        }
       }
     }
   };
