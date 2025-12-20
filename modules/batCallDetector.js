@@ -681,7 +681,8 @@ export class BatCallDetector {
     const { powerMatrix, timeFrames, freqBins, freqResolution } = spectrogram;
     
     // Phase 1: Detect call boundaries using energy threshold
-    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz);
+    // [2025 ENHANCED] Pass sampleRate to enable 5ms padding calculation
+    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz, sampleRate);
     
     if (callSegments.length === 0) return [];
     
@@ -860,7 +861,8 @@ export class BatCallDetector {
     const { powerMatrix, timeFrames, freqBins, freqResolution } = spectrogram;
     
     // Phase 1: Detect call boundaries using energy threshold
-    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz);
+    // [2025 ENHANCED] Pass sampleRate to enable 5ms padding calculation
+    const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz, sampleRate);
     
     if (callSegments.length === 0) return [];
     
@@ -1233,9 +1235,11 @@ export class BatCallDetector {
   
   /**
    * Phase 1: Detect call segments using energy threshold
+   * [2025 ENHANCED] Now includes 5ms padding and segment merging for better fine-tuning
    * Returns: array of { startFrame, endFrame }
+   * @param {number} sampleRate - Sample rate in Hz (needed for frame duration calculation)
    */
-  detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz) {
+  detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz, sampleRate) {
     const { callThreshold_dB } = this.config;
     
     // Find global maximum power across entire spectrogram for threshold reference
@@ -1265,7 +1269,7 @@ export class BatCallDetector {
     }
     
     // Segment continuous active frames into call segments
-    const segments = [];
+    const rawSegments = [];
     let segmentStart = null;
     
     for (let frameIdx = 0; frameIdx < activeFrames.length; frameIdx++) {
@@ -1275,7 +1279,7 @@ export class BatCallDetector {
         }
       } else {
         if (segmentStart !== null) {
-          segments.push({
+          rawSegments.push({
             startFrame: segmentStart,
             endFrame: frameIdx - 1
           });
@@ -1286,13 +1290,39 @@ export class BatCallDetector {
     
     // Catch final segment if call extends to end
     if (segmentStart !== null) {
-      segments.push({
+      rawSegments.push({
         startFrame: segmentStart,
         endFrame: activeFrames.length - 1
       });
     }
     
-    return segments;
+    // [2025 NEW] Apply 5ms Padding and Merge Overlapping Segments
+    // This allows fine-tuning algorithms to see weak starts/ends of calls
+    const PADDING_MS = 5;
+    const hopSamples = Math.floor(this.config.fftSize * (this.config.hopPercent / 100));
+    const secPerFrame = hopSamples / sampleRate;
+    const framesToPad = Math.ceil((PADDING_MS / 1000) / secPerFrame);
+    
+    const paddedSegments = [];
+    for (const seg of rawSegments) {
+      const expandedStart = Math.max(0, seg.startFrame - framesToPad);
+      const expandedEnd = Math.min(activeFrames.length - 1, seg.endFrame + framesToPad);
+      
+      // Check if this overlaps with the previous segment
+      if (paddedSegments.length > 0) {
+        const prev = paddedSegments[paddedSegments.length - 1];
+        if (expandedStart <= prev.endFrame) {
+          // Merge: extend previous segment's end
+          prev.endFrame = Math.max(prev.endFrame, expandedEnd);
+          continue;
+        }
+      }
+      
+      // No overlap, add as new segment
+      paddedSegments.push({ startFrame: expandedStart, endFrame: expandedEnd });
+    }
+    
+    return paddedSegments;
   }
   
   /**

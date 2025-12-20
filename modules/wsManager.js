@@ -281,8 +281,14 @@ export async function runAutoDetection(sensitivityValue = detectionSensitivity) 
     
     console.log(`[AutoDetect] Running with sensitivity: ${sensitivityDB.toFixed(1)} dB`);
     
-    // 2. Get or create WASM Engine
-    const wasmEngine = getOrCreateWasmEngine(currentFftSize, currentWindowType);
+    // [CRITICAL CHANGE] Use fixed Analysis Settings, NOT View Settings
+    // This ensures detection is consistent regardless of UI zoom level
+    const ANALYSIS_FFT_SIZE = 1024;
+    const ANALYSIS_WINDOW = 'hann';
+    
+    // 2. Get/Create WASM Engine with fixed settings
+    // This ensures the detector always runs at 1024 FFT regardless of zoom level
+    const wasmEngine = getOrCreateWasmEngine(ANALYSIS_FFT_SIZE, ANALYSIS_WINDOW);
     if (!wasmEngine) {
       console.warn('[AutoDetect] WASM Engine not available, falling back to basic detection');
       return;
@@ -292,11 +298,13 @@ export async function runAutoDetection(sensitivityValue = detectionSensitivity) 
     const detector = new BatCallDetector();
     detector.setWasmEngine(wasmEngine);
     
-    // 4. [CRITICAL FIX] Sync configuration settings to match Spectrogram View exactly
+    // 4. [CRITICAL FIX] Enforce Standard Analysis Settings
+    // Detector uses fixed, optimal settings to ensure consistency
+    // NOT dependent on currentFftSize or currentWindowType from the UI View
     detector.config.callThreshold_dB = sensitivityDB;
-    detector.config.fftSize = currentFftSize;           // 同步 FFT Size
-    detector.config.windowType = currentWindowType;     // 同步 Window Function
-    detector.config.enableBackwardEndFreqScan = true;   // 確保開啟 Anti-rebounce
+    detector.config.fftSize = ANALYSIS_FFT_SIZE;        // Fixed at 1024
+    detector.config.windowType = ANALYSIS_WINDOW;       // Fixed at 'hann'
+    detector.config.enableBackwardEndFreqScan = true;   // Ensure Anti-rebounce enabled
     
     // 5. Get audio data from decoded buffer
     const decodedData = ws.getDecodedData();
