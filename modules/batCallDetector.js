@@ -384,25 +384,8 @@ export class BatCallDetector {
     // Only record points with energy > (Peak - 30dB) to avoid drawing background noise
     const trajectoryThreshold = localMax - 30;
     
-    // [CRITICAL FIX] Ensure we have valid boundaries from the measurement phase
-    // These boundaries have been refined by measureFrequencyParameters (including Anti-Rebounce)
-    const callStartTime = call.startTime_s !== null && call.startTime_s !== undefined ? call.startTime_s : -Infinity;
-    const callEndTime = call.endTime_s !== null && call.endTime_s !== undefined ? call.endTime_s : Infinity;
-
     for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
       const currentTime = timeFrames[frameIdx];
-      
-      // [CRITICAL FIX] Anti-Rebounce Visualization
-      // If current frame time exceeds the corrected end time (from Anti-rebounce algorithm),
-      // stop drawing. This automatically removes the echo/rebounce tail from visualization.
-      if (currentTime > callEndTime) {
-        break;
-      }
-      
-      // Likewise, skip frames before the call start time
-      if (currentTime < callStartTime) {
-        continue;
-      }
       const framePower = spectrogram[frameIdx];
       
       // Find peak frequency bin in this frame
