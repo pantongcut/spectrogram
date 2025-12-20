@@ -359,8 +359,11 @@ export class BatCallDetector {
   
 /**
    * Compute frequency trajectory for visualization
-   * [FIX 2025] Dynamic thresholding WITHOUT global noise floor clamping.
-   * Trust the specific thresholds found by the optimal analysis algorithms.
+   * [2025 ENHANCED] Adaptive trajectory tracing with flexible thresholding
+   * 
+   * Strategy: Frame-by-frame peak tracking that respects the sensitivity of analysis algorithms
+   * Uses thresholds discovered during `findOptimalHighFrequencyThreshold` to ensure visual
+   * consistency with actual detection results.
    */
   computeFrequencyTrajectory(call) {
     if (!call || !call.spectrogram || !call.timeFrames) {
@@ -372,7 +375,9 @@ export class BatCallDetector {
     const timeFrames = call.timeFrames;
     const freqBins = call.freqBins;
 
-    // 1. Calculate Local Max (Segment Peak Power)
+    // ============================================================
+    // 1. Calculate Local Peak Power of this Segment
+    // ============================================================
     let localMax = -Infinity;
     for (let f = 0; f < spectrogram.length; f++) {
       for (let b = 0; b < spectrogram[f].length; b++) {
@@ -383,45 +388,35 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // [CRITICAL FIX] Dynamic Trajectory Threshold
+    // 2. Determine Adaptive Threshold Based on Analysis Results
     // ============================================================
-    let trajectoryThreshold;
-
-    // Check if we have specific thresholds from the analysis phase
-    if (call.lowFreqThreshold_dB_used != null || call.highFreqThreshold_dB_used != null) {
-        // Retrieve the relative thresholds used (defaults to -24 if missing)
-        const highThreshRel = call.highFreqThreshold_dB_used != null ? call.highFreqThreshold_dB_used : -24;
-        const lowThreshRel = call.lowFreqThreshold_dB_used != null ? call.lowFreqThreshold_dB_used : -24;
-
-        // 1. Pick the lowest (most permissive) threshold used for this call
-        //    If detection found signal at -60dB, we must visualize it at -60dB
-        const lowestUsedThreshRel = Math.min(highThreshRel, lowThreshRel);
-
-        // 2. Add a visual buffer (-3dB) to prevent fragmentation at the exact edge
-        trajectoryThreshold = localMax + lowestUsedThreshRel - 3;
-        
-        // [DEBUG LOG] Uncomment to verify threshold is low enough
-        // console.log(`[Trajectory] Peak: ${localMax.toFixed(1)}, UsedRel: ${lowestUsedThreshRel}, Threshold: ${trajectoryThreshold.toFixed(1)}`);
-
-    } else {
-        // Fallback (e.g. Fast Mode): Relaxed default
-        trajectoryThreshold = localMax - 45;
+    let effectiveThresholdRel = -55; // Default fallback for conservative visibility
+    
+    if (call.highFreqThreshold_dB_used != null || call.lowFreqThreshold_dB_used != null) {
+      // Use the actual thresholds discovered by the analysis algorithms
+      const h = call.highFreqThreshold_dB_used || -24;
+      const l = call.lowFreqThreshold_dB_used || -24;
+      // Pick the most sensitive (lowest/most permissive) threshold
+      // Add a visual buffer (-6dB) to ensure we see the full ridge
+      effectiveThresholdRel = Math.min(h, l) - 6;
     }
-
-    // [MODIFIED SAFETY] Absolute Floor Check Only
-    // REMOVED the global noiseFloor_dB check because it truncates valid faint tails.
-    // Only protect against mathematical absurdity (e.g. -150dB).
+    
+    let trajectoryThreshold = localMax + effectiveThresholdRel;
+    
+    // Absolute safety floor: don't go below -85dB (mathematical absurdity protection)
     if (trajectoryThreshold < -85) {
-        trajectoryThreshold = -85;
+      trajectoryThreshold = -85;
     }
 
-    // 2. Generate Trajectory Points
+    // ============================================================
+    // 3. Step-by-Step Frame-by-Frame Tracing
+    // ============================================================
     for (let frameIdx = 0; frameIdx < spectrogram.length && frameIdx < timeFrames.length; frameIdx++) {
       const framePower = spectrogram[frameIdx];
       
-      // Find peak frequency bin in this frame
+      // Find the bin with maximum power in this frame
       let maxPower = -Infinity;
-      let peakBinIdx = 0;
+      let peakBinIdx = -1;
       
       for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
         if (framePower[binIdx] > maxPower) {
@@ -430,14 +425,26 @@ export class BatCallDetector {
         }
       }
 
-      // If the strongest point in this frame is below our dynamic threshold,
-      // it is truly silence/background. Break the line.
+      // ============================================================
+      // Validation: Check if peak qualifies as a trajectory point
+      // ============================================================
+      
+      // Check 1: Peak must exceed the adaptive trajectory threshold
       if (maxPower < trajectoryThreshold) {
-        trajectory.push(null);
+        trajectory.push(null); // Break in trajectory
         continue;
       }
-
-      // Parabolic Interpolation for smooth frequency curve
+      
+      // Check 2: Safety check against pure background noise
+      // Only draw if significantly above noise floor (if known)
+      if (call.noiseFloor_dB != null && maxPower < call.noiseFloor_dB + 3) {
+        trajectory.push(null); // Skip pure noise
+        continue;
+      }
+      
+      // ============================================================
+      // Parabolic Interpolation for sub-bin frequency precision
+      // ============================================================
       let freqHz = freqBins[peakBinIdx];
       
       if (peakBinIdx > 0 && peakBinIdx < framePower.length - 1) {
@@ -1311,10 +1318,10 @@ export class BatCallDetector {
     }
     
     // [2025 NEW] Apply Padding and Merge Overlapping Segments
-    // FIX: Increased PADDING_MS from 5 to 25. 
+    // FIX: Increased PADDING_MS from 5 to 30. 
     // This allows fine-tuning algorithms (Auto ID) to find faint Start/End tails 
     // that are below the initial -24dB detection threshold.
-    const PADDING_MS = 25; // 原本是 5，建議改為 20~30
+    const PADDING_MS = 30; // Captures even long, faint tails common in bat calls
     
     const hopSamples = Math.floor(this.config.fftSize * (this.config.hopPercent / 100));
     const secPerFrame = hopSamples / sampleRate;
