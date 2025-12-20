@@ -1,4 +1,4 @@
-import { getWavesurfer, getPlugin, getOrCreateWasmEngine } from './wsManager.js';
+import { getWavesurfer, getPlugin } from './wsManager.js';
 import { getTimeExpansionMode } from './fileState.js';
 
 /**
@@ -59,9 +59,12 @@ export function initAutoDetection(config) {
 
   // Handle auto-detect switch toggle
   autoDetectSwitch.addEventListener('change', (e) => {
+    console.log(`[autoDetectionControl] Switch toggled: ${e.target.checked ? 'ON' : 'OFF'}`);
     if (e.target.checked) {
+      console.log('[autoDetectionControl] Starting detection...');
       performAutoDetection();
     } else {
+      console.log('[autoDetectionControl] Clearing selections...');
       if (frequencyHoverControl) {
         frequencyHoverControl.clearSelections();
       }
@@ -72,19 +75,22 @@ export function initAutoDetection(config) {
    * Perform auto-detection based on current threshold
    */
   async function performAutoDetection() {
+    console.log('[autoDetectionControl] ✅ performAutoDetection called');
     try {
       const plugin = getPlugin();
       if (!plugin) {
-        console.warn('[autoDetectionControl] No spectrogram plugin available');
+        console.warn('[autoDetectionControl] ❌ No spectrogram plugin available');
         return;
       }
 
       // Get spectrogram data
       const spectrogramData = plugin.getSpectrogram?.();
       if (!spectrogramData || !spectrogramData.values) {
-        console.warn('[autoDetectionControl] No spectrogram data available');
+        console.warn('[autoDetectionControl] ❌ No spectrogram data available');
         return;
       }
+
+      console.log(`[autoDetectionControl] Spectrogram data available: ${spectrogramData.values.length} frames x ${spectrogramData.values[0]?.length || 0} bins`);
 
       // Get FFT parameters from plugin
       const fftSize = plugin.getFftSize?.() || 512;
@@ -102,10 +108,11 @@ export function initAutoDetection(config) {
 
       console.log(`[autoDetectionControl] Peak Max: ${currentPeakMax.toFixed(2)} dB, Threshold: ${thresholdDb.toFixed(2)} dB`);
 
-      // Get WASM engine to call detect_segments
-      const wasmEngine = await getOrCreateWasmEngine();
-      if (!wasmEngine || !wasmEngine.detect_segments) {
+      // Get WASM module for detect_segments function
+      const wasmModule = globalThis._spectrogramWasm;
+      if (!wasmModule || !wasmModule.detect_segments) {
         console.warn('[autoDetectionControl] WASM detect_segments function not available');
+        console.log('[autoDetectionControl] Available WASM functions:', Object.keys(wasmModule || {}));
         return;
       }
 
@@ -113,8 +120,10 @@ export function initAutoDetection(config) {
       const flatArray = new Float32Array(spectrogramData.values.flat());
       const numCols = spectrogramData.values[0]?.length || 128;
 
+      console.log(`[autoDetectionControl] Calling detect_segments with: flatArray.length=${flatArray.length}, numCols=${numCols}, threshold=${thresholdDb.toFixed(2)}, sampleRate=${sampleRate}, hopSize=${hopSize}`);
+
       // Call WASM detection function
-      const segments = wasmEngine.detect_segments(
+      const segments = wasmModule.detect_segments(
         flatArray,
         numCols,
         thresholdDb,
@@ -122,6 +131,8 @@ export function initAutoDetection(config) {
         hopSize,
         5.0 // padding in milliseconds
       );
+
+      console.log(`[autoDetectionControl] detect_segments returned ${segments.length} values (${Math.floor(segments.length / 2)} segments)`);
 
       // Clear previous selections
       if (frequencyHoverControl) {

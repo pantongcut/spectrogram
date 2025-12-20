@@ -3,8 +3,15 @@ import init, * as spectrogramWasm from './modules/spectrogram_wasm.js';
 // 初始化並暴露 WASM 模塊到全局變量，讓 WaveSurfer 可以訪問
 init().then(() => {
     globalThis._spectrogramWasm = spectrogramWasm;
+    console.log('✅ WASM Module initialized successfully');
+    console.log('Available WASM functions:', Object.keys(spectrogramWasm).slice(0, 10), '...');
+    if (spectrogramWasm.detect_segments) {
+        console.log('✅ detect_segments function is available');
+    } else {
+        console.warn('⚠️ detect_segments function NOT found in WASM module');
+    }
 }).catch(e => {
-    console.error('WASM 模塊初始化失敗:', e);
+    console.error('❌ WASM 模塊初始化失敗:', e);
 });
 
 import {
