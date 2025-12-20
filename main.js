@@ -3,15 +3,8 @@ import init, * as spectrogramWasm from './modules/spectrogram_wasm.js';
 // 初始化並暴露 WASM 模塊到全局變量，讓 WaveSurfer 可以訪問
 init().then(() => {
     globalThis._spectrogramWasm = spectrogramWasm;
-    console.log('✅ WASM Module initialized successfully');
-    console.log('Available WASM functions:', Object.keys(spectrogramWasm).slice(0, 10), '...');
-    if (spectrogramWasm.detect_segments) {
-        console.log('✅ detect_segments function is available');
-    } else {
-        console.warn('⚠️ detect_segments function NOT found in WASM module');
-    }
 }).catch(e => {
-    console.error('❌ WASM 模塊初始化失敗:', e);
+    console.error('WASM 模塊初始化失敗:', e);
 });
 
 import {
@@ -46,7 +39,6 @@ import { showMessageBox } from './modules/messageBox.js';
 import { initAutoIdPanel } from './modules/autoIdPanel.js';
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
 import { initPeakControl, isPeakModeActive, getPeakThreshold } from './modules/peakControl.js';
-import { initAutoDetection } from './modules/autoDetectionControl.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
 const spectrogramHeight = 800;
@@ -973,8 +965,6 @@ scrollSourceId: 'viewer-container',
 scrollTargetId: 'time-axis-wrapper',
 });
 
-let autoDetectionInitialized = false;
-
 getWavesurfer().on('ready', () => {
     duration = getWavesurfer().getDuration();
     
@@ -994,19 +984,6 @@ getWavesurfer().on('ready', () => {
       freqHoverControl?.refreshHover();
       autoIdControl?.updateMarkers();
       updateSpectrogramSettingsText();
-      
-      // Initialize Auto Detection Control once after everything is ready
-      if (!autoDetectionInitialized && freqHoverControl) {
-        autoDetectionInitialized = true;
-        initAutoDetection({
-          frequencyHoverControl: freqHoverControl,
-          getDuration: () => duration,
-          getZoomLevel: () => zoomControl?.getZoomLevel?.() || 1,
-          spectrogramHeight,
-          minFrequency: currentFreqMin,
-          maxFrequency: currentFreqMax
-        });
-      }
     });
   });
 
@@ -1567,7 +1544,6 @@ autoIdControl = initAutoIdPanel({
   hideHover: () => freqHoverControl?.hideHover(),
   refreshHover: () => freqHoverControl?.refreshHover()
 });
-
 freqMenuControl = initFreqContextMenu({
   viewerId: 'viewer-container',
   wrapperId: 'viewer-wrapper',

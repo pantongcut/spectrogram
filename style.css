@@ -1358,11 +1358,6 @@ body.timeexp-open #timeexpBtn {
   background-color: #B91F1C;  /* 紅色：Peak Mode 啟用 */
 }
 
-/* Auto Detect Button states */
-#autoDetectBtn.active {
-  background-color: #28a745;  /* 綠色：Auto Detection Mode 啟用 */
-}
-
 input.tag-button {
   width: 90px;
   margin-bottom: 4px;
