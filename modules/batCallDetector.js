@@ -1262,9 +1262,9 @@ export class BatCallDetector {
    */
 
   
-  /**
+/**
    * Phase 1: Detect call segments using energy threshold
-   * [2025 ENHANCED] Now includes 5ms padding and segment merging for better fine-tuning
+   * [2025 ENHANCED] Now includes padding and segment merging for better fine-tuning
    * Returns: array of { startFrame, endFrame }
    * @param {number} sampleRate - Sample rate in Hz (needed for frame duration calculation)
    */
@@ -1325,23 +1325,27 @@ export class BatCallDetector {
       });
     }
     
-    // [2025 NEW] Apply 5ms Padding and Merge Overlapping Segments
-    // This allows fine-tuning algorithms to see weak starts/ends of calls
-    const PADDING_MS = 5;
+    // [2025 NEW] Apply Padding and Merge Overlapping Segments
+    // FIX: Increased PADDING_MS from 5 to 25. 
+    // This allows fine-tuning algorithms (Auto ID) to find faint Start/End tails 
+    // that are below the initial -24dB detection threshold.
+    const PADDING_MS = 25; // 原本是 5，建議改為 20~30
+    
     const hopSamples = Math.floor(this.config.fftSize * (this.config.hopPercent / 100));
     const secPerFrame = hopSamples / sampleRate;
     const framesToPad = Math.ceil((PADDING_MS / 1000) / secPerFrame);
     
     const paddedSegments = [];
     for (const seg of rawSegments) {
+      // 確保不超出邊界
       const expandedStart = Math.max(0, seg.startFrame - framesToPad);
       const expandedEnd = Math.min(activeFrames.length - 1, seg.endFrame + framesToPad);
       
       // Check if this overlaps with the previous segment
       if (paddedSegments.length > 0) {
         const prev = paddedSegments[paddedSegments.length - 1];
+        // 如果 Padding 後導致重疊，則合併這兩個 Segment
         if (expandedStart <= prev.endFrame) {
-          // Merge: extend previous segment's end
           prev.endFrame = Math.max(prev.endFrame, expandedEnd);
           continue;
         }
