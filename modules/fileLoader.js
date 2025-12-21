@@ -63,7 +63,6 @@ export async function getWavDuration(file) {
 }
 
 let lastObjectUrl = null;
-let lastWaveformEngine = null; // Track WaveformEngine for cleanup
 
 export function initFileLoader({
   fileInputId,
@@ -138,17 +137,14 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // MEMORY CLEANUP: Clean up old WaveformEngine before loading new file
-    if (lastWaveformEngine) {
+    // MEMORY CLEANUP: Before loading new file, forcefully clear WaveSurfer's audio buffer
+    if (wavesurfer && wavesurfer.backend && wavesurfer.backend.audioBuffer) {
       try {
-        if (typeof lastWaveformEngine.clear === 'function') {
-          lastWaveformEngine.clear();
-          console.log('✅ [fileLoader] Cleared old WaveformEngine audio data');
-        }
+        wavesurfer.backend.audioBuffer = null;
+        console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffer');
       } catch (err) {
-        console.warn('⚠️ [fileLoader] Error clearing WaveformEngine:', err);
+        console.warn('⚠️ [fileLoader] Error clearing audio buffer:', err);
       }
-      lastWaveformEngine = null;
     }
 
     const fileUrl = URL.createObjectURL(file);

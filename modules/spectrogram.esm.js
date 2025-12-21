@@ -568,6 +568,25 @@ class h extends s {
         // Clear last render data to release references
         this.lastRenderData = null;
         
+        // Clear all canvas contexts and images
+        try {
+            if (this.canvas) {
+                const ctx = this.canvas.getContext('2d');
+                if (ctx) {
+                    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                }
+            }
+            if (this.colorBarCanvas) {
+                const ctx = this.colorBarCanvas.getContext('2d');
+                if (ctx) {
+                    ctx.clearRect(0, 0, this.colorBarCanvas.width, this.colorBarCanvas.height);
+                }
+            }
+            console.log('🗑️ [Spectrogram] Cleared canvas contexts');
+        } catch (err) {
+            console.warn('⚠️ [Spectrogram] Error clearing canvas:', err);
+        }
+        
         // Release WASM engine reference without calling .free()
         // Let wasm-bindgen's FinalizationRegistry handle deallocation
         // This prevents "memory access out of bounds" errors from double-free
