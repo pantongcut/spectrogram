@@ -250,10 +250,15 @@ export class SpectrogramEngine {
     compute_spectrogram(audio_data, noverlap) {
         const ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.spectrogramengine_compute_spectrogram(this.__wbg_ptr, ptr0, len0, noverlap);
-        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-        return v2;
+        try {
+            const ret = wasm.spectrogramengine_compute_spectrogram(this.__wbg_ptr, ptr0, len0, noverlap);
+            var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+            return v2;
+        } finally {
+            // 【新增這行】釋放輸入記憶體
+            wasm.__wbindgen_free(ptr0, len0 * 4, 4);
+        }
     }
     /**
      * 獲取每個時間幀的峰值幅度值
@@ -303,12 +308,23 @@ export class SpectrogramEngine {
      * @returns {Uint8Array}
      */
     compute_spectrogram_u8(audio_data, noverlap, gain_db, range_db) {
+        // 1. 這裡申請了記憶體 (malloc)
         const ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.spectrogramengine_compute_spectrogram_u8(this.__wbg_ptr, ptr0, len0, noverlap, gain_db, range_db);
-        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-        return v2;
+        
+        try {
+            // 2. 執行計算
+            const ret = wasm.spectrogramengine_compute_spectrogram_u8(this.__wbg_ptr, ptr0, len0, noverlap, gain_db, range_db);
+            
+            // 3. 處理回傳值 (原本的程式碼有釋放回傳值，這很好)
+            var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+            return v2;
+        } finally {
+            // 4. 【新增這行】釋放輸入的音訊數據記憶體！
+            // audio_data 是 Float32 (4 bytes)，所以長度要乘 4
+            wasm.__wbindgen_free(ptr0, len0 * 4, 4);
+        }
     }
     /**
      * 計算完整的光譜圖像 (FFT -> 重採樣 -> 色彩化)
