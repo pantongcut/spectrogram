@@ -549,20 +549,8 @@ class h extends s {
         this.drawColorMapBar()
     }
     destroy() {
-        // Clean up WASM memory: FREE the SpectrogramEngine instance
-        if (this._wasmEngine) {
-            try {
-                if (typeof this._wasmEngine.free === 'function') {
-                    this._wasmEngine.free();
-                    console.log('✅ [Spectrogram] WASM SpectrogramEngine freed');
-                }
-            } catch (err) {
-                console.warn('⚠️ [Spectrogram] Error freeing WASM SpectrogramEngine:', err);
-            }
-            this._wasmEngine = null;
-        }
-        
-        // Clear all filter bank caches to release memory
+        // Clear all filter bank caches BEFORE freeing WASM engine
+        // This ensures all borrowed references are released first
         this._filterBankCache = {};
         this._filterBankCacheByKey = {};
         this._filterBankFlat = null;
@@ -576,6 +564,22 @@ class h extends s {
         this._colorMapUint = null;
         this._baseColorMapUint = null;
         this._activeColorMapUint = null;
+        
+        // Clear last render data to release references
+        this.lastRenderData = null;
+        
+        // Now free WASM memory: FREE the SpectrogramEngine instance
+        if (this._wasmEngine) {
+            try {
+                if (typeof this._wasmEngine.free === 'function') {
+                    this._wasmEngine.free();
+                    console.log('✅ [Spectrogram] WASM SpectrogramEngine freed');
+                }
+            } catch (err) {
+                console.warn('⚠️ [Spectrogram] Error freeing WASM SpectrogramEngine:', err);
+            }
+            this._wasmEngine = null;
+        }
         
         // Clean up event listeners for color bar and dropdown
         if (this._colorBarClickHandler) {
