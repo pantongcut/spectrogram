@@ -137,16 +137,6 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // MEMORY CLEANUP: Before loading new file, forcefully clear WaveSurfer's audio buffer
-    if (wavesurfer && wavesurfer.backend && wavesurfer.backend.audioBuffer) {
-      try {
-        wavesurfer.backend.audioBuffer = null;
-        console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffer');
-      } catch (err) {
-        console.warn('⚠️ [fileLoader] Error clearing audio buffer:', err);
-      }
-    }
-
     const fileUrl = URL.createObjectURL(file);
     if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
     lastObjectUrl = fileUrl;
