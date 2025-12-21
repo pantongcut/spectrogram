@@ -114,8 +114,6 @@ export function replacePlugin(
     }, 50);
   }
 
-  container.style.width = '100%';
-
   // 更新內部狀態
   currentColorMap = colorMap;
   currentFftSize = fftSamples;

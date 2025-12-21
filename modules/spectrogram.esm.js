@@ -1224,7 +1224,8 @@ class h extends s {
         }
     }
     getWidth() {
-        return this.wavesurfer.getWrapper().offsetWidth
+        const wrapper = this.wavesurfer.getWrapper();
+        return wrapper.clientWidth || wrapper.offsetWidth;
     }
     
     /// 清除濾波器組緩存 (當 FFT 大小或頻率範圍改變時調用)
