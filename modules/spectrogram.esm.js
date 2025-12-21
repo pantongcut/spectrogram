@@ -570,19 +570,24 @@ class h extends s {
         
         // Clear all canvas contexts and images
         try {
+            // Set canvas to smaller size to free image data
             if (this.canvas) {
+                this.canvas.width = 1;
+                this.canvas.height = 1;
                 const ctx = this.canvas.getContext('2d');
                 if (ctx) {
-                    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                    ctx.clearRect(0, 0, 1, 1);
                 }
             }
             if (this.colorBarCanvas) {
+                this.colorBarCanvas.width = 1;
+                this.colorBarCanvas.height = 1;
                 const ctx = this.colorBarCanvas.getContext('2d');
                 if (ctx) {
-                    ctx.clearRect(0, 0, this.colorBarCanvas.width, this.colorBarCanvas.height);
+                    ctx.clearRect(0, 0, 1, 1);
                 }
             }
-            console.log('🗑️ [Spectrogram] Cleared canvas contexts');
+            console.log('🗑️ [Spectrogram] Cleared and resized canvas elements');
         } catch (err) {
             console.warn('⚠️ [Spectrogram] Error clearing canvas:', err);
         }
