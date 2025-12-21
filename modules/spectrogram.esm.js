@@ -568,39 +568,21 @@ class h extends s {
         // Clear last render data to release references
         this.lastRenderData = null;
         
-        // Clear all canvas contexts and images AGGRESSIVELY
+        // Clear all canvas contexts and images
         try {
             if (this.canvas) {
                 const ctx = this.canvas.getContext('2d');
                 if (ctx) {
                     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                    ctx.canvas.width = 1;  // Reset canvas size to free memory
-                    ctx.canvas.height = 1;
                 }
-                this.canvas = null;
             }
             if (this.colorBarCanvas) {
                 const ctx = this.colorBarCanvas.getContext('2d');
                 if (ctx) {
                     ctx.clearRect(0, 0, this.colorBarCanvas.width, this.colorBarCanvas.height);
-                    ctx.canvas.width = 1;  // Reset canvas size
-                    ctx.canvas.height = 1;
                 }
-                this.colorBarCanvas = null;
             }
-            // Clear wrapper canvas elements
-            if (this.wrapper) {
-                const canvases = this.wrapper.querySelectorAll('canvas');
-                canvases.forEach(canvas => {
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        canvas.width = 1;
-                        canvas.height = 1;
-                    }
-                });
-            }
-            console.log('🗑️ [Spectrogram] Aggressively cleared all canvas contexts and resized');
+            console.log('🗑️ [Spectrogram] Cleared canvas contexts');
         } catch (err) {
             console.warn('⚠️ [Spectrogram] Error clearing canvas:', err);
         }

@@ -93,12 +93,7 @@ export function replacePlugin(
     if (typeof plugin.destroy === 'function') {
       plugin.destroy();
     }
-    // Clear plugin references
     plugin = null;
-    // Force container to release memory
-    if (container) {
-      container.innerHTML = '';
-    }
   }
 
   container.style.width = '100%';
