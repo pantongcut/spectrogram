@@ -887,17 +887,39 @@ class h extends s {
         }, this.wrapper),
         this.spectrCc = this.canvas.getContext("2d")
     }
-    async render() {
-        var t;
-        if (this.frequenciesDataUrl)
-            this.loadFrequenciesData(this.frequenciesDataUrl);
-        else {
-            const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
-            if (e) {
-                const frequencies = await this.getFrequencies(e);
-                if (frequencies) {
-                    this.drawSpectrogram(frequencies);
-                }
+async render() {
+        if (this.destroyed) return;
+
+        // 1. 【新增】如果有正在進行的任務，立刻取消它！
+        if (this.currentRenderTask) {
+            this.currentRenderTask.abort();
+            this.currentRenderTask = null;
+        }
+
+        // 2. 【新增】建立新的取消控制器
+        const controller = new AbortController();
+        this.currentRenderTask = controller;
+
+        this.updateCanvasStyle();
+        const t = this.canvas;
+        if (t.width = t.clientWidth, t.height = t.clientHeight, this.wavesurfer) {
+            const e = this.wavesurfer.getDecodedData();
+            
+            // 3. 【新增】將 controller.signal 傳遞給 getFrequencies
+            const s = await this.getFrequencies(e, controller.signal);
+
+            // 4. 【新增】如果在計算過程中被取消了，就不要畫圖了
+            if (controller.signal.aborted) {
+                return;
+            }
+
+            // 任務完成，清除控制器引用
+            if (this.currentRenderTask === controller) {
+                this.currentRenderTask = null;
+            }
+
+            if (s && this.buffer) {
+                this.drawSpectrogram(s);
             }
         }
     }
@@ -1199,22 +1221,21 @@ class h extends s {
         this._filterBankMatrix = null;
         this._filterBankFlat = null;
     }
-async getFrequencies(t) {
-        // 1. 基本檢查
-        if (!this.options || !t) {
-            return;
-        }
+async getFrequencies(t, signal) {
+        if (!this.options || !t) return;
+
+        // 如果一進來就已經取消了，直接退出
+        if (signal && signal.aborted) return;
 
         var e, s;
         const r = this.fftSamples,
             i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
         
-        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2, !t)
-            return;
+        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2, !t) return;
             
         this.buffer = t;
         const n = t.sampleRate,
-            h = []; // 最終輸出
+            h = [];
             
         let o = this.noverlap;
         if (!o) {
@@ -1223,8 +1244,9 @@ async getFrequencies(t) {
             o = Math.max(minOverlap, Math.round(r - e));
         }
 
-        // 等待 WASM 就緒
         await this._wasmReady;
+        // 【新增】等待 WASM 時可能被取消
+        if (signal && signal.aborted) return;
 
         // --- Filter Bank Logic (保持不變) ---
         const minBinFull = Math.floor(this.frequencyMin * r / n);
@@ -1263,46 +1285,47 @@ async getFrequencies(t) {
         }
         // --- End Filter Bank Logic ---
 
-        this.peakBandArrayPerChannel = [];
+this.peakBandArrayPerChannel = [];
         let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
         const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
-        // --- 開始處理每個聲道 ---
         for (let e = 0; e < i; e++) {
+            // 【新增】檢查取消：如果在處理聲道之間被取消
+            if (signal && signal.aborted) return;
+
             const s = t.getChannelData(e);
             const channelFrames = [];
             const channelPeakLists = [];
 
-            // ==================== 關鍵修改：分塊處理 Start ====================
-            const CHUNK_SIZE = 2000000; // 200萬點 (約 8MB)，安全值
+            // === 分塊處理開始 ===
+            const CHUNK_SIZE = 2000000; 
             const totalSamples = s.length;
             let processedOffset = 0;
 
-            // 暫存容器
             let spectrumChunks = [];
             let magnitudeChunks = [];
             let totalSpectrumLength = 0;
             let totalMagnitudeLength = 0;
-            let calculatedGlobalMax = 0; // 手動追蹤最大值
+            let calculatedGlobalMax = 0; 
 
             while (processedOffset < totalSamples) {
-                // 1. 計算範圍 (處理 Overlap)
+                // 2. 【關鍵新增】檢查取消：在每個區塊計算前檢查
+                // 這能讓 Zoom 快速滑動時，立刻停止舊的 WASM 計算，釋放 CPU 和 RAM
+                if (signal && signal.aborted) {
+                    return; // 直接中止，不要回傳任何東西
+                }
+
                 let start = processedOffset;
-                // 如果不是第一塊，需要往前倒退 o (overlap) 以確保連接平滑
                 if (start > 0 && o > 0) {
                     start = Math.max(0, start - o);
                 }
 
                 let end = Math.min(processedOffset + CHUNK_SIZE, totalSamples);
-
-                // 剩餘長度不足 FFT 則跳過
                 if (end - start < this.fftSamples) break;
 
-                // 2. 切割數據 (使用 subarray，不消耗額外記憶體)
                 const audioChunk = s.subarray(start, end);
 
-                // 3. 呼叫 WASM
-                // 這裡會 malloc 記憶體，但在 spectrogram_wasm.js 的 finally 中會被釋放
+                // 呼叫 WASM
                 const chunkSpectrum = this._wasmEngine.compute_spectrogram_u8(
                     audioChunk,
                     o,
@@ -1311,26 +1334,25 @@ async getFrequencies(t) {
                 );
 
                 if (chunkSpectrum && chunkSpectrum.length > 0) {
-                    // A. 保存頻譜圖塊
                     spectrumChunks.push(chunkSpectrum);
                     totalSpectrumLength += chunkSpectrum.length;
 
-                    // B. 保存 Magnitude 塊 (用於 Peak Mode)
-                    // 必須用 slice() 複製，因為 WASM 記憶體在下一次迴圈會變
                     const chunkMags = this._wasmEngine.get_peak_magnitudes(0.0).slice();
                     magnitudeChunks.push(chunkMags);
                     totalMagnitudeLength += chunkMags.length;
 
-                    // C. 更新全局最大值
                     const chunkMax = this._wasmEngine.get_global_max();
                     if (chunkMax > calculatedGlobalMax) {
                         calculatedGlobalMax = chunkMax;
                     }
                 }
 
-                // 移動指標 (依據 CHUNK_SIZE 移動，不包含倒退的 overlap)
                 processedOffset += CHUNK_SIZE;
             }
+            // === 分塊處理結束 ===
+
+            // 如果被取消了，不要執行耗時的合併操作
+            if (signal && signal.aborted) return;
 
             // 4. 合併所有塊 - 頻譜圖 (Uint8Array)
             const fullU8Spectrum = new Uint8Array(totalSpectrumLength);
