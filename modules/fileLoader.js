@@ -156,6 +156,7 @@ export function initFileLoader({
     }
     
     // MEMORY CLEANUP: After loading new file, clean up resources
+    // Use longer delay to ensure WaveSurfer worker has finished decoding
     setTimeout(() => {
       try {
         // Now safe to revoke old URL since new file is loaded
@@ -164,20 +165,31 @@ export function initFileLoader({
           console.log('✅ [fileLoader] Revoked old Blob URL');
         }
         
-        // Clear any cached audio buffers in WaveSurfer
+        // Clear any cached audio buffers in WaveSurfer backend
         if (wavesurfer && wavesurfer.backend) {
-          const keysToNull = ['audioBuffer', 'decodedData', 'buffer', 'data', 'rawData'];
+          // More aggressive buffer clearing
+          const keysToNull = [
+            'audioBuffer', 'decodedData', 'buffer', 'data', 'rawData',
+            'originalAudioBuffer', 'filteredBuffer', 'offlineContext',
+            'convolver', 'analyser', 'scriptProcessor', 'gainNode'
+          ];
           keysToNull.forEach(key => {
-            if (wavesurfer.backend[key] && wavesurfer.backend[key] !== wavesurfer.backend.getAudioContext?.().destination) {
+            if (wavesurfer.backend[key]) {
               wavesurfer.backend[key] = null;
             }
           });
-          console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffers');
+          console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffers and nodes');
+        }
+        
+        // Try to force garbage collection by suggesting it to the browser
+        if (window.gc) {
+          window.gc();
+          console.log('💾 [fileLoader] Triggered manual garbage collection');
         }
       } catch (err) {
         console.warn('⚠️ [fileLoader] Error in cleanup:', err);
       }
-    }, 200);
+    }, 300);
     
     document.dispatchEvent(new Event('file-loaded'));
     

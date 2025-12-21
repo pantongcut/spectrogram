@@ -95,7 +95,20 @@ export function replacePlugin(
     }
     plugin = null;
     
-    // Force garbage collection hint by scheduling cleanup
+    // Also clean up the analysis WASM engine if it exists
+    if (analysisWasmEngine) {
+      try {
+        if (typeof analysisWasmEngine.free === 'function') {
+          analysisWasmEngine.free();
+          console.log('🗑️ [wsManager] Freed analysisWasmEngine');
+        }
+      } catch (err) {
+        console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
+      }
+      analysisWasmEngine = null;
+    }
+    
+    // Schedule post-destruction cleanup
     setTimeout(() => {
       console.log('⏱️ [wsManager] Post-destruction cleanup completed');
     }, 50);
