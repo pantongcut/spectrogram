@@ -890,7 +890,7 @@ class h extends s {
     async render() {
         if (this.destroyed) return;
 
-        // 1. 【關鍵】如果有正在進行的任務，強制中止它！
+        // 1. 如果有正在進行的任務，強制中止它！(防止 WASM 衝突)
         if (this.currentRenderTask) {
             this.currentRenderTask.abort();
             this.currentRenderTask = null;
@@ -900,12 +900,19 @@ class h extends s {
         const controller = new AbortController();
         this.currentRenderTask = controller;
 
-        this.updateCanvasStyle();
+        // [修正] 移除了不存在的 updateCanvasStyle() 呼叫
+        // 直接設定 Canvas 尺寸
         const t = this.canvas;
-        if (t.width = t.clientWidth, t.height = t.clientHeight, this.wavesurfer) {
+        if (t) {
+            t.width = t.clientWidth;
+            t.height = t.clientHeight;
+        }
+
+        if (this.wavesurfer) {
             const e = this.wavesurfer.getDecodedData();
             
-            // 3. 把 controller.signal 傳進去
+            // 3. 傳遞 controller.signal 給 getFrequencies
+            // (請確保你已經更新了 getFrequencies 方法以接收 signal 參數)
             const s = await this.getFrequencies(e, controller.signal);
 
             // 4. 如果回來後發現已經被中止了，就不要畫圖了
