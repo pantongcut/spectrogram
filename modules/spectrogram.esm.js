@@ -887,39 +887,17 @@ class h extends s {
         }, this.wrapper),
         this.spectrCc = this.canvas.getContext("2d")
     }
-async render() {
-        if (this.destroyed) return;
-
-        // 1. 【新增】如果有正在進行的任務，立刻取消它！
-        if (this.currentRenderTask) {
-            this.currentRenderTask.abort();
-            this.currentRenderTask = null;
-        }
-
-        // 2. 【新增】建立新的取消控制器
-        const controller = new AbortController();
-        this.currentRenderTask = controller;
-
-        this.updateCanvasStyle();
-        const t = this.canvas;
-        if (t.width = t.clientWidth, t.height = t.clientHeight, this.wavesurfer) {
-            const e = this.wavesurfer.getDecodedData();
-            
-            // 3. 【新增】將 controller.signal 傳遞給 getFrequencies
-            const s = await this.getFrequencies(e, controller.signal);
-
-            // 4. 【新增】如果在計算過程中被取消了，就不要畫圖了
-            if (controller.signal.aborted) {
-                return;
-            }
-
-            // 任務完成，清除控制器引用
-            if (this.currentRenderTask === controller) {
-                this.currentRenderTask = null;
-            }
-
-            if (s && this.buffer) {
-                this.drawSpectrogram(s);
+    async render() {
+        var t;
+        if (this.frequenciesDataUrl)
+            this.loadFrequenciesData(this.frequenciesDataUrl);
+        else {
+            const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
+            if (e) {
+                const frequencies = await this.getFrequencies(e);
+                if (frequencies) {
+                    this.drawSpectrogram(frequencies);
+                }
             }
         }
     }
@@ -1221,41 +1199,39 @@ async render() {
         this._filterBankMatrix = null;
         this._filterBankFlat = null;
     }
-async getFrequencies(t, signal) {
-        if (!this.options || !t) return;
-
-        // 如果一進來就已經取消了，直接退出
-        if (signal && signal.aborted) return;
-
-        var e, s;
-        const r = this.fftSamples,
-            i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
+async getFrequencies(t) {
+        // 檢查 this.options 是否為 null
+        if (!this.options || !t) {
+            return;
+        }
         
-        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2, !t) return;
-            
+        var e, s;
+        const r = this.fftSamples
+          , i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
+        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2,
+        !t)
+            return;
         this.buffer = t;
-        const n = t.sampleRate,
-            h = [];
-            
+        const n = t.sampleRate
+          , h = [];
         let o = this.noverlap;
         if (!o) {
             const e = t.length / this.canvas.width;
             const minOverlap = Math.floor(r * 0.05);
             o = Math.max(minOverlap, Math.round(r - e));
         }
-
+        
+        // Wait for WASM to be ready
         await this._wasmReady;
-        // 【新增】等待 WASM 時可能被取消
-        if (signal && signal.aborted) return;
-
+        
         // --- Filter Bank Logic (保持不變) ---
         const minBinFull = Math.floor(this.frequencyMin * r / n);
         const maxBinFull = Math.ceil(this.frequencyMax * r / n);
-        // const binRangeSize = maxBinFull - minBinFull; // (未使用變數)
+        const binRangeSize = maxBinFull - minBinFull;
 
         let filterBankMatrix = null;
         const currentFilterBankKey = `${this.scale}:${n}:${this.frequencyMin}:${this.frequencyMax}`;
-
+        
         if (this.scale !== "linear") {
             if (this._lastFilterBankScale !== currentFilterBankKey) {
                 let c;
@@ -1264,10 +1240,10 @@ async getFrequencies(t, signal) {
                     c = this._filterBankCacheByKey[currentFilterBankKey];
                 } else {
                     switch (this.scale) {
-                        case "mel": numFilters = this.numMelFilters; c = this.createFilterBank(numFilters, n, this.hzToMel, this.melToHz); break;
-                        case "logarithmic": numFilters = this.numLogFilters; c = this.createFilterBank(numFilters, n, this.hzToLog, this.logToHz); break;
-                        case "bark": numFilters = this.numBarkFilters; c = this.createFilterBank(numFilters, n, this.hzToBark, this.barkToHz); break;
-                        case "erb": numFilters = this.numErbFilters; c = this.createFilterBank(numFilters, n, this.hzToErb, this.erbToHz); break;
+                    case "mel": numFilters = this.numMelFilters; c = this.createFilterBank(numFilters, n, this.hzToMel, this.melToHz); break;
+                    case "logarithmic": numFilters = this.numLogFilters; c = this.createFilterBank(numFilters, n, this.hzToLog, this.logToHz); break;
+                    case "bark": numFilters = this.numBarkFilters; c = this.createFilterBank(numFilters, n, this.hzToBark, this.barkToHz); break;
+                    case "erb": numFilters = this.numErbFilters; c = this.createFilterBank(numFilters, n, this.hzToErb, this.erbToHz); break;
                     }
                     this._filterBankCacheByKey[currentFilterBankKey] = c;
                 }
@@ -1285,151 +1261,82 @@ async getFrequencies(t, signal) {
         }
         // --- End Filter Bank Logic ---
 
-this.peakBandArrayPerChannel = [];
-        let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+        this.peakBandArrayPerChannel = [];
+        
+            let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
+            const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
-        for (let e = 0; e < i; e++) {
-            // 【新增】檢查取消：如果在處理聲道之間被取消
-            if (signal && signal.aborted) return;
-
-            const s = t.getChannelData(e);
-            const channelFrames = [];
-            const channelPeakLists = [];
-
-            // === 分塊處理開始 ===
-            const CHUNK_SIZE = 2000000; 
-            const totalSamples = s.length;
-            let processedOffset = 0;
-
-            let spectrumChunks = [];
-            let magnitudeChunks = [];
-            let totalSpectrumLength = 0;
-            let totalMagnitudeLength = 0;
-            let calculatedGlobalMax = 0; 
-
-            while (processedOffset < totalSamples) {
-                // 2. 【關鍵新增】檢查取消：在每個區塊計算前檢查
-                // 這能讓 Zoom 快速滑動時，立刻停止舊的 WASM 計算，釋放 CPU 和 RAM
-                if (signal && signal.aborted) {
-                    return; // 直接中止，不要回傳任何東西
-                }
-
-                let start = processedOffset;
-                if (start > 0 && o > 0) {
-                    start = Math.max(0, start - o);
-                }
-
-                let end = Math.min(processedOffset + CHUNK_SIZE, totalSamples);
-                if (end - start < this.fftSamples) break;
-
-                const audioChunk = s.subarray(start, end);
-
-                // 呼叫 WASM
-                const chunkSpectrum = this._wasmEngine.compute_spectrogram_u8(
-                    audioChunk,
+            for (let e = 0; e < i; e++) {
+                const s = t.getChannelData(e)
+                  , channelFrames = []
+                  , channelPeakLists = [];
+                
+                const fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
+                    s,
                     o,
                     this.gainDB,
                     this.rangeDB
                 );
 
-                if (chunkSpectrum && chunkSpectrum.length > 0) {
-                    spectrumChunks.push(chunkSpectrum);
-                    totalSpectrumLength += chunkSpectrum.length;
+                const globalMaxLinear = this._wasmEngine.get_global_max();
+                const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
 
-                    const chunkMags = this._wasmEngine.get_peak_magnitudes(0.0).slice();
-                    magnitudeChunks.push(chunkMags);
-                    totalMagnitudeLength += chunkMags.length;
+                // 獲取線性幅度用於全局噪音過濾
+                const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
+                
+                const numFilters = this._wasmEngine.get_num_filters();
+                const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
+                const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
+                
+                for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
+                    const frameStartIdx = frameIdx * outputSize;
+                    const outputFrame = fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize);
+                    channelFrames.push(outputFrame);
 
-                    const chunkMax = this._wasmEngine.get_global_max();
-                    if (chunkMax > calculatedGlobalMax) {
-                        calculatedGlobalMax = chunkMax;
-                    }
-                }
+                    if (this.options && this.options.peakMode) {
+                        const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
-                processedOffset += CHUNK_SIZE;
-            }
-            // === 分塊處理結束 ===
+                        // [Rule 1] 全局噪音過濾 (-24dB)
+                        // 低於此強度的片段直接略過
+                        if (localMaxLinear < noiseFloorLinear) {
+                            channelPeakLists.push([]); 
+                            continue; 
+                        }
 
-            // 如果被取消了，不要執行耗時的合併操作
-            if (signal && signal.aborted) return;
+                        // [Rule 2] 局部自適應閾值
+                        let localMaxU8 = 0;
+                        for(let k=0; k < outputSize; k++) {
+                            if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
+                        }
 
-            // 4. 合併所有塊 - 頻譜圖 (Uint8Array)
-            const fullU8Spectrum = new Uint8Array(totalSpectrumLength);
-            let mergeOffset = 0;
-            for (let chunk of spectrumChunks) {
-                fullU8Spectrum.set(chunk, mergeOffset);
-                mergeOffset += chunk.length;
-            }
+                        // [關鍵修改] 使用調整後的 effectiveThreshold 計算截止線
+                        // 例如：Slider 40% -> effectiveThreshold 約 0.7 -> 只保留最強的 30% 區域
+                        const cutoffU8 = localMaxU8 * effectiveThreshold;
 
-            // 5. 合併所有塊 - Magnitudes (Float32Array)
-            const fullFrameMaxMagnitudes = new Float32Array(totalMagnitudeLength);
-            let magMergeOffset = 0;
-            for (let chunk of magnitudeChunks) {
-                fullFrameMaxMagnitudes.set(chunk, magMergeOffset);
-                magMergeOffset += chunk.length;
-            }
-
-            // 6. 準備數據供後續處理
-            // 使用我們手動合併/計算出來的數據，取代原本直接從 WASM 獲取的方式
-            const globalMaxLinear = calculatedGlobalMax;
-            const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線
-            const frameMaxMagnitudes = fullFrameMaxMagnitudes;
-            // ==================== 關鍵修改：分塊處理 End ====================
-
-            const numFilters = this._wasmEngine.get_num_filters();
-            const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
-            // 這裡使用 fullU8Spectrum.length 才是正確的總幀數
-            const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
-
-            // --- 後續處理：分割 Frames 與 Peak 計算 (邏輯與原版基本一致) ---
-            for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
-                const frameStartIdx = frameIdx * outputSize;
-                const outputFrame = fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize);
-                channelFrames.push(outputFrame);
-
-                if (this.options && this.options.peakMode) {
-                    // 邊界檢查：防止 magnitude 陣列比 spectrum 陣列短 (極端情況)
-                    const localMaxLinear = frameIdx < frameMaxMagnitudes.length ? frameMaxMagnitudes[frameIdx] : 0;
-
-                    // [Rule 1] 全局噪音過濾
-                    if (localMaxLinear < noiseFloorLinear) {
-                        channelPeakLists.push([]);
-                        continue;
-                    }
-
-                    // [Rule 2] 局部自適應閾值
-                    let localMaxU8 = 0;
-                    for (let k = 0; k < outputSize; k++) {
-                        if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
-                    }
-
-                    const cutoffU8 = localMaxU8 * effectiveThreshold;
-                    const framePeaks = [];
-
-                    // 優化：如果 localMaxU8 太小則忽略
-                    if (localMaxU8 > 10) {
-                        for (let k = 0; k < outputSize; k++) {
-                            if (outputFrame[k] >= cutoffU8) {
-                                framePeaks.push({
-                                    bin: k,
-                                    magnitude: outputFrame[k],
-                                    isMainPeak: outputFrame[k] === localMaxU8
-                                });
+                        const framePeaks = [];
+                        
+                        // 優化：如果 localMaxU8 太小（例如全黑背景中的微小波動），直接忽略
+                        if (localMaxU8 > 10) { 
+                            for(let k=0; k < outputSize; k++) {
+                                if (outputFrame[k] >= cutoffU8) {
+                                    framePeaks.push({
+                                        bin: k,
+                                        magnitude: outputFrame[k],
+                                        isMainPeak: outputFrame[k] === localMaxU8
+                                    });
+                                }
                             }
                         }
+                        channelPeakLists.push(framePeaks);
                     }
-                    channelPeakLists.push(framePeaks);
                 }
+                
+                if (this.options && this.options.peakMode) {
+                    this.peakBandArrayPerChannel.push(channelPeakLists);
+                }
+                h.push(channelFrames)
             }
-
-            if (this.options && this.options.peakMode) {
-                this.peakBandArrayPerChannel.push(channelPeakLists);
-            }
-            h.push(channelFrames);
-        }
-        
-        return h;
+            return h
     }
     
     freqType(t) {

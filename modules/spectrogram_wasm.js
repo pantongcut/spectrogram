@@ -250,15 +250,10 @@ export class SpectrogramEngine {
     compute_spectrogram(audio_data, noverlap) {
         const ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        try {
-            const ret = wasm.spectrogramengine_compute_spectrogram(this.__wbg_ptr, ptr0, len0, noverlap);
-            var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
-            wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-            return v2;
-        } finally {
-            // 【新增這行】釋放輸入記憶體
-            wasm.__wbindgen_free(ptr0, len0 * 4, 4);
-        }
+        const ret = wasm.spectrogramengine_compute_spectrogram(this.__wbg_ptr, ptr0, len0, noverlap);
+        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
     }
     /**
      * 獲取每個時間幀的峰值幅度值
@@ -308,23 +303,12 @@ export class SpectrogramEngine {
      * @returns {Uint8Array}
      */
     compute_spectrogram_u8(audio_data, noverlap, gain_db, range_db) {
-        let ptr0 = 0; // 初始化為 0
-        let len0 = 0;
-        try {
-            // 如果這裡報錯 (OOM)，ptr0 還是 0
-            ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
-            len0 = WASM_VECTOR_LEN;
-            
-            const ret = wasm.spectrogramengine_compute_spectrogram_u8(this.__wbg_ptr, ptr0, len0, noverlap, gain_db, range_db);
-            var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-            return v2;
-        } finally {
-            // 【新增檢查】只有當 ptr0 有效時才釋放，避免 double error
-            if (ptr0 !== 0) {
-                wasm.__wbindgen_free(ptr0, len0 * 4, 4);
-            }
-        }
+        const ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.spectrogramengine_compute_spectrogram_u8(this.__wbg_ptr, ptr0, len0, noverlap, gain_db, range_db);
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
     }
     /**
      * 計算完整的光譜圖像 (FFT -> 重採樣 -> 色彩化)
