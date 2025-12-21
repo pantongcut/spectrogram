@@ -102,7 +102,7 @@ function _injectCssForSmoothing() {
     const visibleWidth = wrapperElement.clientWidth || 1000;
     const dur = duration();
     if (dur > 0) {
-      minZoomLevel = Math.floor((visibleWidth - 2) / dur);
+      minZoomLevel = visibleWidth / dur;
     }
   }
 
@@ -125,17 +125,25 @@ function applyZoom() {
     
     _injectShadowDomStyles();
 
-    const width = duration() * zoomLevel;
-    const widthPx = `${width}px`;
+    if (Math.abs(zoomLevel - minZoomLevel) < 0.01) {
+        container.style.width = '100%';
+        const freqGrid = document.getElementById('freq-grid');
+        if (freqGrid) {
+          freqGrid.style.width = '100%';
+        }
+    } else {
+        // 否則使用像素計算寬度 (Zoom In 狀態)
+        const width = duration() * zoomLevel;
+        const widthPx = `${width}px`;
 
-    // 只設定子元素
-    container.style.width = widthPx;
-    
-    const freqGrid = document.getElementById('freq-grid');
-    if (freqGrid) {
-      freqGrid.style.width = widthPx;
+        container.style.width = widthPx;
+        
+        const freqGrid = document.getElementById('freq-grid');
+        if (freqGrid) {
+          freqGrid.style.width = widthPx;
+        }
     }
-
+  
     applyZoomCallback();
     if (typeof onAfterZoom === 'function') onAfterZoom();    
     updateZoomButtons();
