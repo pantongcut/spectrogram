@@ -549,6 +549,42 @@ class h extends s {
         this.drawColorMapBar()
     }
     destroy() {
+        // Clear all filter bank caches BEFORE clearing engine reference
+        // This ensures all borrowed references are released first
+        this._filterBankCache = {};
+        this._filterBankCacheByKey = {};
+        this._filterBankFlat = null;
+        this._filterBankMatrix = null;
+        this._loadedFilterBankKey = null;
+        
+        // Clear resample cache
+        this._resampleCache = {};
+        
+        // Clear color map data
+        this._colorMapUint = null;
+        this._baseColorMapUint = null;
+        this._activeColorMapUint = null;
+        
+        // Clear last render data to release references
+        this.lastRenderData = null;
+        
+        // Clear any intermediate buffers and data arrays
+        this.fftData = null;
+        this.powerSpectrum = null;
+        this.melFilteredSpectrum = null;
+        this.barkFilteredSpectrum = null;
+        this.erbFilteredSpectrum = null;
+        this.logFilteredSpectrum = null;
+        
+        // Release WASM engine reference without calling .free()
+        // Let wasm-bindgen's FinalizationRegistry handle deallocation
+        // This prevents "memory access out of bounds" errors from double-free
+        // or accessing memory while it's still being used
+        if (this._wasmEngine) {
+            console.log('🗑️ [Spectrogram] Releasing WASM SpectrogramEngine reference (auto-cleanup)');
+            this._wasmEngine = null;
+        }
+        
         // Clean up event listeners for color bar and dropdown
         if (this._colorBarClickHandler) {
             const colorBarCanvas = document.getElementById("color-bar");

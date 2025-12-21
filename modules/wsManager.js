@@ -86,9 +86,32 @@ export function replacePlugin(
     oldCanvas.remove();
   }
 
-  if (plugin?.destroy) {
-    plugin.destroy();
+  // CRITICAL: Clean up the old plugin BEFORE creating a new one
+  // This ensures WASM memory (SpectrogramEngine) is freed
+  if (plugin) {
+    console.log('🔄 [wsManager] Destroying old plugin to free WASM memory...');
+    if (typeof plugin.destroy === 'function') {
+      plugin.destroy();
+    }
     plugin = null;
+    
+    // Also clean up the analysis WASM engine if it exists
+    if (analysisWasmEngine) {
+      try {
+        if (typeof analysisWasmEngine.free === 'function') {
+          analysisWasmEngine.free();
+          console.log('🗑️ [wsManager] Freed analysisWasmEngine');
+        }
+      } catch (err) {
+        console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
+      }
+      analysisWasmEngine = null;
+    }
+    
+    // Schedule post-destruction cleanup
+    setTimeout(() => {
+      console.log('⏱️ [wsManager] Post-destruction cleanup completed');
+    }, 50);
   }
 
   container.style.width = '100%';

@@ -138,7 +138,9 @@ export function initFileLoader({
     }
 
     const fileUrl = URL.createObjectURL(file);
-    if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
+    // Don't revoke old URL yet - WaveSurfer might still be using it
+    // Store it for later revocation
+    const oldObjectUrl = lastObjectUrl;
     lastObjectUrl = fileUrl;
 
     await wavesurfer.load(fileUrl);
@@ -152,6 +154,43 @@ export function initFileLoader({
     if (typeof onAfterLoad === 'function') {
       onAfterLoad();
     }
+    
+    // MEMORY CLEANUP: After loading new file, clean up resources
+    // Use longer delay to ensure WaveSurfer worker has finished decoding
+    setTimeout(() => {
+      try {
+        // Now safe to revoke old URL since new file is loaded
+        if (oldObjectUrl) {
+          URL.revokeObjectURL(oldObjectUrl);
+          console.log('✅ [fileLoader] Revoked old Blob URL');
+        }
+        
+        // Clear any cached audio buffers in WaveSurfer backend
+        if (wavesurfer && wavesurfer.backend) {
+          // More aggressive buffer clearing
+          const keysToNull = [
+            'audioBuffer', 'decodedData', 'buffer', 'data', 'rawData',
+            'originalAudioBuffer', 'filteredBuffer', 'offlineContext',
+            'convolver', 'analyser', 'scriptProcessor', 'gainNode'
+          ];
+          keysToNull.forEach(key => {
+            if (wavesurfer.backend[key]) {
+              wavesurfer.backend[key] = null;
+            }
+          });
+          console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffers and nodes');
+        }
+        
+        // Try to force garbage collection by suggesting it to the browser
+        if (window.gc) {
+          window.gc();
+          console.log('💾 [fileLoader] Triggered manual garbage collection');
+        }
+      } catch (err) {
+        console.warn('⚠️ [fileLoader] Error in cleanup:', err);
+      }
+    }, 300);
+    
     document.dispatchEvent(new Event('file-loaded'));
     
   }
