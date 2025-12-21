@@ -137,18 +137,10 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // MEMORY CLEANUP: Before loading new file, forcefully clear WaveSurfer's audio buffer
-    if (wavesurfer && wavesurfer.backend && wavesurfer.backend.audioBuffer) {
-      try {
-        wavesurfer.backend.audioBuffer = null;
-        console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffer');
-      } catch (err) {
-        console.warn('⚠️ [fileLoader] Error clearing audio buffer:', err);
-      }
-    }
-
     const fileUrl = URL.createObjectURL(file);
-    if (lastObjectUrl) URL.revokeObjectURL(lastObjectUrl);
+    // Don't revoke old URL yet - WaveSurfer might still be using it
+    // Store it for later revocation
+    const oldObjectUrl = lastObjectUrl;
     lastObjectUrl = fileUrl;
 
     await wavesurfer.load(fileUrl);
@@ -162,6 +154,31 @@ export function initFileLoader({
     if (typeof onAfterLoad === 'function') {
       onAfterLoad();
     }
+    
+    // MEMORY CLEANUP: After loading new file, clean up resources
+    setTimeout(() => {
+      try {
+        // Now safe to revoke old URL since new file is loaded
+        if (oldObjectUrl) {
+          URL.revokeObjectURL(oldObjectUrl);
+          console.log('✅ [fileLoader] Revoked old Blob URL');
+        }
+        
+        // Clear any cached audio buffers in WaveSurfer
+        if (wavesurfer && wavesurfer.backend) {
+          const keysToNull = ['audioBuffer', 'decodedData', 'buffer', 'data', 'rawData'];
+          keysToNull.forEach(key => {
+            if (wavesurfer.backend[key] && wavesurfer.backend[key] !== wavesurfer.backend.getAudioContext?.().destination) {
+              wavesurfer.backend[key] = null;
+            }
+          });
+          console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffers');
+        }
+      } catch (err) {
+        console.warn('⚠️ [fileLoader] Error in cleanup:', err);
+      }
+    }, 200);
+    
     document.dispatchEvent(new Event('file-loaded'));
     
   }

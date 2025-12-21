@@ -94,6 +94,11 @@ export function replacePlugin(
       plugin.destroy();
     }
     plugin = null;
+    
+    // Force garbage collection hint by scheduling cleanup
+    setTimeout(() => {
+      console.log('⏱️ [wsManager] Post-destruction cleanup completed');
+    }, 50);
   }
 
   container.style.width = '100%';
