@@ -81,11 +81,9 @@ export function replacePlugin(
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
 
-  // MEMORY CLEANUP: Remove all child elements from container
-  // This includes spectrogram canvas and any other elements
-  while (container.firstChild) {
-    container.removeChild(container.firstChild);
-    console.log('🗑️ [wsManager] Removed child element from container');
+  const oldCanvas = container.querySelector("canvas");
+  if (oldCanvas) {
+    oldCanvas.remove();
   }
 
   // CRITICAL: Clean up the old plugin BEFORE creating a new one
@@ -96,22 +94,6 @@ export function replacePlugin(
       plugin.destroy();
     }
     plugin = null;
-  }
-
-  // Force garbage collection by removing all references
-  if (ws && ws.drawer) {
-    try {
-      // Clear WaveSurfer's drawer canvas
-      if (ws.drawer.canvas) {
-        const ctx = ws.drawer.canvas.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, ws.drawer.canvas.width, ws.drawer.canvas.height);
-        }
-      }
-      console.log('🗑️ [wsManager] Cleared WaveSurfer drawer canvas');
-    } catch (err) {
-      console.warn('⚠️ [wsManager] Error clearing drawer canvas:', err);
-    }
   }
 
   container.style.width = '100%';
