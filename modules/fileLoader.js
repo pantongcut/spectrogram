@@ -137,13 +137,34 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // MEMORY CLEANUP: Before loading new file, forcefully clear WaveSurfer's audio buffer
-    if (wavesurfer && wavesurfer.backend && wavesurfer.backend.audioBuffer) {
+    // AGGRESSIVE MEMORY CLEANUP: Clear ALL WaveSurfer audio buffers before loading
+    if (wavesurfer) {
       try {
-        wavesurfer.backend.audioBuffer = null;
-        console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffer');
+        // Clear backend audio buffers
+        if (wavesurfer.backend) {
+          wavesurfer.backend.audioBuffer = null;
+          wavesurfer.backend.buffer = null;
+          wavesurfer.backend.buffers = null;
+          // WebAudio API context buffers
+          if (wavesurfer.backend.ac && wavesurfer.backend.ac.createBufferSource) {
+            // Don't stop playing, but clear internal buffers
+            wavesurfer.backend._buffer = null;
+          }
+        }
+        // Clear any cached decoded data
+        wavesurfer.decodedData = null;
+        wavesurfer.peaks = null;
+        wavesurfer.peaksCached = null;
+        // Clear drawer canvas/buffer
+        if (wavesurfer.drawer && wavesurfer.drawer.canvas) {
+          const ctx = wavesurfer.drawer.canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, wavesurfer.drawer.canvas.width, wavesurfer.drawer.canvas.height);
+          }
+        }
+        console.log('🗑️ [fileLoader] Aggressively cleared ALL WaveSurfer buffers');
       } catch (err) {
-        console.warn('⚠️ [fileLoader] Error clearing audio buffer:', err);
+        console.warn('⚠️ [fileLoader] Error clearing WaveSurfer buffers:', err);
       }
     }
 
