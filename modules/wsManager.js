@@ -90,8 +90,6 @@ export function replacePlugin(
   // This ensures WASM memory (SpectrogramEngine) is freed
   if (plugin) {
     console.log('🔄 [wsManager] Destroying old plugin to free WASM memory...');
-    
-    // Destroy the plugin (avoid canvas manipulation to prevent flickering)
     if (typeof plugin.destroy === 'function') {
       plugin.destroy();
     }
@@ -112,24 +110,6 @@ export function replacePlugin(
     
     // Schedule post-destruction cleanup
     setTimeout(() => {
-      try {
-        // Additional cleanup: clear WaveSurfer's internal caches
-        if (ws) {
-          // Clear any cached decoded audio data
-          if (ws.decodedData !== undefined) {
-            ws.decodedData = null;
-          }
-          if (ws.backend && ws.backend.decodedData !== undefined) {
-            ws.backend.decodedData = null;
-          }
-          if (ws.backend && ws.backend.audioBuffer !== undefined) {
-            ws.backend.audioBuffer = null;
-          }
-          console.log('✅ [wsManager] Cleared WaveSurfer internal caches');
-        }
-      } catch (err) {
-        console.warn('⚠️ [wsManager] Error clearing WaveSurfer caches:', err);
-      }
       console.log('⏱️ [wsManager] Post-destruction cleanup completed');
     }, 50);
   }
