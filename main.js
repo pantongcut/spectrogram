@@ -500,8 +500,6 @@ onBeforeLoad: () => {
   if (uploadOverlay.style.display !== 'flex') {
     loadingOverlay.style.display = 'flex';
   }
-  // ✅ 在加載新文件前重置 container 寬度，避免先前 zoom 的殘留
-  container.style.width = '100%';
   
   freqHoverControl?.hideHover();
   freqHoverControl?.clearSelections();
