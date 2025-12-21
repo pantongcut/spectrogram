@@ -81,10 +81,9 @@ export function replacePlugin(
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
 
+  // Store old canvas reference but DON'T remove it yet
+  // Let destroy() complete its cleanup naturally
   const oldCanvas = container.querySelector("canvas");
-  if (oldCanvas) {
-    oldCanvas.remove();
-  }
 
   // CRITICAL: Clean up the old plugin BEFORE creating a new one
   // This ensures WASM memory (SpectrogramEngine) is freed
@@ -108,10 +107,16 @@ export function replacePlugin(
       analysisWasmEngine = null;
     }
     
-    // Schedule post-destruction cleanup
-    setTimeout(() => {
-      console.log('⏱️ [wsManager] Post-destruction cleanup completed');
-    }, 50);
+    // Remove old canvas after destroy() cleanup is done to avoid width changes
+    if (oldCanvas) {
+      // Use microtask (more reliable than setTimeout for DOM operations)
+      Promise.resolve().then(() => {
+        if (oldCanvas.parentNode) {
+          oldCanvas.remove();
+          console.log('🗑️ [wsManager] Removed old canvas DOM element');
+        }
+      });
+    }
   }
 
   container.style.width = '100%';
