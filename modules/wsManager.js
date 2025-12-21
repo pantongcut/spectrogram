@@ -86,9 +86,18 @@ export function replacePlugin(
     oldCanvas.remove();
   }
 
-  if (plugin?.destroy) {
-    plugin.destroy();
+  // CRITICAL: Clean up the old plugin BEFORE creating a new one
+  // This ensures WASM memory (SpectrogramEngine) is freed
+  if (plugin) {
+    console.log('🔄 [wsManager] Destroying old plugin to free WASM memory...');
+    if (typeof plugin.destroy === 'function') {
+      plugin.destroy();
+    }
     plugin = null;
+    // Force garbage collection hint (not guaranteed, but good practice)
+    if (global?.gc) {
+      global.gc();
+    }
   }
 
   container.style.width = '100%';

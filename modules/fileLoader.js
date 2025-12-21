@@ -63,6 +63,7 @@ export async function getWavDuration(file) {
 }
 
 let lastObjectUrl = null;
+let lastWaveformEngine = null; // Track WaveformEngine for cleanup
 
 export function initFileLoader({
   fileInputId,
@@ -135,6 +136,19 @@ export function initFileLoader({
       setFileMetadata(idx, meta);
     } catch (err) {
       guanoOutput.textContent = '(Error reading GUANO metadata)';
+    }
+
+    // MEMORY CLEANUP: Clean up old WaveformEngine before loading new file
+    if (lastWaveformEngine) {
+      try {
+        if (typeof lastWaveformEngine.clear === 'function') {
+          lastWaveformEngine.clear();
+          console.log('✅ [fileLoader] Cleared old WaveformEngine audio data');
+        }
+      } catch (err) {
+        console.warn('⚠️ [fileLoader] Error clearing WaveformEngine:', err);
+      }
+      lastWaveformEngine = null;
     }
 
     const fileUrl = URL.createObjectURL(file);

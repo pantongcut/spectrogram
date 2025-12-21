@@ -549,6 +549,34 @@ class h extends s {
         this.drawColorMapBar()
     }
     destroy() {
+        // Clean up WASM memory: FREE the SpectrogramEngine instance
+        if (this._wasmEngine) {
+            try {
+                if (typeof this._wasmEngine.free === 'function') {
+                    this._wasmEngine.free();
+                    console.log('✅ [Spectrogram] WASM SpectrogramEngine freed');
+                }
+            } catch (err) {
+                console.warn('⚠️ [Spectrogram] Error freeing WASM SpectrogramEngine:', err);
+            }
+            this._wasmEngine = null;
+        }
+        
+        // Clear all filter bank caches to release memory
+        this._filterBankCache = {};
+        this._filterBankCacheByKey = {};
+        this._filterBankFlat = null;
+        this._filterBankMatrix = null;
+        this._loadedFilterBankKey = null;
+        
+        // Clear resample cache
+        this._resampleCache = {};
+        
+        // Clear color map data
+        this._colorMapUint = null;
+        this._baseColorMapUint = null;
+        this._activeColorMapUint = null;
+        
         // Clean up event listeners for color bar and dropdown
         if (this._colorBarClickHandler) {
             const colorBarCanvas = document.getElementById("color-bar");
