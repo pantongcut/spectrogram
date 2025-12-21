@@ -549,7 +549,7 @@ class h extends s {
         this.drawColorMapBar()
     }
     destroy() {
-        // Clear all filter bank caches BEFORE freeing WASM engine
+        // Clear all filter bank caches BEFORE clearing engine reference
         // This ensures all borrowed references are released first
         this._filterBankCache = {};
         this._filterBankCacheByKey = {};
@@ -568,16 +568,12 @@ class h extends s {
         // Clear last render data to release references
         this.lastRenderData = null;
         
-        // Now free WASM memory: FREE the SpectrogramEngine instance
+        // Release WASM engine reference without calling .free()
+        // Let wasm-bindgen's FinalizationRegistry handle deallocation
+        // This prevents "memory access out of bounds" errors from double-free
+        // or accessing memory while it's still being used
         if (this._wasmEngine) {
-            try {
-                if (typeof this._wasmEngine.free === 'function') {
-                    this._wasmEngine.free();
-                    console.log('✅ [Spectrogram] WASM SpectrogramEngine freed');
-                }
-            } catch (err) {
-                console.warn('⚠️ [Spectrogram] Error freeing WASM SpectrogramEngine:', err);
-            }
+            console.log('🗑️ [Spectrogram] Releasing WASM SpectrogramEngine reference (auto-cleanup)');
             this._wasmEngine = null;
         }
         
