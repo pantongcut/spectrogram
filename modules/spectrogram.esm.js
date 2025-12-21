@@ -95,69 +95,8 @@ class s extends e {
         this.onInit()
     }
     destroy() {
-        console.log("💥 [Spectrogram] Destroying plugin instance...");
-
-        // 【新增】標記為已銷毀，防止並行的 Promise 建立新引擎
-        this.isDestroyed = true;
-
-        // 1. 【關鍵修復】釋放 WASM 引擎記憶體
-        // 如果沒有這一步，每次 Zoom/Resize/Reload 都會洩漏幾百 MB，直到崩潰
-        if (this._wasmEngine) {
-            try {
-                if (typeof this._wasmEngine.free === 'function') {
-                    this._wasmEngine.free();
-                    console.log("✅ [Spectrogram] WASM engine memory freed.");
-                }
-            } catch (e) {
-                console.warn("⚠️ [Spectrogram] Failed to free WASM engine:", e);
-            }
-            this._wasmEngine = null;
-        }
-
-        // 2. 【關鍵修復】中止任何正在進行的運算任務
-        // 防止 WASM 已經被 free 了，舊的非同步 render 迴圈還在跑
-        if (this.currentRenderTask) {
-            this.currentRenderTask.abort();
-            this.currentRenderTask = null;
-        }
-
-        // 3. 清理 UI 事件監聽器
-        if (this._colorBarClickHandler) {
-            const colorBarCanvas = document.getElementById("color-bar");
-            if (colorBarCanvas) {
-                colorBarCanvas.removeEventListener("click", this._colorBarClickHandler);
-            }
-            this._colorBarClickHandler = null;
-        }
-        
-        if (this._documentClickHandler) {
-            document.removeEventListener("click", this._documentClickHandler);
-            this._documentClickHandler = null;
-        }
-        
-        // 4. 清理 WaveSurfer 綁定
-        this.unAll();
-        if (this.wavesurfer) {
-            this.wavesurfer.un("ready", this._onReady);
-            this.wavesurfer.un("redraw", this._onRender);
-        }
-        this.wavesurfer = null;
-        this.util = null;
-        this.options = null;
-        
-        if (this.wrapper) {
-            this.wrapper.remove();
-            this.wrapper = null;
-        }
-
-        // 呼叫父類銷毀 (如果你有繼承的話，沒有的話這行可省略，但你的代碼看來是有繼承 BasePlugin 或類似的)
-        // 注意：原本的代碼中是用 super.destroy() 還是手動 emit? 
-        // 原本代碼是: this.emit("destroy"), this.subscriptions.forEach(...)
-        // 為了保險起見，保留原本的清理邏輯：
-        this.emit("destroy");
-        if (this.subscriptions) {
-            this.subscriptions.forEach(t => t());
-        }
+        this.emit("destroy"),
+        this.subscriptions.forEach((t => t()))
     }
 }
 function r(t, e) {
@@ -479,18 +418,11 @@ class h extends s {
         this.numErbFilters = this.fftSamples / 2,
         this.createWrapper(),
         this.createCanvas();
-        // 【新增】初始化銷毀旗標
-        this.isDestroyed = false;
+
         // WASM integration
         this._wasmEngine = null;
         this._wasmInitialized = false;
         this._wasmReady = wasmReady.then(() => {
-            // 【關鍵修復】如果在這個 Promise 等待期間插件已經被銷毀，就直接退出，不要建立引擎！
-            if (this.isDestroyed) {
-                console.warn("⚠️ [Spectrogram] Plugin destroyed before WASM init. Skipping engine creation.");
-                return;
-            }
-
             if (this._wasmInitialized) return;  // 防止重複初始化
             this._wasmInitialized = true;
             
@@ -956,45 +888,16 @@ class h extends s {
         this.spectrCc = this.canvas.getContext("2d")
     }
     async render() {
-        if (this.destroyed) return;
-
-        // 1. 如果有正在進行的任務，強制中止它！(防止 WASM 衝突)
-        if (this.currentRenderTask) {
-            this.currentRenderTask.abort();
-            this.currentRenderTask = null;
-        }
-
-        // 2. 建立新的控制器
-        const controller = new AbortController();
-        this.currentRenderTask = controller;
-
-        // [修正] 移除了不存在的 updateCanvasStyle() 呼叫
-        // 直接設定 Canvas 尺寸
-        const t = this.canvas;
-        if (t) {
-            t.width = t.clientWidth;
-            t.height = t.clientHeight;
-        }
-
-        if (this.wavesurfer) {
-            const e = this.wavesurfer.getDecodedData();
-            
-            // 3. 傳遞 controller.signal 給 getFrequencies
-            // (請確保你已經更新了 getFrequencies 方法以接收 signal 參數)
-            const s = await this.getFrequencies(e, controller.signal);
-
-            // 4. 如果回來後發現已經被中止了，就不要畫圖了
-            if (controller.signal.aborted) {
-                return;
-            }
-
-            // 清理標記
-            if (this.currentRenderTask === controller) {
-                this.currentRenderTask = null;
-            }
-
-            if (s && this.buffer) {
-                this.drawSpectrogram(s);
+        var t;
+        if (this.frequenciesDataUrl)
+            this.loadFrequenciesData(this.frequenciesDataUrl);
+        else {
+            const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
+            if (e) {
+                const frequencies = await this.getFrequencies(e);
+                if (frequencies) {
+                    this.drawSpectrogram(frequencies);
+                }
             }
         }
     }
@@ -1296,39 +1199,31 @@ class h extends s {
         this._filterBankMatrix = null;
         this._filterBankFlat = null;
     }
-async getFrequencies(t, signal) {
-        // [檢查 1] 一開始就檢查是否已被中止
-        if (signal && signal.aborted) return null;
-
+async getFrequencies(t) {
         // 檢查 this.options 是否為 null
         if (!this.options || !t) {
             return;
         }
-
-        var e, s;
-        const r = this.fftSamples,
-            i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
         
-        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2, !t)
+        var e, s;
+        const r = this.fftSamples
+          , i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
+        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2,
+        !t)
             return;
-            
         this.buffer = t;
-        const n = t.sampleRate,
-            h = [];
-            
+        const n = t.sampleRate
+          , h = [];
         let o = this.noverlap;
         if (!o) {
             const e = t.length / this.canvas.width;
             const minOverlap = Math.floor(r * 0.05);
             o = Math.max(minOverlap, Math.round(r - e));
         }
-
+        
         // Wait for WASM to be ready
         await this._wasmReady;
-
-        // [檢查 2] 等待 WASM 就緒期間可能被中止
-        if (signal && signal.aborted) return null;
-
+        
         // --- Filter Bank Logic (保持不變) ---
         const minBinFull = Math.floor(this.frequencyMin * r / n);
         const maxBinFull = Math.ceil(this.frequencyMax * r / n);
@@ -1336,7 +1231,7 @@ async getFrequencies(t, signal) {
 
         let filterBankMatrix = null;
         const currentFilterBankKey = `${this.scale}:${n}:${this.frequencyMin}:${this.frequencyMax}`;
-
+        
         if (this.scale !== "linear") {
             if (this._lastFilterBankScale !== currentFilterBankKey) {
                 let c;
@@ -1345,10 +1240,10 @@ async getFrequencies(t, signal) {
                     c = this._filterBankCacheByKey[currentFilterBankKey];
                 } else {
                     switch (this.scale) {
-                        case "mel": numFilters = this.numMelFilters; c = this.createFilterBank(numFilters, n, this.hzToMel, this.melToHz); break;
-                        case "logarithmic": numFilters = this.numLogFilters; c = this.createFilterBank(numFilters, n, this.hzToLog, this.logToHz); break;
-                        case "bark": numFilters = this.numBarkFilters; c = this.createFilterBank(numFilters, n, this.hzToBark, this.barkToHz); break;
-                        case "erb": numFilters = this.numErbFilters; c = this.createFilterBank(numFilters, n, this.hzToErb, this.erbToHz); break;
+                    case "mel": numFilters = this.numMelFilters; c = this.createFilterBank(numFilters, n, this.hzToMel, this.melToHz); break;
+                    case "logarithmic": numFilters = this.numLogFilters; c = this.createFilterBank(numFilters, n, this.hzToLog, this.logToHz); break;
+                    case "bark": numFilters = this.numBarkFilters; c = this.createFilterBank(numFilters, n, this.hzToBark, this.barkToHz); break;
+                    case "erb": numFilters = this.numErbFilters; c = this.createFilterBank(numFilters, n, this.hzToErb, this.erbToHz); break;
                     }
                     this._filterBankCacheByKey[currentFilterBankKey] = c;
                 }
@@ -1367,90 +1262,81 @@ async getFrequencies(t, signal) {
         // --- End Filter Bank Logic ---
 
         this.peakBandArrayPerChannel = [];
+        
+            let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
+            const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
-        let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+            for (let e = 0; e < i; e++) {
+                const s = t.getChannelData(e)
+                  , channelFrames = []
+                  , channelPeakLists = [];
+                
+                const fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
+                    s,
+                    o,
+                    this.gainDB,
+                    this.rangeDB
+                );
 
-        for (let e = 0; e < i; e++) {
-            // [檢查 3] 在處理每個聲道前檢查
-            if (signal && signal.aborted) return null;
+                const globalMaxLinear = this._wasmEngine.get_global_max();
+                const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
 
-            const s = t.getChannelData(e);
-            const channelFrames = [];
-            const channelPeakLists = [];
+                // 獲取線性幅度用於全局噪音過濾
+                const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
+                
+                const numFilters = this._wasmEngine.get_num_filters();
+                const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
+                const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
+                
+                for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
+                    const frameStartIdx = frameIdx * outputSize;
+                    const outputFrame = fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize);
+                    channelFrames.push(outputFrame);
 
-            // 呼叫 WASM 計算 (不使用 Chunking，直接傳入完整數據)
-            // 注意：請確保 spectrogram_wasm.js 已經加上了 finally { free() } 的修復
-            const fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
-                s,
-                o,
-                this.gainDB,
-                this.rangeDB
-            );
+                    if (this.options && this.options.peakMode) {
+                        const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
-            // [檢查 4] 關鍵！WASM 計算非常耗時，回來後必須檢查是否已被新的 Render 取消
-            // 如果這裡不檢查，舊數據會繼續跑下面的迴圈，並與新任務發生衝突 (Recursive Error)
-            if (signal && signal.aborted) return null;
+                        // [Rule 1] 全局噪音過濾 (-24dB)
+                        // 低於此強度的片段直接略過
+                        if (localMaxLinear < noiseFloorLinear) {
+                            channelPeakLists.push([]); 
+                            continue; 
+                        }
 
-            const globalMaxLinear = this._wasmEngine.get_global_max();
-            const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
+                        // [Rule 2] 局部自適應閾值
+                        let localMaxU8 = 0;
+                        for(let k=0; k < outputSize; k++) {
+                            if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
+                        }
 
-            // 獲取線性幅度用於全局噪音過濾
-            const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
+                        // [關鍵修改] 使用調整後的 effectiveThreshold 計算截止線
+                        // 例如：Slider 40% -> effectiveThreshold 約 0.7 -> 只保留最強的 30% 區域
+                        const cutoffU8 = localMaxU8 * effectiveThreshold;
 
-            const numFilters = this._wasmEngine.get_num_filters();
-            const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
-            const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
-
-            for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
-                // [檢查 5] (選用) 在長迴圈中檢查，提高反應速度
-                // 每處理 1000 幀檢查一次，避免頻繁檢查影響效能
-                if (frameIdx % 1000 === 0 && signal && signal.aborted) return null;
-
-                const frameStartIdx = frameIdx * outputSize;
-                const outputFrame = fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize);
-                channelFrames.push(outputFrame);
-
-                if (this.options && this.options.peakMode) {
-                    const localMaxLinear = frameIdx < frameMaxMagnitudes.length ? frameMaxMagnitudes[frameIdx] : 0;
-
-                    // [Rule 1] 全局噪音過濾 (-24dB)
-                    if (localMaxLinear < noiseFloorLinear) {
-                        channelPeakLists.push([]);
-                        continue;
-                    }
-
-                    // [Rule 2] 局部自適應閾值
-                    let localMaxU8 = 0;
-                    for (let k = 0; k < outputSize; k++) {
-                        if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
-                    }
-
-                    const cutoffU8 = localMaxU8 * effectiveThreshold;
-                    const framePeaks = [];
-
-                    // 優化：如果 localMaxU8 太小（例如全黑背景中的微小波動），直接忽略
-                    if (localMaxU8 > 10) {
-                        for (let k = 0; k < outputSize; k++) {
-                            if (outputFrame[k] >= cutoffU8) {
-                                framePeaks.push({
-                                    bin: k,
-                                    magnitude: outputFrame[k],
-                                    isMainPeak: outputFrame[k] === localMaxU8
-                                });
+                        const framePeaks = [];
+                        
+                        // 優化：如果 localMaxU8 太小（例如全黑背景中的微小波動），直接忽略
+                        if (localMaxU8 > 10) { 
+                            for(let k=0; k < outputSize; k++) {
+                                if (outputFrame[k] >= cutoffU8) {
+                                    framePeaks.push({
+                                        bin: k,
+                                        magnitude: outputFrame[k],
+                                        isMainPeak: outputFrame[k] === localMaxU8
+                                    });
+                                }
                             }
                         }
+                        channelPeakLists.push(framePeaks);
                     }
-                    channelPeakLists.push(framePeaks);
                 }
+                
+                if (this.options && this.options.peakMode) {
+                    this.peakBandArrayPerChannel.push(channelPeakLists);
+                }
+                h.push(channelFrames)
             }
-
-            if (this.options && this.options.peakMode) {
-                this.peakBandArrayPerChannel.push(channelPeakLists);
-            }
-            h.push(channelFrames)
-        }
-        return h
+            return h
     }
     
     freqType(t) {

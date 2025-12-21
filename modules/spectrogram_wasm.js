@@ -248,22 +248,12 @@ export class SpectrogramEngine {
      * @returns {Float32Array}
      */
     compute_spectrogram(audio_data, noverlap) {
-        let ptr0 = 0;
-        let len0 = 0;
-        try {
-            ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
-            len0 = WASM_VECTOR_LEN;
-            
-            const ret = wasm.spectrogramengine_compute_spectrogram(this.__wbg_ptr, ptr0, len0, noverlap);
-            var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
-            wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-            return v2;
-        } finally {
-            // 【關鍵修復】釋放輸入記憶體
-            if (ptr0 !== 0) {
-                wasm.__wbindgen_free(ptr0, len0 * 4, 4);
-            }
-        }
+        const ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.spectrogramengine_compute_spectrogram(this.__wbg_ptr, ptr0, len0, noverlap);
+        var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v2;
     }
     /**
      * 獲取每個時間幀的峰值幅度值
@@ -313,22 +303,12 @@ export class SpectrogramEngine {
      * @returns {Uint8Array}
      */
     compute_spectrogram_u8(audio_data, noverlap, gain_db, range_db) {
-        let ptr0 = 0;
-        let len0 = 0;
-        try {
-            ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
-            len0 = WASM_VECTOR_LEN;
-            const ret = wasm.spectrogramengine_compute_spectrogram_u8(this.__wbg_ptr, ptr0, len0, noverlap, gain_db, range_db);
-            var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-            wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-            return v2;
-        } finally {
-            // 【重要】一定要檢查 ptr0 是否不為 0，才執行 free
-            // 如果 malloc 失敗 (OOM)，ptr0 會是 0，這時候 free 會導致 crash
-            if (ptr0 !== 0) {
-                wasm.__wbindgen_free(ptr0, len0 * 4, 4);
-            }
-        }
+        const ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.spectrogramengine_compute_spectrogram_u8(this.__wbg_ptr, ptr0, len0, noverlap, gain_db, range_db);
+        var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+        return v2;
     }
     /**
      * 計算完整的光譜圖像 (FFT -> 重採樣 -> 色彩化)
