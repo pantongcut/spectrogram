@@ -549,18 +549,30 @@ class h extends s {
         this.drawColorMapBar()
     }
     destroy() {
-        // 1. 【新增】釋放 WASM 引擎記憶體！
-        // 這是最關鍵的一步，防止每次切換設定時記憶體洩漏
-        if (this._wasmEngine && this._wasmEngine.free) {
-            try {
-                this._wasmEngine.free();
-            } catch (e) {
-                console.warn("Failed to free WASM engine:", e);
-            }
-        }
-        this._wasmEngine = null;
+        console.log("💥 [Spectrogram] Destroying plugin instance...");
 
-        // Clean up event listeners for color bar and dropdown
+        // 1. 【關鍵修復】釋放 WASM 引擎記憶體
+        // 如果沒有這一步，每次 Zoom/Resize/Reload 都會洩漏幾十 MB，直到崩潰
+        if (this._wasmEngine) {
+            try {
+                if (typeof this._wasmEngine.free === 'function') {
+                    this._wasmEngine.free();
+                    console.log("✅ [Spectrogram] WASM engine memory freed.");
+                }
+            } catch (e) {
+                console.warn("⚠️ [Spectrogram] Failed to free WASM engine:", e);
+            }
+            this._wasmEngine = null;
+        }
+
+        // 2. 【關鍵修復】中止任何正在進行的運算任務
+        // 防止 WASM 已經被 free 了，舊的非同步 render 迴圈還在跑
+        if (this.currentRenderTask) {
+            this.currentRenderTask.abort();
+            this.currentRenderTask = null;
+        }
+
+        // 3. 清理 UI 事件監聽器 (保持原樣)
         if (this._colorBarClickHandler) {
             const colorBarCanvas = document.getElementById("color-bar");
             if (colorBarCanvas) {
@@ -574,21 +586,23 @@ class h extends s {
             this._documentClickHandler = null;
         }
         
-        // 中止任何正在進行的渲染任務
-        if (this.currentRenderTask) {
-            this.currentRenderTask.abort();
-            this.currentRenderTask = null;
+        // 4. 清理 WaveSurfer 綁定 (保持原樣)
+        this.unAll();
+        if (this.wavesurfer) {
+            this.wavesurfer.un("ready", this._onReady);
+            this.wavesurfer.un("redraw", this._onRender);
+        }
+        this.wavesurfer = null;
+        this.util = null;
+        this.options = null;
+        
+        if (this.wrapper) {
+            this.wrapper.remove();
+            this.wrapper = null;
         }
 
-        this.unAll(),
-        this.wavesurfer.un("ready", this._onReady),
-        this.wavesurfer.un("redraw", this._onRender),
-        this.wavesurfer = null,
-        this.util = null,
-        this.options = null,
-        this.wrapper && (this.wrapper.remove(),
-        this.wrapper = null),
-        super.destroy()
+        // 呼叫父類銷毀
+        super.destroy();
     }
     setColorMap(mapName) {
         this.colorMapName = mapName;
