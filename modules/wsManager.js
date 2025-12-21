@@ -90,6 +90,43 @@ export function replacePlugin(
   // This ensures WASM memory (SpectrogramEngine) is freed
   if (plugin) {
     console.log('🔄 [wsManager] Destroying old plugin to free WASM memory...');
+    
+    // Before destroying, aggressively clear all plugin data
+    try {
+      // Clear spectrogram canvas and image data
+      if (plugin.canvas) {
+        const ctx = plugin.canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, plugin.canvas.width, plugin.canvas.height);
+          // Clear the canvas from DOM
+          plugin.canvas.remove?.();
+        }
+        plugin.canvas = null;
+      }
+      
+      // Clear color bar canvas
+      if (plugin.colorBarCanvas) {
+        const ctx = plugin.colorBarCanvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, plugin.colorBarCanvas.width, plugin.colorBarCanvas.height);
+          plugin.colorBarCanvas.remove?.();
+        }
+        plugin.colorBarCanvas = null;
+      }
+      
+      // Clear wrapper
+      if (plugin.wrapper) {
+        plugin.wrapper.innerHTML = '';
+        plugin.wrapper.remove?.();
+        plugin.wrapper = null;
+      }
+      
+      console.log('✅ [wsManager] Pre-cleared plugin DOM and canvas');
+    } catch (err) {
+      console.warn('⚠️ [wsManager] Error pre-clearing plugin:', err);
+    }
+    
+    // Now destroy the plugin
     if (typeof plugin.destroy === 'function') {
       plugin.destroy();
     }
@@ -110,6 +147,24 @@ export function replacePlugin(
     
     // Schedule post-destruction cleanup
     setTimeout(() => {
+      try {
+        // Additional cleanup: clear WaveSurfer's internal caches
+        if (ws) {
+          // Clear any cached decoded audio data
+          if (ws.decodedData !== undefined) {
+            ws.decodedData = null;
+          }
+          if (ws.backend && ws.backend.decodedData !== undefined) {
+            ws.backend.decodedData = null;
+          }
+          if (ws.backend && ws.backend.audioBuffer !== undefined) {
+            ws.backend.audioBuffer = null;
+          }
+          console.log('✅ [wsManager] Cleared WaveSurfer internal caches');
+        }
+      } catch (err) {
+        console.warn('⚠️ [wsManager] Error clearing WaveSurfer caches:', err);
+      }
       console.log('⏱️ [wsManager] Post-destruction cleanup completed');
     }, 50);
   }
