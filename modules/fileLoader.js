@@ -137,29 +137,6 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // PRE-LOAD CLEANUP: Clear old audio data from WaveSurfer BEFORE loading new file
-    try {
-      if (wavesurfer && wavesurfer.backend) {
-        const keysToNull = [
-          'audioBuffer', 'decodedData', 'buffer', 'data', 'rawData',
-          'originalAudioBuffer', 'filteredBuffer', 'offlineContext',
-          'convolver', 'analyser', 'scriptProcessor', 'gainNode',
-          'duration', 'frameData'
-        ];
-        keysToNull.forEach(key => {
-          if (wavesurfer.backend[key]) {
-            wavesurfer.backend[key] = null;
-          }
-        });
-      }
-      if (wavesurfer && wavesurfer.decodedData) {
-        wavesurfer.decodedData = null;
-      }
-      console.log('🗑️ [fileLoader] Pre-cleared old WaveSurfer data before load');
-    } catch (err) {
-      console.warn('⚠️ [fileLoader] Error in pre-clear:', err);
-    }
-
     const fileUrl = URL.createObjectURL(file);
     // Don't revoke old URL yet - WaveSurfer might still be using it
     // Store it for later revocation
