@@ -94,10 +94,6 @@ export function replacePlugin(
       plugin.destroy();
     }
     plugin = null;
-    // Force garbage collection hint (not guaranteed, but good practice)
-    if (global?.gc) {
-      global.gc();
-    }
   }
 
   container.style.width = '100%';
