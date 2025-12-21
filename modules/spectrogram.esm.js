@@ -568,14 +568,6 @@ class h extends s {
         // Clear last render data to release references
         this.lastRenderData = null;
         
-        // Clear any intermediate buffers and data arrays
-        this.fftData = null;
-        this.powerSpectrum = null;
-        this.melFilteredSpectrum = null;
-        this.barkFilteredSpectrum = null;
-        this.erbFilteredSpectrum = null;
-        this.logFilteredSpectrum = null;
-        
         // Release WASM engine reference without calling .free()
         // Let wasm-bindgen's FinalizationRegistry handle deallocation
         // This prevents "memory access out of bounds" errors from double-free

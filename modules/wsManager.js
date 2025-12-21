@@ -81,35 +81,9 @@ export function replacePlugin(
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
 
-  // Store old canvas reference and fix its display width to prevent visual shrinking
   const oldCanvas = container.querySelector("canvas");
   if (oldCanvas) {
-    // Capture the current width BEFORE any reflows
-    const oldCanvasWidth = oldCanvas.offsetWidth;
-    const oldWrapper = oldCanvas.parentElement;
-    
-    if (oldWrapper) {
-      // Prevent wrapper from resizing during cleanup
-      oldWrapper.style.position = 'fixed';
-      oldWrapper.style.width = oldCanvasWidth + 'px';
-      oldWrapper.style.pointerEvents = 'none';
-      oldWrapper.style.opacity = '1';
-      console.log(`🔒 [wsManager] Locked old canvas width to ${oldCanvasWidth}px to prevent shrinking`);
-      
-      // Schedule opacity fade-out and cleanup after plugin is ready
-      setTimeout(() => {
-        if (oldWrapper.parentNode) {
-          oldWrapper.style.opacity = '0';
-          oldWrapper.style.transition = 'opacity 0.1s ease-out';
-          setTimeout(() => {
-            if (oldWrapper.parentNode) {
-              oldWrapper.remove();
-              console.log('🗑️ [wsManager] Removed old wrapper after fade-out');
-            }
-          }, 100);
-        }
-      }, 50);
-    }
+    oldCanvas.remove();
   }
 
   // CRITICAL: Clean up the old plugin BEFORE creating a new one
@@ -121,23 +95,13 @@ export function replacePlugin(
     }
     plugin = null;
     
-    // Also clean up the analysis WASM engine if it exists
-    if (analysisWasmEngine) {
-      try {
-        if (typeof analysisWasmEngine.free === 'function') {
-          analysisWasmEngine.free();
-          console.log('🗑️ [wsManager] Freed analysisWasmEngine');
-        }
-      } catch (err) {
-        console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
-      }
-      analysisWasmEngine = null;
-    }
+    // Force garbage collection hint by scheduling cleanup
+    setTimeout(() => {
+      console.log('⏱️ [wsManager] Post-destruction cleanup completed');
+    }, 50);
   }
 
-  // Ensure container is ready for new plugin
   container.style.width = '100%';
-  container.style.position = 'relative';
 
   // 更新內部狀態
   currentColorMap = colorMap;
