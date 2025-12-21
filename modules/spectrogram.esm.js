@@ -97,6 +97,9 @@ class s extends e {
     destroy() {
         console.log("💥 [Spectrogram] Destroying plugin instance...");
 
+        // 【新增】標記為已銷毀，防止並行的 Promise 建立新引擎
+        this.isDestroyed = true;
+
         // 1. 【關鍵修復】釋放 WASM 引擎記憶體
         // 如果沒有這一步，每次 Zoom/Resize/Reload 都會洩漏幾百 MB，直到崩潰
         if (this._wasmEngine) {
@@ -476,11 +479,18 @@ class h extends s {
         this.numErbFilters = this.fftSamples / 2,
         this.createWrapper(),
         this.createCanvas();
-
+        // 【新增】初始化銷毀旗標
+        this.isDestroyed = false;
         // WASM integration
         this._wasmEngine = null;
         this._wasmInitialized = false;
         this._wasmReady = wasmReady.then(() => {
+            // 【關鍵修復】如果在這個 Promise 等待期間插件已經被銷毀，就直接退出，不要建立引擎！
+            if (this.isDestroyed) {
+                console.warn("⚠️ [Spectrogram] Plugin destroyed before WASM init. Skipping engine creation.");
+                return;
+            }
+
             if (this._wasmInitialized) return;  // 防止重複初始化
             this._wasmInitialized = true;
             
