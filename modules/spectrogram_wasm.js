@@ -312,27 +312,19 @@ export class SpectrogramEngine {
      * @param {number} range_db
      * @returns {Uint8Array}
      */
-compute_spectrogram_u8(audio_data, noverlap, gain_db, range_db) {
+    compute_spectrogram_u8(audio_data, noverlap, gain_db, range_db) {
         let ptr0 = 0;
         let len0 = 0;
         try {
-            // 1. 申請記憶體
             ptr0 = passArrayF32ToWasm0(audio_data, wasm.__wbindgen_malloc);
             len0 = WASM_VECTOR_LEN;
-            
-            // 2. 執行計算
             const ret = wasm.spectrogramengine_compute_spectrogram_u8(this.__wbg_ptr, ptr0, len0, noverlap, gain_db, range_db);
-            
-            // 3. 複製結果 (slice 很重要，將數據從 WASM 記憶體複製到 JS 記憶體)
             var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
-            
-            // 4. 釋放回傳值的記憶體
             wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
-            
             return v2;
         } finally {
-            // 5. 【關鍵修復】釋放輸入的 audio_data 記憶體
-            // 只有當指針有效(不為0)時才釋放，避免報錯
+            // 【重要】一定要檢查 ptr0 是否不為 0，才執行 free
+            // 如果 malloc 失敗 (OOM)，ptr0 會是 0，這時候 free 會導致 crash
             if (ptr0 !== 0) {
                 wasm.__wbindgen_free(ptr0, len0 * 4, 4);
             }

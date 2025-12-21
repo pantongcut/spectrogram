@@ -549,6 +549,17 @@ class h extends s {
         this.drawColorMapBar()
     }
     destroy() {
+        // 1. 【新增】釋放 WASM 引擎記憶體！
+        // 這是最關鍵的一步，防止每次切換設定時記憶體洩漏
+        if (this._wasmEngine && this._wasmEngine.free) {
+            try {
+                this._wasmEngine.free();
+            } catch (e) {
+                console.warn("Failed to free WASM engine:", e);
+            }
+        }
+        this._wasmEngine = null;
+
         // Clean up event listeners for color bar and dropdown
         if (this._colorBarClickHandler) {
             const colorBarCanvas = document.getElementById("color-bar");
@@ -563,6 +574,12 @@ class h extends s {
             this._documentClickHandler = null;
         }
         
+        // 中止任何正在進行的渲染任務
+        if (this.currentRenderTask) {
+            this.currentRenderTask.abort();
+            this.currentRenderTask = null;
+        }
+
         this.unAll(),
         this.wavesurfer.un("ready", this._onReady),
         this.wavesurfer.un("redraw", this._onRender),
