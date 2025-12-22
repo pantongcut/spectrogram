@@ -1669,7 +1669,9 @@ document.addEventListener("file-loaded", async () => {
     try {
       const arrayBuf = await currentFile.arrayBuffer();
       ac = new (window.AudioContext || window.webkitAudioContext)();
-      const audioBuf = await ac.decodeAudioData(arrayBuf.slice(0));
+      // [FIX] Remove .slice(0) to avoid doubling memory usage
+      // decodeAudioData takes ownership or copies internally; no need to preserve arrayBuf
+      const audioBuf = await ac.decodeAudioData(arrayBuf);
       // Prefer Wavesurfer decoded internal length for the original audio buffer when available
       const wsDecodedLen = getWavesurfer()?.getDecodedData()?.length;
       currentAudioBufferLength = wsDecodedLen || audioBuf.length;

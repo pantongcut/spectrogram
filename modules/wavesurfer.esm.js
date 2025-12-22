@@ -1425,6 +1425,8 @@ class u extends a {
                             // WASM requires exclusive ownership of the data
                             const channelDataCopy = new Float32Array(channelData);
                             this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
+                            // [FIX] Release the temporary buffer immediately for faster GC
+                            channelDataCopy = null;
                         }
                         
                         // Audio data loaded to WaveformEngine

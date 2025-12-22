@@ -580,10 +580,19 @@ class h extends s {
         this.erbFilteredSpectrum = null;
         this.logFilteredSpectrum = null;
         
-        // Clear caches but keep WASM engine for reuse
-        // Let wasm-bindgen FinalizationRegistry handle cleanup when truly destroyed
-        // Setting to null prevents reuse when loading new files
-        // this._wasmEngine = null;
+        // [FIX] Force "Soft Release" to empty WASM vectors immediately
+        // Use release_memory instead of free to avoid double-free crashes
+        if (this._wasmEngine && typeof this._wasmEngine.release_memory === 'function') {
+            try {
+                console.log('🗑️ [Spectrogram] Soft-releasing WASM memory on destroy');
+                this._wasmEngine.release_memory();
+            } catch (e) {
+                console.warn('⚠️ [Spectrogram] Error releasing memory:', e);
+            }
+        }
+        
+        // [FIX] Remove the reference so it can't be reused and allows GC
+        this._wasmEngine = null;
         
         // Clean up event listeners for color bar and dropdown
         if (this._colorBarClickHandler) {
