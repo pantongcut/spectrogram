@@ -439,18 +439,6 @@ class h extends s {
                 this.alpha
             );
             
-            // 設置色彩映射到 WASM
-            if (this._colorMapUint && this._colorMapUint.length === 1024) {
-                try {
-                    // Create a copy as Uint8Array to avoid Rust aliasing issues
-                    const colorMapCopy = new Uint8Array(this._colorMapUint);
-                    this._wasmEngine.set_color_map(colorMapCopy);
-                } catch (e) {
-                    // [FIX] Handle WASM aliasing errors gracefully during init
-                    console.warn('[Spectrogram] Error setting initial color map in WASM:', e);
-                }
-            }
-            
             // 設置光譜配置
             this._wasmEngine.set_spectrum_config(
                 this.scale,
@@ -535,33 +523,6 @@ class h extends s {
             // Preserve Alpha
             this._activeColorMapUint[baseIdx + 3] = this._baseColorMapUint[baseIdx + 3];
         }
-
-        // [FIX] REMOVE WASM set_color_map() call - it's redundant and causes aliasing errors
-        // The WASM engine does not use the colormap for 'compute_spectrogram_u8' (it returns 0-255 indices).
-        // Coloring is applied in JavaScript in 'drawSpectrogram()' using _activeColorMapUint.
-        // Keeping this call causes unnecessary concurrency issues and WASM aliasing errors during playback.
-        /*
-        if (this._wasmEngine && this._wasmEngine.set_color_map && !this._isRendering) {
-            try {
-                // Create a copy as Uint8Array to avoid Rust aliasing issues
-                const colorMapCopy = new Uint8Array(this._activeColorMapUint);
-                this._wasmEngine.set_color_map(colorMapCopy);
-            } catch (e) {
-                // [FIX] Detect aliasing errors in color map and reinitialize
-                if (e.message && e.message.includes('aliasing')) {
-                    const now = Date.now();
-                    const timeSinceLastError = now - this._lastWasmErrorTime;
-                    
-                    if (timeSinceLastError > this._wasmErrorThrottleMs) {
-                        console.error('[Spectrogram] WASM aliasing error in color map, reinitializing...');
-                        this._reinitWasmEngine();
-                    }
-                } else {
-                    console.warn('[Spectrogram] Error updating color map in WASM:', e.message);
-                }
-            }
-        }
-        */
 
         // Redraw components
         this.drawColorMapBar();
@@ -802,15 +763,6 @@ class h extends s {
                 this.windowFunc,
                 this.alpha
             );
-            
-            if (this._colorMapUint && this._colorMapUint.length === 1024) {
-                try {
-                    const colorMapCopy = new Uint8Array(this._colorMapUint);
-                    this._wasmEngine.set_color_map(colorMapCopy);
-                } catch (e) {
-                    console.warn('[Spectrogram] Error setting initial color map in WASM:', e);
-                }
-            }
             
             this._wasmEngine.set_spectrum_config(
                 this.scale,
