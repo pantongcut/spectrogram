@@ -924,6 +924,10 @@ class h extends s {
     }
     async render() {
         var t;
+        // 如果引擎已被釋放，停止渲染
+        if (!this._wasmEngine) {
+            return;
+        }
         if (this.frequenciesDataUrl)
             this.loadFrequenciesData(this.frequenciesDataUrl);
         else {
@@ -1236,8 +1240,8 @@ class h extends s {
         this._filterBankFlat = null;
     }
 async getFrequencies(t) {
-        // 檢查 this.options 是否為 null
-        if (!this.options || !t) {
+        // 檢查 this.options 是否為 null 或 WASM engine 是否已被釋放
+        if (!this.options || !t || !this._wasmEngine) {
             return;
         }
         
