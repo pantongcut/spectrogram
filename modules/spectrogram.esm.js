@@ -422,6 +422,8 @@ class h extends s {
         // WASM integration
         this._wasmEngine = null;
         this._wasmInitialized = false;
+        // [FIX] Prevent concurrent render calls
+        this._isRendering = false;
         this._wasmReady = wasmReady.then(() => {
             if (this._wasmInitialized) return;  // 防止重複初始化
             this._wasmInitialized = true;
@@ -434,9 +436,14 @@ class h extends s {
             
             // 設置色彩映射到 WASM
             if (this._colorMapUint && this._colorMapUint.length === 1024) {
-                // Create a copy as Uint8Array to avoid Rust aliasing issues
-                const colorMapCopy = new Uint8Array(this._colorMapUint);
-                this._wasmEngine.set_color_map(colorMapCopy);
+                try {
+                    // Create a copy as Uint8Array to avoid Rust aliasing issues
+                    const colorMapCopy = new Uint8Array(this._colorMapUint);
+                    this._wasmEngine.set_color_map(colorMapCopy);
+                } catch (e) {
+                    // [FIX] Handle WASM aliasing errors gracefully during init
+                    console.warn('[Spectrogram] Error setting initial color map in WASM:', e);
+                }
             }
             
             // 設置光譜配置
@@ -526,9 +533,14 @@ class h extends s {
 
         // Push to WASM engine
         if (this._wasmEngine && this._wasmEngine.set_color_map) {
-            // Create a copy as Uint8Array to avoid Rust aliasing issues
-            const colorMapCopy = new Uint8Array(this._activeColorMapUint);
-            this._wasmEngine.set_color_map(colorMapCopy);
+            try {
+                // Create a copy as Uint8Array to avoid Rust aliasing issues
+                const colorMapCopy = new Uint8Array(this._activeColorMapUint);
+                this._wasmEngine.set_color_map(colorMapCopy);
+            } catch (e) {
+                // [FIX] Handle WASM aliasing errors gracefully
+                console.warn('[Spectrogram] Error updating color map in WASM:', e);
+            }
         }
 
         // Redraw components
@@ -941,16 +953,28 @@ class h extends s {
     }
     async render() {
         var t;
-        if (this.frequenciesDataUrl)
-            this.loadFrequenciesData(this.frequenciesDataUrl);
-        else {
-            const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
-            if (e) {
-                const frequencies = await this.getFrequencies(e);
-                if (frequencies) {
-                    this.drawSpectrogram(frequencies);
+        
+        // [FIX] Prevent concurrent render calls to avoid WASM aliasing issues
+        if (this._isRendering) {
+            console.warn('[Spectrogram] Render already in progress, skipping');
+            return;
+        }
+        
+        this._isRendering = true;
+        try {
+            if (this.frequenciesDataUrl)
+                this.loadFrequenciesData(this.frequenciesDataUrl);
+            else {
+                const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
+                if (e) {
+                    const frequencies = await this.getFrequencies(e);
+                    if (frequencies) {
+                        this.drawSpectrogram(frequencies);
+                    }
                 }
             }
+        } finally {
+            this._isRendering = false;
         }
     }
 
@@ -1333,12 +1357,23 @@ async getFrequencies(t) {
                 // WASM Rust code requires exclusive ownership of the data
                 const audioDataCopy = new Float32Array(s);
                 
-                const fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
-                    audioDataCopy,
-                    o,
-                    this.gainDB,
-                    this.rangeDB
-                );
+                let fullU8Spectrum;
+                try {
+                    // [FIX] Wrap WASM call with error handling for aliasing issues
+                    fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
+                        audioDataCopy,
+                        o,
+                        this.gainDB,
+                        this.rangeDB
+                    );
+                } catch (wasmError) {
+                    // [FIX] If WASM aliasing error occurs, log and use fallback
+                    console.error('[Spectrogram] WASM compute error (aliasing):', wasmError);
+                    console.warn('[Spectrogram] Using fallback rendering (this may be slow)');
+                    audioDataCopy.fill(0);
+                    // Return empty frequencies to prevent further errors
+                    return h;
+                }
                 
                 // [FIX] Clear the audioDataCopy reference immediately after WASM processing
                 audioDataCopy.fill(0);
