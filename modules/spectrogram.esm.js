@@ -1306,19 +1306,21 @@ class h extends s {
         this._filterBankMatrix = null;
         this._filterBankFlat = null;
     }
-async getFrequencies(t, isRetry = false) {
+
+    async getFrequencies(t, isRetry = false) {
         // 檢查 this.options 是否為 null
         if (!this.options || !t) {
             return;
         }
         
-        // 清除舊緩存以防止內存泄漏（當加載新文件時）
+        // 清除舊緩存以防止內存泄漏
         this.peakBandArrayPerChannel = [];
         
         var e, s;
         const r = this.fftSamples
           , i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
         
+        // 確保頻率範圍設置正確
         if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2, !t)
             return;
             
@@ -1332,15 +1334,9 @@ async getFrequencies(t, isRetry = false) {
             o = Math.max(minOverlap, Math.round(r - e));
         }
         
-        // Wait for WASM to be ready (如果在重試模式，這裡會等待新的引擎初始化完畢)
+        // Wait for WASM to be ready
         await this._wasmReady;
         
-        // --- Filter Bank Logic ---
-        const minBinFull = Math.floor(this.frequencyMin * r / n);
-        const maxBinFull = Math.ceil(this.frequencyMax * r / n);
-        const binRangeSize = maxBinFull - minBinFull; // [保留原代碼] 雖然看似未被使用
-
-        let filterBankMatrix = null; // [保留原代碼] 雖然看似未被使用
         const currentFilterBankKey = `${this.scale}:${n}:${this.frequencyMin}:${this.frequencyMax}`;
         
         if (this.scale !== "linear") {
@@ -1387,7 +1383,7 @@ async getFrequencies(t, isRetry = false) {
             
             let fullU8Spectrum;
             try {
-                // [FIX] Wrap WASM call with error handling for aliasing issues
+                // 嘗試調用 WASM 計算
                 fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
                     audioDataCopy,
                     o,
@@ -1395,38 +1391,26 @@ async getFrequencies(t, isRetry = false) {
                     this.rangeDB
                 );
             } catch (wasmError) {
-                // [FIX] 靜默處理第一次的 Aliasing Error 並自動重試
+                // [FIX] 靜默處理第一次的 Aliasing Error 並自動重試 (無 Error Log)
                 if (wasmError.message && wasmError.message.includes('aliasing')) {
                     
-                    // 如果這還不是重試嘗試 (isRetry === false)，則執行自動修復
+                    // 如果這還不是重試嘗試 (isRetry === false)，則執行無聲自動修復
                     if (!isRetry) {
-                        console.warn('⚠️ [Spectrogram] 初始化載入衝突，正在自動修復引擎...');
-                        
-                        // 強制重置引擎
+                        // 1. 強制重置引擎
                         this._reinitWasmEngine();
-                        // 釋放本次的內存副本
+                        // 2. 釋放本次的內存副本
                         audioDataCopy.fill(0);
                         
-                        // 等待新引擎就緒
+                        // 3. 等待新引擎就緒
                         await this._wasmReady;
                         
-                        // 遞歸調用：使用新引擎重新嘗試計算
-                        console.log('🔄 [Spectrogram] 重新嘗試計算頻譜...');
+                        // 4. 遞歸調用：使用新引擎重新嘗試計算，且不產生任何 Log
                         return this.getFrequencies(t, true);
                     }
 
-                    // 如果已經是重試狀態還失敗，則執行原本的報錯邏輯
-                    const now = Date.now();
-                    const timeSinceLastError = now - this._lastWasmErrorTime;
-                    
-                    if (timeSinceLastError > this._wasmErrorThrottleMs) {
-                        this._wasmErrorCount++;
-                        this._lastWasmErrorTime = now;
-                        this._wasmErrorThrottleMs = Math.min(10000, this._wasmErrorThrottleMs * 1.5);
-                        
-                        console.error('[Spectrogram] WASM aliasing error persisted:', wasmError.message);
-                        this._reinitWasmEngine();
-                    }
+                    // 只有當「第二次」重試也失敗時，才真正報錯 (防止無限迴圈)
+                    console.error('[Spectrogram] WASM aliasing error persisted:', wasmError.message);
+                    this._reinitWasmEngine();
                 } else {
                     console.error('[Spectrogram] WASM compute error:', wasmError.message);
                 }
@@ -1435,11 +1419,12 @@ async getFrequencies(t, isRetry = false) {
                 return null;
             }
             
-            // [FIX] Clear the audioDataCopy reference immediately
+            // 清理 WASM 輸入數據引用
             audioDataCopy.fill(0);
 
+            // 以下為正常的數據處理邏輯 (保持不變)
             const globalMaxLinear = this._wasmEngine.get_global_max();
-            const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
+            const noiseFloorLinear = globalMaxLinear * 0.063;               
 
             const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
             
@@ -1455,20 +1440,17 @@ async getFrequencies(t, isRetry = false) {
                 if (this.options && this.options.peakMode) {
                     const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
-                    // [Rule 1] 全局噪音過濾 (-24dB)
                     if (localMaxLinear < noiseFloorLinear) {
                         channelPeakLists.push([]); 
                         continue; 
                     }
 
-                    // [Rule 2] 局部自適應閾值
                     let localMaxU8 = 0;
                     for(let k=0; k < outputSize; k++) {
                         if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
                     }
 
                     const cutoffU8 = localMaxU8 * effectiveThreshold;
-
                     const framePeaks = [];
                     
                     if (localMaxU8 > 10) { 
