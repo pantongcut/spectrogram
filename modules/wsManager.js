@@ -81,82 +81,106 @@ export function replacePlugin(
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
 
-  const oldCanvas = container.querySelector("canvas");
-  if (oldCanvas) {
-    oldCanvas.remove();
-  }
+  // Check if only non-critical parameters changed (peakMode, peakThreshold)
+  // If so, update existing plugin instead of destroying it
+  const needsRebuild = 
+    !plugin ||
+    colorMap !== currentColorMap ||
+    fftSamples !== currentFftSize ||
+    windowFunc !== currentWindowType ||
+    frequencyMin * 1000 !== (plugin && plugin.options && plugin.options.frequencyMin) ||
+    frequencyMax * 1000 !== (plugin && plugin.options && plugin.options.frequencyMax);
 
-  // CRITICAL: Clean up the old plugin BEFORE creating a new one
-  // This ensures WASM memory (SpectrogramEngine) is freed
-  if (plugin) {
-    console.log('🔄 [wsManager] Destroying old plugin to free WASM memory...');
-    if (typeof plugin.destroy === 'function') {
-      plugin.destroy();
+  if (needsRebuild) {
+    // Only destroy plugin if core parameters changed
+    const oldCanvas = container.querySelector("canvas");
+    if (oldCanvas) {
+      oldCanvas.remove();
     }
-    plugin = null;
-    
-    // Also clean up the analysis WASM engine if it exists
-    if (analysisWasmEngine) {
-      try {
-        if (typeof analysisWasmEngine.free === 'function') {
-          analysisWasmEngine.free();
-          console.log('🗑️ [wsManager] Freed analysisWasmEngine');
-        }
-      } catch (err) {
-        console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
+
+    // CRITICAL: Clean up the old plugin BEFORE creating a new one
+    if (plugin) {
+      console.log('🔄 [wsManager] Destroying old plugin - core parameters changed...');
+      if (typeof plugin.destroy === 'function') {
+        plugin.destroy();
       }
-      analysisWasmEngine = null;
+      plugin = null;
+      
+      // Also clean up the analysis WASM engine if it exists
+      if (analysisWasmEngine) {
+        try {
+          if (typeof analysisWasmEngine.free === 'function') {
+            analysisWasmEngine.free();
+            console.log('🗑️ [wsManager] Freed analysisWasmEngine');
+          }
+        } catch (err) {
+          console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
+        }
+        analysisWasmEngine = null;
+      }
     }
-    
-    // Schedule post-destruction cleanup
-    setTimeout(() => {
-      console.log('⏱️ [wsManager] Post-destruction cleanup completed');
-    }, 50);
-  }
 
-  // 更新內部狀態
-  currentColorMap = colorMap;
-  currentFftSize = fftSamples;
-  currentWindowType = windowFunc;
-  
-  // [Fix] 確保 Peak 相關的全局狀態也被更新
-  // 這保證了 wsManager 的內部狀態與最後一次渲染的插件一致
-  currentPeakMode = peakMode;
-  currentPeakThreshold = peakThreshold;
+    // 更新內部狀態
+    currentColorMap = colorMap;
+    currentFftSize = fftSamples;
+    currentWindowType = windowFunc;
 
-  const noverlap = (overlapPercent !== null && overlapPercent !== undefined)
-    ? Math.floor(fftSamples * (overlapPercent / 100))
-    : null;
+    const noverlap = (overlapPercent !== null && overlapPercent !== undefined)
+      ? Math.floor(fftSamples * (overlapPercent / 100))
+      : null;
 
-  plugin = createSpectrogramPlugin({
-    colorMap,
-    height,
-    frequencyMin,
-    frequencyMax,
-    fftSamples,
-    noverlap,
-    windowFunc,
-    peakMode,
-    peakThreshold, // 這裡會傳遞正確的參數值
-  });
-
-  if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
-    plugin.on('colorMapChanged', onColorMapChanged);
-  }
-
-  ws.registerPlugin(plugin);
-
-  if (plugin && plugin.setSmoothMode) {
-    plugin.setSmoothMode(currentSmoothMode);
-  }
-
-  try {
-    plugin.render();
-    requestAnimationFrame(() => {
-      if (typeof onRendered === 'function') onRendered();
+    plugin = createSpectrogramPlugin({
+      colorMap,
+      height,
+      frequencyMin,
+      frequencyMax,
+      fftSamples,
+      noverlap,
+      windowFunc,
+      peakMode,
+      peakThreshold,
     });
-  } catch (err) {
-    console.warn('⚠️ Spectrogram render failed:', err);
+
+    if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
+      plugin.on('colorMapChanged', onColorMapChanged);
+    }
+
+    ws.registerPlugin(plugin);
+
+    if (plugin && plugin.setSmoothMode) {
+      plugin.setSmoothMode(currentSmoothMode);
+    }
+
+    try {
+      plugin.render();
+      requestAnimationFrame(() => {
+        if (typeof onRendered === 'function') onRendered();
+      });
+    } catch (err) {
+      console.warn('⚠️ Spectrogram render failed:', err);
+    }
+  } else {
+    // Only update non-critical parameters on existing plugin
+    console.log(`📊 [wsManager] Updating Peak parameters: Mode=${peakMode}, Threshold=${peakThreshold}`);
+    
+    currentPeakMode = peakMode;
+    currentPeakThreshold = peakThreshold;
+
+    // Update plugin options directly
+    if (plugin && plugin.options) {
+      plugin.options.peakMode = peakMode;
+      plugin.options.peakThreshold = peakThreshold;
+    }
+
+    // Re-render with updated parameters
+    try {
+      plugin.render();
+      requestAnimationFrame(() => {
+        if (typeof onRendered === 'function') onRendered();
+      });
+    } catch (err) {
+      console.warn('⚠️ Spectrogram render failed:', err);
+    }
   }
 }
 
