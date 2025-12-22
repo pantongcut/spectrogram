@@ -1097,9 +1097,6 @@ class h extends s {
 
         for (let channelIdx = 0; channelIdx < t.length; channelIdx++) {
             const channelData = t[channelIdx];
-            const specHeight = this._wasmEngine.get_num_filters() > 0 && this.scale !== "linear"
-                ? this._wasmEngine.get_num_filters()
-                : (this.fftSamples / 2);
             
             const canvasWidth = this.getWidth();
             let renderPixels = isSmooth ? channelData : this.resample(channelData);
