@@ -42,8 +42,8 @@ export function createSpectrogramPlugin({
   peakMode = false,
   peakThreshold = 0.4,
 }) {
-  // [DEBUG] 打印創建插件時的參數，確認 wsManager 收到的值是否正確
-  console.log(`[wsManager] Creating Plugin -> PeakMode: ${peakMode}, Threshold: ${peakThreshold}`);
+  // [DEBUG] 打印創建插件時的參數
+  // console.log(`[wsManager] Creating Plugin -> PeakMode: ${peakMode}, Threshold: ${peakThreshold}, Overlap: ${noverlap}`);
 
   const baseOptions = {
     labels: false,
@@ -81,37 +81,43 @@ export function replacePlugin(
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
 
-  // Check if only non-critical parameters changed (peakMode, peakThreshold)
-  // If so, update existing plugin instead of destroying it
+  // [FIX] 預先計算目標 overlap 點數，以便正確比對是否需要 Rebuild
+  const targetNoverlap = (overlapPercent !== null && overlapPercent !== undefined)
+      ? Math.floor(fftSamples * (overlapPercent / 100))
+      : null;
+
+  // 檢查是否需要重建插件 (Core parameters changed)
+  // 加入 targetNoverlap 比對，確保 Overlap 改變時會觸發重建
   const needsRebuild = 
     !plugin ||
     colorMap !== currentColorMap ||
     fftSamples !== currentFftSize ||
     windowFunc !== currentWindowType ||
-    frequencyMin * 1000 !== (plugin && plugin.options && plugin.options.frequencyMin) ||
-    frequencyMax * 1000 !== (plugin && plugin.options && plugin.options.frequencyMax);
+    // 檢查頻率範圍 (使用容差避免浮點數微小差異)
+    Math.abs(frequencyMin * 1000 - (plugin.options.frequencyMin || 0)) > 1 || 
+    Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1 ||
+    // [FIX] 關鍵修正：檢查 Overlap 是否改變
+    targetNoverlap !== (plugin.options.noverlap);
 
   if (needsRebuild) {
-    // Only destroy plugin if core parameters changed
+    // 銷毀舊插件前清理 DOM
     const oldCanvas = container.querySelector("canvas");
     if (oldCanvas) {
       oldCanvas.remove();
     }
 
-    // CRITICAL: Clean up the old plugin BEFORE creating a new one
     if (plugin) {
-      console.log('🔄 [wsManager] Destroying old plugin - core parameters changed...');
+      // console.log('🔄 [wsManager] Destroying old plugin - core parameters changed...');
       if (typeof plugin.destroy === 'function') {
         plugin.destroy();
       }
       plugin = null;
       
-      // Also clean up the analysis WASM engine if it exists
+      // 清理分析引擎
       if (analysisWasmEngine) {
         try {
           if (typeof analysisWasmEngine.free === 'function') {
             analysisWasmEngine.free();
-            console.log('🗑️ [wsManager] Freed analysisWasmEngine');
           }
         } catch (err) {
           console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
@@ -125,17 +131,14 @@ export function replacePlugin(
     currentFftSize = fftSamples;
     currentWindowType = windowFunc;
 
-    const noverlap = (overlapPercent !== null && overlapPercent !== undefined)
-      ? Math.floor(fftSamples * (overlapPercent / 100))
-      : null;
-
+    // 創建新插件 (使用上面計算好的 targetNoverlap)
     plugin = createSpectrogramPlugin({
       colorMap,
       height,
       frequencyMin,
       frequencyMax,
       fftSamples,
-      noverlap,
+      noverlap: targetNoverlap, 
       windowFunc,
       peakMode,
       peakThreshold,
@@ -160,24 +163,21 @@ export function replacePlugin(
       console.warn('⚠️ Spectrogram render failed:', err);
     }
   } else {
-    // Only update non-critical parameters on existing plugin
-    console.log(`📊 [wsManager] Updating Peak parameters: Mode=${peakMode}, Threshold=${peakThreshold}`);
+    // 如果只有 Peak 參數改變，不重建插件，直接更新參數
+    // console.log(`📊 [wsManager] Updating Peak parameters: Mode=${peakMode}, Threshold=${peakThreshold}`);
     
     currentPeakMode = peakMode;
     currentPeakThreshold = peakThreshold;
 
-    // Update plugin options directly
     if (plugin && plugin.options) {
       plugin.options.peakMode = peakMode;
       plugin.options.peakThreshold = peakThreshold;
     }
 
-    // Only update Peak overlay, not full spectrogram
     try {
       if (plugin && typeof plugin.updatePeakOverlay === 'function') {
         plugin.updatePeakOverlay();
       } else {
-        // Fallback to full render if updatePeakOverlay not available
         plugin.render();
       }
       requestAnimationFrame(() => {
@@ -288,7 +288,6 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
       }
     }
     
-    // console.log(`[WASM Engine] Creating SpectrogramEngine with FFT size: ${effectiveFFTSize}`);
     return new globalThis._spectrogramWasm.SpectrogramEngine(effectiveFFTSize, windowFunc, null);
   } catch (error) {
     console.warn('Failed to create WASM SpectrogramEngine:', error);
