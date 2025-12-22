@@ -1417,7 +1417,10 @@ class u extends a {
                         // 加載每個通道的數據到 WASM
                         for (let ch = 0; ch < numChannels; ch++) {
                             const channelData = this.decodedData.getChannelData(ch);
-                            this._wasmWaveformEngine.load_channel(ch, channelData);
+                            // Create a copy to avoid Rust aliasing issues
+                            // WASM requires exclusive ownership of the data
+                            const channelDataCopy = new Float32Array(channelData);
+                            this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
                         }
                         
                         // Audio data loaded to WaveformEngine

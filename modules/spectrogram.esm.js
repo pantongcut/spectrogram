@@ -434,7 +434,9 @@ class h extends s {
             
             // 設置色彩映射到 WASM
             if (this._colorMapUint && this._colorMapUint.length === 1024) {
-                this._wasmEngine.set_color_map(this._colorMapUint);
+                // Create a copy to avoid Rust aliasing issues
+                const colorMapCopy = new Uint32Array(this._colorMapUint);
+                this._wasmEngine.set_color_map(colorMapCopy);
             }
             
             // 設置光譜配置
@@ -524,7 +526,9 @@ class h extends s {
 
         // Push to WASM engine
         if (this._wasmEngine && this._wasmEngine.set_color_map) {
-            this._wasmEngine.set_color_map(this._activeColorMapUint);
+            // Create a copy to avoid Rust aliasing issues
+            const colorMapCopy = new Uint32Array(this._activeColorMapUint);
+            this._wasmEngine.set_color_map(colorMapCopy);
         }
 
         // Redraw components
@@ -690,7 +694,9 @@ class h extends s {
         
         // 恢復原始色圖到 WASM 引擎（以備下次顏色切換）
         if (this._wasmEngine && this._wasmEngine.set_color_map) {
-            this._wasmEngine.set_color_map(this._colorMapUint);
+            // Create a copy to avoid Rust aliasing issues
+            const colorMapCopy = new Uint32Array(this._colorMapUint);
+            this._wasmEngine.set_color_map(colorMapCopy);
             console.log('[Spectrogram] Original color map restored');
         }
     }
@@ -1216,7 +1222,9 @@ class h extends s {
         this._filterBankFlat = flatArray;
         
         if (this._wasmEngine) {
-            this._wasmEngine.load_filter_bank(flatArray, numFilters);
+            // Create a copy to avoid Rust aliasing issues
+            const filterBankCopy = new Float32Array(flatArray);
+            this._wasmEngine.load_filter_bank(filterBankCopy, numFilters);
         }
     }
     getWidth() {
@@ -1307,8 +1315,12 @@ async getFrequencies(t) {
                   , channelFrames = []
                   , channelPeakLists = [];
                 
+                // Create a copy of audio data to avoid Rust aliasing issues
+                // WASM Rust code requires exclusive ownership of the data
+                const audioDataCopy = new Float32Array(s);
+                
                 const fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
-                    s,
+                    audioDataCopy,
                     o,
                     this.gainDB,
                     this.rangeDB
