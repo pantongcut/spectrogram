@@ -439,12 +439,6 @@ class h extends s {
                 this.alpha
             );
             
-            // 設置光譜配置
-            this._wasmEngine.set_spectrum_config(
-                this.scale,
-                this.frequencyMin,
-                this.frequencyMax
-            );
             console.log('✅ [Spectrogram] WASM 引擎已初始化 - 使用預計算色彩映射渲染');
         });
 
@@ -764,11 +758,6 @@ class h extends s {
                 this.alpha
             );
             
-            this._wasmEngine.set_spectrum_config(
-                this.scale,
-                this.frequencyMin,
-                this.frequencyMax
-            );
             console.log('✅ [Spectrogram] WASM 引擎已重新初始化');
         });
     }
