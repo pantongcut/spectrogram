@@ -537,7 +537,10 @@ class h extends s {
         }
 
         // Push to WASM engine
-        if (this._wasmEngine && this._wasmEngine.set_color_map) {
+        // [FIX] 加入 !this._isRendering 檢查
+        // 當正在進行頻譜計算時，不要打擾 WASM 引擎更新色圖，避免 aliasing error。
+        // 反正上色是在 JS 端 (drawSpectrogram) 進行的，這裡跳過是安全的。
+        if (this._wasmEngine && this._wasmEngine.set_color_map && !this._isRendering) {
             try {
                 // Create a copy as Uint8Array to avoid Rust aliasing issues
                 const colorMapCopy = new Uint8Array(this._activeColorMapUint);
