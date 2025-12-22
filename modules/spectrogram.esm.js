@@ -576,12 +576,12 @@ class h extends s {
         this.erbFilteredSpectrum = null;
         this.logFilteredSpectrum = null;
         
-        // Release WASM engine reference without calling .free()
-        // Let wasm-bindgen's FinalizationRegistry handle deallocation
-        // This prevents "memory access out of bounds" errors from double-free
-        // or accessing memory while it's still being used
+        // Explicitly free WASM engine memory to prevent accumulation on reload
         if (this._wasmEngine) {
-            console.log('🗑️ [Spectrogram] Releasing WASM SpectrogramEngine reference (auto-cleanup)');
+            if (typeof this._wasmEngine.free === 'function') {
+                console.log('🗑️ [Spectrogram] Freeing WASM SpectrogramEngine memory');
+                this._wasmEngine.free();
+            }
             this._wasmEngine = null;
         }
         

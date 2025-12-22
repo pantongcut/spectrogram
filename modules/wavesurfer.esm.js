@@ -1407,6 +1407,10 @@ class u extends a {
                     // 現在加載音頻數據到 WASM
                     if (this._wasmWaveformEngine) {
                         const numChannels = this.decodedData.numberOfChannels;
+                        // Clear internal buffers before allocating new ones
+                        if (typeof this._wasmWaveformEngine.clear === 'function') {
+                            this._wasmWaveformEngine.clear();
+                        }
                         // 調整 WaveformEngine 的通道數
                         this._wasmWaveformEngine.resize(numChannels);
                         
@@ -1619,6 +1623,7 @@ class u extends a {
         this.unsubscribePlayerEvents(),
         this.timer.destroy(),
         this.renderer.destroy(),
+        this._wasmWaveformEngine && typeof this._wasmWaveformEngine.free === 'function' && (this._wasmWaveformEngine.free(), this._wasmWaveformEngine = null),
         super.destroy()
     }
 }
