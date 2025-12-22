@@ -675,27 +675,15 @@ impl SpectrogramEngine {
     }
 
     /// 釋放 WASM 記憶體而不銷毀引擎實例
-    /// 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+    /// 這是"軟釋放"模式：只清空數據緩衝區，不觸及 FFT 規劃器
     /// 避免雙重釋放錯誤和 JS GC 延遲
     #[wasm_bindgen]
     pub fn release_memory(&mut self) {
-        // 替換所有大向量為空向量
-        self.window_values = Vec::new();
-        self.scratch_buffer = Vec::new();
-        self._output_buffer = Vec::new();
-        self.filter_bank = Vec::new();
-        self.last_magnitude_buffer = Vec::new();
-        self.color_map = Vec::new();
-        self.image_buffer = Vec::new();
-
-        // 強制分配器將記憶體歸還給 OS
-        self.window_values.shrink_to_fit();
-        self.scratch_buffer.shrink_to_fit();
-        self._output_buffer.shrink_to_fit();
-        self.filter_bank.shrink_to_fit();
-        self.last_magnitude_buffer.shrink_to_fit();
-        self.color_map.shrink_to_fit();
-        self.image_buffer.shrink_to_fit();
+        // 只清空數據緩衝區，保留 FFT 規劃器完整性
+        self.filter_bank.clear();
+        self.last_magnitude_buffer.clear();
+        self.color_map.clear();
+        self.image_buffer.clear();
 
         // 重置計數器和配置
         self.num_filters = 0;
@@ -998,18 +986,16 @@ impl WaveformEngine {
     }
 
     /// 釋放 WASM 記憶體而不銷毀引擎實例
-    /// 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+    /// 這是"軟釋放"模式：清空所有向量內容
     /// 避免雙重釋放錯誤和 JS GC 延遲
     #[wasm_bindgen]
     pub fn release_memory(&mut self) {
-        // 清空所有通道
+        // 清空每個通道的數據
         for channel in &mut self.channels {
             channel.clear();
-            channel.shrink_to_fit();
         }
         // 清空通道向量本身
         self.channels.clear();
-        self.channels.shrink_to_fit();
     }
 }
 

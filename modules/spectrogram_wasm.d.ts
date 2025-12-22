@@ -31,7 +31,7 @@ export class SpectrogramEngine {
   get_global_max(): number;
   /**
    * 釋放 WASM 記憶體而不銷毀引擎實例
-   * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+   * 這是"軟釋放"模式：只清空數據緩衝區，不觸及 FFT 規劃器
    * 避免雙重釋放錯誤和 JS GC 延遲
    */
   release_memory(): void;
@@ -154,7 +154,7 @@ export class WaveformEngine {
   load_channel(channel_idx: number, data: Float32Array): void;
   /**
    * 釋放 WASM 記憶體而不銷毀引擎實例
-   * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+   * 這是"軟釋放"模式：清空所有向量內容
    * 避免雙重釋放錯誤和 JS GC 延遲
    */
   release_memory(): void;

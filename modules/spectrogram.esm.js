@@ -576,12 +576,11 @@ class h extends s {
         this.erbFilteredSpectrum = null;
         this.logFilteredSpectrum = null;
         
-        // Release WASM engine memory using soft release pattern
+        // Release WASM engine reference - let wasm-bindgen FinalizationRegistry handle cleanup
+        // Calling .release_memory() or .free() can cause memory access issues
+        // Just set to null and let JS GC + wasm-bindgen handle deallocation safely
         if (this._wasmEngine) {
-            if (typeof this._wasmEngine.release_memory === 'function') {
-                console.log('🗑️ [Spectrogram] Releasing WASM SpectrogramEngine memory');
-                this._wasmEngine.release_memory();
-            }
+            console.log('🗑️ [Spectrogram] Releasing WASM SpectrogramEngine reference');
             this._wasmEngine = null;
         }
         
