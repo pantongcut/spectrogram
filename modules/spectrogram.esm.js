@@ -536,10 +536,11 @@ class h extends s {
             this._activeColorMapUint[baseIdx + 3] = this._baseColorMapUint[baseIdx + 3];
         }
 
-        // Push to WASM engine
-        // [FIX] 加入 !this._isRendering 檢查
-        // 當正在進行頻譜計算時，不要打擾 WASM 引擎更新色圖，避免 aliasing error。
-        // 反正上色是在 JS 端 (drawSpectrogram) 進行的，這裡跳過是安全的。
+        // [FIX] REMOVE WASM set_color_map() call - it's redundant and causes aliasing errors
+        // The WASM engine does not use the colormap for 'compute_spectrogram_u8' (it returns 0-255 indices).
+        // Coloring is applied in JavaScript in 'drawSpectrogram()' using _activeColorMapUint.
+        // Keeping this call causes unnecessary concurrency issues and WASM aliasing errors during playback.
+        /*
         if (this._wasmEngine && this._wasmEngine.set_color_map && !this._isRendering) {
             try {
                 // Create a copy as Uint8Array to avoid Rust aliasing issues
@@ -560,6 +561,7 @@ class h extends s {
                 }
             }
         }
+        */
 
         // Redraw components
         this.drawColorMapBar();
