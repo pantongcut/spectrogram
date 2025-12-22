@@ -425,6 +425,10 @@ class h extends s {
         // [FIX] Prevent concurrent render calls with queue
         this._isRendering = false;
         this._pendingRender = false;
+        // [FIX] Track WASM errors and throttle recovery
+        this._wasmErrorCount = 0;
+        this._lastWasmErrorTime = 0;
+        this._wasmErrorThrottleMs = 1000; // Start with 1 second throttle
         this._wasmReady = wasmReady.then(() => {
             if (this._wasmInitialized) return;  // 防止重複初始化
             this._wasmInitialized = true;
@@ -539,8 +543,18 @@ class h extends s {
                 const colorMapCopy = new Uint8Array(this._activeColorMapUint);
                 this._wasmEngine.set_color_map(colorMapCopy);
             } catch (e) {
-                // [FIX] Handle WASM aliasing errors gracefully
-                console.warn('[Spectrogram] Error updating color map in WASM:', e);
+                // [FIX] Detect aliasing errors in color map and reinitialize
+                if (e.message && e.message.includes('aliasing')) {
+                    const now = Date.now();
+                    const timeSinceLastError = now - this._lastWasmErrorTime;
+                    
+                    if (timeSinceLastError > this._wasmErrorThrottleMs) {
+                        console.error('[Spectrogram] WASM aliasing error in color map, reinitializing...');
+                        this._reinitWasmEngine();
+                    }
+                } else {
+                    console.warn('[Spectrogram] Error updating color map in WASM:', e.message);
+                }
             }
         }
 
@@ -761,6 +775,45 @@ class h extends s {
         }, this.wrapper)),
         
         this.wrapper.addEventListener("click", this._onWrapperClick)
+    }
+
+    // [FIX] Reinitialize WASM engine when it becomes corrupted due to aliasing errors
+    _reinitWasmEngine() {
+        console.log('[Spectrogram] Reinitializing WASM engine due to aliasing errors');
+        this._wasmInitialized = false;
+        this._wasmEngine = null;
+        
+        // Reset error tracking
+        this._wasmErrorCount = 0;
+        this._lastWasmErrorTime = 0;
+        
+        // Reinitialize
+        this._wasmReady = wasmReady.then(() => {
+            if (this._wasmInitialized) return;
+            this._wasmInitialized = true;
+            
+            this._wasmEngine = new SpectrogramEngine(
+                this.fftSamples,
+                this.windowFunc,
+                this.alpha
+            );
+            
+            if (this._colorMapUint && this._colorMapUint.length === 1024) {
+                try {
+                    const colorMapCopy = new Uint8Array(this._colorMapUint);
+                    this._wasmEngine.set_color_map(colorMapCopy);
+                } catch (e) {
+                    console.warn('[Spectrogram] Error setting initial color map in WASM:', e);
+                }
+            }
+            
+            this._wasmEngine.set_spectrum_config(
+                this.scale,
+                this.frequencyMin,
+                this.frequencyMax
+            );
+            console.log('✅ [Spectrogram] WASM 引擎已重新初始化');
+        });
     }
 
     // Helper method to draw a preview canvas for a color map with its defaults applied
@@ -1401,8 +1454,30 @@ async getFrequencies(t) {
                         this.rangeDB
                     );
                 } catch (wasmError) {
-                    // [FIX] If WASM aliasing error occurs, skip this render entirely
-                    console.error('[Spectrogram] WASM compute error (aliasing):', wasmError.message);
+                    // [FIX] Detect aliasing errors and reinitialize WASM
+                    if (wasmError.message && wasmError.message.includes('aliasing')) {
+                        const now = Date.now();
+                        const timeSinceLastError = now - this._lastWasmErrorTime;
+                        
+                        // Only reinit if enough time has passed (exponential backoff)
+                        if (timeSinceLastError > this._wasmErrorThrottleMs) {
+                            this._wasmErrorCount++;
+                            this._lastWasmErrorTime = now;
+                            
+                            // Increase throttle with exponential backoff (max 10 seconds)
+                            this._wasmErrorThrottleMs = Math.min(10000, this._wasmErrorThrottleMs * 1.5);
+                            
+                            console.error('[Spectrogram] WASM aliasing error detected, reinitializing engine...');
+                            
+                            // Reinitialize the WASM engine to clear corrupted state
+                            this._reinitWasmEngine();
+                        } else {
+                            console.warn('[Spectrogram] WASM error throttled, waiting before retry');
+                        }
+                    } else {
+                        console.error('[Spectrogram] WASM compute error:', wasmError.message);
+                    }
+                    
                     audioDataCopy.fill(0);
                     // Return null to indicate render failure - let render() handle it gracefully
                     return null;
