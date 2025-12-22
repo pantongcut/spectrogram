@@ -422,8 +422,9 @@ class h extends s {
         // WASM integration
         this._wasmEngine = null;
         this._wasmInitialized = false;
-        // [FIX] Prevent concurrent render calls
+        // [FIX] Prevent concurrent render calls with queue
         this._isRendering = false;
+        this._pendingRender = false;
         this._wasmReady = wasmReady.then(() => {
             if (this._wasmInitialized) return;  // 防止重複初始化
             this._wasmInitialized = true;
@@ -546,8 +547,13 @@ class h extends s {
         // Redraw components
         this.drawColorMapBar();
         
-        if (this.lastRenderData) {
-            this.drawSpectrogram(this.lastRenderData);
+        // [FIX] Only redraw if we have valid cached data
+        if (this.lastRenderData && Array.isArray(this.lastRenderData) && this.lastRenderData.length > 0) {
+            try {
+                this.drawSpectrogram(this.lastRenderData);
+            } catch (e) {
+                console.warn('[Spectrogram] Error redrawing after color map update:', e);
+            }
         }
     }
     
@@ -954,13 +960,15 @@ class h extends s {
     async render() {
         var t;
         
-        // [FIX] Prevent concurrent render calls to avoid WASM aliasing issues
+        // [FIX] Queue renders instead of skipping - set flag to indicate pending render
         if (this._isRendering) {
-            console.warn('[Spectrogram] Render already in progress, skipping');
+            this._pendingRender = true;
             return;
         }
         
         this._isRendering = true;
+        this._pendingRender = false;
+        
         try {
             if (this.frequenciesDataUrl)
                 this.loadFrequenciesData(this.frequenciesDataUrl);
@@ -968,13 +976,20 @@ class h extends s {
                 const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
                 if (e) {
                     const frequencies = await this.getFrequencies(e);
-                    if (frequencies) {
+                    // [FIX] Only draw if frequencies is valid (not null/undefined/empty)
+                    if (frequencies && Array.isArray(frequencies) && frequencies.length > 0) {
                         this.drawSpectrogram(frequencies);
                     }
                 }
             }
         } finally {
             this._isRendering = false;
+            // [FIX] If a render was requested while we were busy, do it now
+            if (this._pendingRender) {
+                this._pendingRender = false;
+                // Use setTimeout to avoid stack overflow
+                setTimeout(() => this.render(), 0);
+            }
         }
     }
 
@@ -988,9 +1003,28 @@ class h extends s {
     }
 
     drawSpectrogram(t) {
+        // [FIX] Validate input data before drawing
+        if (!t || (Array.isArray(t) && t.length === 0)) {
+            console.warn('[Spectrogram] drawSpectrogram called with invalid data, skipping');
+            return;
+        }
+        
         this.lastRenderData = t;
         if (!this.wrapper || !this.canvas) return;
-        isNaN(t[0][0]) || (t = [t]);
+        
+        // [FIX] Safely handle data format detection
+        if (Array.isArray(t) && Array.isArray(t[0]) && typeof t[0][0] === 'number') {
+            if (!isNaN(t[0][0])) {
+                // Data is valid, continue
+            } else {
+                console.warn('[Spectrogram] Invalid frequency data detected');
+                return;
+            }
+        }
+        
+        if (!Array.isArray(t[0])) {
+            t = [t];
+        }
         
         this.wrapper.style.height = this.height * t.length + "px";
         this.canvas.width = this.getWidth();
@@ -1367,12 +1401,11 @@ async getFrequencies(t) {
                         this.rangeDB
                     );
                 } catch (wasmError) {
-                    // [FIX] If WASM aliasing error occurs, log and use fallback
-                    console.error('[Spectrogram] WASM compute error (aliasing):', wasmError);
-                    console.warn('[Spectrogram] Using fallback rendering (this may be slow)');
+                    // [FIX] If WASM aliasing error occurs, skip this render entirely
+                    console.error('[Spectrogram] WASM compute error (aliasing):', wasmError.message);
                     audioDataCopy.fill(0);
-                    // Return empty frequencies to prevent further errors
-                    return h;
+                    // Return null to indicate render failure - let render() handle it gracefully
+                    return null;
                 }
                 
                 // [FIX] Clear the audioDataCopy reference immediately after WASM processing
