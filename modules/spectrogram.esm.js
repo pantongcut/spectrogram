@@ -1306,7 +1306,7 @@ class h extends s {
         this._filterBankMatrix = null;
         this._filterBankFlat = null;
     }
-async getFrequencies(t) {
+async getFrequencies(t, isRetry = false) {
         // 檢查 this.options 是否為 null
         if (!this.options || !t) {
             return;
@@ -1318,9 +1318,10 @@ async getFrequencies(t) {
         var e, s;
         const r = this.fftSamples
           , i = (null !== (e = this.options.splitChannels) && void 0 !== e ? e : null === (s = this.wavesurfer) || void 0 === s ? void 0 : s.options.splitChannels) ? t.numberOfChannels : 1;
-        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2,
-        !t)
+        
+        if (this.frequencyMax = this.frequencyMax || t.sampleRate / 2, !t)
             return;
+            
         this.buffer = t;
         const n = t.sampleRate
           , h = [];
@@ -1331,15 +1332,15 @@ async getFrequencies(t) {
             o = Math.max(minOverlap, Math.round(r - e));
         }
         
-        // Wait for WASM to be ready
+        // Wait for WASM to be ready (如果在重試模式，這裡會等待新的引擎初始化完畢)
         await this._wasmReady;
         
-        // --- Filter Bank Logic (保持不變) ---
+        // --- Filter Bank Logic ---
         const minBinFull = Math.floor(this.frequencyMin * r / n);
         const maxBinFull = Math.ceil(this.frequencyMax * r / n);
-        const binRangeSize = maxBinFull - minBinFull;
+        const binRangeSize = maxBinFull - minBinFull; // [保留原代碼] 雖然看似未被使用
 
-        let filterBankMatrix = null;
+        let filterBankMatrix = null; // [保留原代碼] 雖然看似未被使用
         const currentFilterBankKey = `${this.scale}:${n}:${this.frequencyMin}:${this.frequencyMax}`;
         
         if (this.scale !== "linear") {
@@ -1373,120 +1374,124 @@ async getFrequencies(t) {
 
         this.peakBandArrayPerChannel = [];
         
-            let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-            const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+        let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
+        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
-            for (let e = 0; e < i; e++) {
-                const s = t.getChannelData(e)
-                  , channelFrames = []
-                  , channelPeakLists = [];
-                
-                // Create a copy of audio data to avoid Rust aliasing issues
-                // WASM Rust code requires exclusive ownership of the data
-                const audioDataCopy = new Float32Array(s);
-                
-                let fullU8Spectrum;
-                try {
-                    // [FIX] Wrap WASM call with error handling for aliasing issues
-                    fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
-                        audioDataCopy,
-                        o,
-                        this.gainDB,
-                        this.rangeDB
-                    );
-                } catch (wasmError) {
-                    // [FIX] Detect aliasing errors and reinitialize WASM
-                    if (wasmError.message && wasmError.message.includes('aliasing')) {
-                        const now = Date.now();
-                        const timeSinceLastError = now - this._lastWasmErrorTime;
-                        
-                        // Only reinit if enough time has passed (exponential backoff)
-                        if (timeSinceLastError > this._wasmErrorThrottleMs) {
-                            this._wasmErrorCount++;
-                            this._lastWasmErrorTime = now;
-                            
-                            // Increase throttle with exponential backoff (max 10 seconds)
-                            this._wasmErrorThrottleMs = Math.min(10000, this._wasmErrorThrottleMs * 1.5);
-                            
-                            console.error('[Spectrogram] WASM aliasing error detected, reinitializing engine...');
-                            
-                            // Reinitialize the WASM engine to clear corrupted state
-                            this._reinitWasmEngine();
-                        } else {
-                            console.warn('[Spectrogram] WASM error throttled, waiting before retry');
-                        }
-                    } else {
-                        console.error('[Spectrogram] WASM compute error:', wasmError.message);
-                    }
+        for (let e = 0; e < i; e++) {
+            const s = t.getChannelData(e)
+              , channelFrames = []
+              , channelPeakLists = [];
+            
+            // Create a copy of audio data to avoid Rust aliasing issues
+            const audioDataCopy = new Float32Array(s);
+            
+            let fullU8Spectrum;
+            try {
+                // [FIX] Wrap WASM call with error handling for aliasing issues
+                fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
+                    audioDataCopy,
+                    o,
+                    this.gainDB,
+                    this.rangeDB
+                );
+            } catch (wasmError) {
+                // [FIX] 靜默處理第一次的 Aliasing Error 並自動重試
+                if (wasmError.message && wasmError.message.includes('aliasing')) {
                     
-                    audioDataCopy.fill(0);
-                    // Return null to indicate render failure - let render() handle it gracefully
-                    return null;
+                    // 如果這還不是重試嘗試 (isRetry === false)，則執行自動修復
+                    if (!isRetry) {
+                        console.warn('⚠️ [Spectrogram] 初始化載入衝突，正在自動修復引擎...');
+                        
+                        // 強制重置引擎
+                        this._reinitWasmEngine();
+                        // 釋放本次的內存副本
+                        audioDataCopy.fill(0);
+                        
+                        // 等待新引擎就緒
+                        await this._wasmReady;
+                        
+                        // 遞歸調用：使用新引擎重新嘗試計算
+                        console.log('🔄 [Spectrogram] 重新嘗試計算頻譜...');
+                        return this.getFrequencies(t, true);
+                    }
+
+                    // 如果已經是重試狀態還失敗，則執行原本的報錯邏輯
+                    const now = Date.now();
+                    const timeSinceLastError = now - this._lastWasmErrorTime;
+                    
+                    if (timeSinceLastError > this._wasmErrorThrottleMs) {
+                        this._wasmErrorCount++;
+                        this._lastWasmErrorTime = now;
+                        this._wasmErrorThrottleMs = Math.min(10000, this._wasmErrorThrottleMs * 1.5);
+                        
+                        console.error('[Spectrogram] WASM aliasing error persisted:', wasmError.message);
+                        this._reinitWasmEngine();
+                    }
+                } else {
+                    console.error('[Spectrogram] WASM compute error:', wasmError.message);
                 }
                 
-                // [FIX] Clear the audioDataCopy reference immediately after WASM processing
                 audioDataCopy.fill(0);
+                return null;
+            }
+            
+            // [FIX] Clear the audioDataCopy reference immediately
+            audioDataCopy.fill(0);
 
-                const globalMaxLinear = this._wasmEngine.get_global_max();
-                const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
+            const globalMaxLinear = this._wasmEngine.get_global_max();
+            const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
 
-                // 獲取線性幅度用於全局噪音過濾
-                const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
-                
-                const numFilters = this._wasmEngine.get_num_filters();
-                const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
-                const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
-                
-                for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
-                    const frameStartIdx = frameIdx * outputSize;
-                    // [FIX] Copy subarray instead of creating a view to avoid aliasing
-                    const outputFrame = new Uint8Array(fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize));
-                    channelFrames.push(outputFrame);
+            const frameMaxMagnitudes = this._wasmEngine.get_peak_magnitudes(0.0);
+            
+            const numFilters = this._wasmEngine.get_num_filters();
+            const outputSize = this.scale !== "linear" && numFilters > 0 ? numFilters : (this.fftSamples / 2);
+            const numFrames = Math.floor(fullU8Spectrum.length / outputSize);
+            
+            for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
+                const frameStartIdx = frameIdx * outputSize;
+                const outputFrame = new Uint8Array(fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize));
+                channelFrames.push(outputFrame);
 
-                    if (this.options && this.options.peakMode) {
-                        const localMaxLinear = frameMaxMagnitudes[frameIdx];
+                if (this.options && this.options.peakMode) {
+                    const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
-                        // [Rule 1] 全局噪音過濾 (-24dB)
-                        // 低於此強度的片段直接略過
-                        if (localMaxLinear < noiseFloorLinear) {
-                            channelPeakLists.push([]); 
-                            continue; 
-                        }
+                    // [Rule 1] 全局噪音過濾 (-24dB)
+                    if (localMaxLinear < noiseFloorLinear) {
+                        channelPeakLists.push([]); 
+                        continue; 
+                    }
 
-                        // [Rule 2] 局部自適應閾值
-                        let localMaxU8 = 0;
+                    // [Rule 2] 局部自適應閾值
+                    let localMaxU8 = 0;
+                    for(let k=0; k < outputSize; k++) {
+                        if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
+                    }
+
+                    const cutoffU8 = localMaxU8 * effectiveThreshold;
+
+                    const framePeaks = [];
+                    
+                    if (localMaxU8 > 10) { 
                         for(let k=0; k < outputSize; k++) {
-                            if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
-                        }
-
-                        // [關鍵修改] 使用調整後的 effectiveThreshold 計算截止線
-                        // 例如：Slider 40% -> effectiveThreshold 約 0.7 -> 只保留最強的 30% 區域
-                        const cutoffU8 = localMaxU8 * effectiveThreshold;
-
-                        const framePeaks = [];
-                        
-                        // 優化：如果 localMaxU8 太小（例如全黑背景中的微小波動），直接忽略
-                        if (localMaxU8 > 10) { 
-                            for(let k=0; k < outputSize; k++) {
-                                if (outputFrame[k] >= cutoffU8) {
-                                    framePeaks.push({
-                                        bin: k,
-                                        magnitude: outputFrame[k],
-                                        isMainPeak: outputFrame[k] === localMaxU8
-                                    });
-                                }
+                            if (outputFrame[k] >= cutoffU8) {
+                                framePeaks.push({
+                                    bin: k,
+                                    magnitude: outputFrame[k],
+                                    isMainPeak: outputFrame[k] === localMaxU8
+                                });
                             }
                         }
-                        channelPeakLists.push(framePeaks);
                     }
+                    channelPeakLists.push(framePeaks);
                 }
-                
-                if (this.options && this.options.peakMode) {
-                    this.peakBandArrayPerChannel.push(channelPeakLists);
-                }
-                h.push(channelFrames)
             }
-            return h
+            
+            if (this.options && this.options.peakMode) {
+                this.peakBandArrayPerChannel.push(channelPeakLists);
+            }
+            h.push(channelFrames)
+        }
+        return h
     }
     
     freqType(t) {
