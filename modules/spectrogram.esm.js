@@ -576,13 +576,10 @@ class h extends s {
         this.erbFilteredSpectrum = null;
         this.logFilteredSpectrum = null;
         
-        // Release WASM engine reference - let wasm-bindgen FinalizationRegistry handle cleanup
-        // Calling .release_memory() or .free() can cause memory access issues
-        // Just set to null and let JS GC + wasm-bindgen handle deallocation safely
-        if (this._wasmEngine) {
-            console.log('🗑️ [Spectrogram] Releasing WASM SpectrogramEngine reference');
-            this._wasmEngine = null;
-        }
+        // Clear caches but keep WASM engine for reuse
+        // Let wasm-bindgen FinalizationRegistry handle cleanup when truly destroyed
+        // Setting to null prevents reuse when loading new files
+        // this._wasmEngine = null;
         
         // Clean up event listeners for color bar and dropdown
         if (this._colorBarClickHandler) {
@@ -924,10 +921,6 @@ class h extends s {
     }
     async render() {
         var t;
-        // 如果引擎已被釋放，停止渲染
-        if (!this._wasmEngine) {
-            return;
-        }
         if (this.frequenciesDataUrl)
             this.loadFrequenciesData(this.frequenciesDataUrl);
         else {
@@ -1240,10 +1233,13 @@ class h extends s {
         this._filterBankFlat = null;
     }
 async getFrequencies(t) {
-        // 檢查 this.options 是否為 null 或 WASM engine 是否已被釋放
-        if (!this.options || !t || !this._wasmEngine) {
+        // 檢查 this.options 是否為 null
+        if (!this.options || !t) {
             return;
         }
+        
+        // 清除舊緩存以防止內存泄漏（當加載新文件時）
+        this.peakBandArrayPerChannel = [];
         
         var e, s;
         const r = this.fftSamples
