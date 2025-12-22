@@ -172,14 +172,19 @@ export function replacePlugin(
       plugin.options.peakThreshold = peakThreshold;
     }
 
-    // Re-render with updated parameters
+    // Only update Peak overlay, not full spectrogram
     try {
-      plugin.render();
+      if (plugin && typeof plugin.updatePeakOverlay === 'function') {
+        plugin.updatePeakOverlay();
+      } else {
+        // Fallback to full render if updatePeakOverlay not available
+        plugin.render();
+      }
       requestAnimationFrame(() => {
         if (typeof onRendered === 'function') onRendered();
       });
     } catch (err) {
-      console.warn('⚠️ Spectrogram render failed:', err);
+      console.warn('⚠️ Peak overlay update failed:', err);
     }
   }
 }

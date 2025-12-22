@@ -1427,6 +1427,72 @@ async getFrequencies(t) {
                 }
             }
     }
+
+    /// 只更新Peak overlay，不重新計算頻譜 (用於快速更新Peak Threshold)
+    updatePeakOverlay() {
+        if (!this.lastRenderData || !this.options || !this.options.peakMode) {
+            return;
+        }
+        
+        // 只有在有Peak數據時才重繪
+        if (!this.peakBandArrayPerChannel || this.peakBandArrayPerChannel.length === 0) {
+            return;
+        }
+
+        const canvasCtx = this.spectrCc;
+        if (!canvasCtx) return;
+
+        const canvasWidth = this.getWidth();
+        const t = this.lastRenderData;
+        const numChannels = Array.isArray(t[0]) ? t.length : 1;
+        
+        // Get updated effective threshold with new peakThreshold
+        const sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
+        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+
+        // Redraw Peak overlay lines only
+        canvasCtx.strokeStyle = "rgb(255, 192, 0)";
+        canvasCtx.lineWidth = 1.5;
+
+        for (let channelIdx = 0; channelIdx < numChannels; channelIdx++) {
+            const startY = channelIdx * this.height;
+            
+            if (this.peakBandArrayPerChannel[channelIdx]) {
+                const peaks = this.peakBandArrayPerChannel[channelIdx];
+                const xStep = canvasWidth / peaks.length;
+
+                canvasCtx.beginPath();
+                let isFirstPoint = true;
+                
+                for (let i = 0; i < peaks.length; i++) {
+                    const framePeaks = peaks[i];
+                    if (!framePeaks || framePeaks.length === 0) continue;
+
+                    for (let peakIdx = 0; peakIdx < framePeaks.length; peakIdx++) {
+                        const freq = framePeaks[peakIdx];
+                        if (freq < effectiveThreshold) continue;
+
+                        const freqHz = freq * 1000;
+                        const viewMinHz = this.frequencyMin || 0;
+                        const viewMaxHz = this.frequencyMax || 64000;
+                        const freqNormalized = (freqHz - viewMinHz) / (viewMaxHz - viewMinHz);
+                        
+                        const y = startY + this.height * (1 - freqNormalized);
+                        const x = i * xStep + xStep / 2;
+                        
+                        if (isFirstPoint) {
+                            canvasCtx.moveTo(x, y);
+                            isFirstPoint = false;
+                        } else {
+                            canvasCtx.lineTo(x, y);
+                        }
+                    }
+                }
+                canvasCtx.stroke();
+            }
+        }
+    }
+
     resample(t) {
         const outW = this.getWidth()
           , out = []
