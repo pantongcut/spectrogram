@@ -434,8 +434,8 @@ class h extends s {
             
             // 設置色彩映射到 WASM
             if (this._colorMapUint && this._colorMapUint.length === 1024) {
-                // Create a copy to avoid Rust aliasing issues
-                const colorMapCopy = new Uint32Array(this._colorMapUint);
+                // Create a copy as Uint8Array to avoid Rust aliasing issues
+                const colorMapCopy = new Uint8Array(this._colorMapUint);
                 this._wasmEngine.set_color_map(colorMapCopy);
             }
             
@@ -526,8 +526,8 @@ class h extends s {
 
         // Push to WASM engine
         if (this._wasmEngine && this._wasmEngine.set_color_map) {
-            // Create a copy to avoid Rust aliasing issues
-            const colorMapCopy = new Uint32Array(this._activeColorMapUint);
+            // Create a copy as Uint8Array to avoid Rust aliasing issues
+            const colorMapCopy = new Uint8Array(this._activeColorMapUint);
             this._wasmEngine.set_color_map(colorMapCopy);
         }
 
@@ -683,7 +683,12 @@ class h extends s {
         
         // 將濾鏡後的色圖應用到 WASM 引擎
         if (this._wasmEngine && this._wasmEngine.set_color_map) {
-            this._wasmEngine.set_color_map(filtered);
+            // Create a copy as Uint8Array to avoid Rust aliasing issues
+            const filteredU8 = new Uint8Array(256 * 4);
+            for (let i = 0; i < 256 * 4; i++) {
+                filteredU8[i] = filtered[i];
+            }
+            this._wasmEngine.set_color_map(filteredU8);
             console.log('[Spectrogram] Color map applied to WASM engine');
         }
         
@@ -694,8 +699,8 @@ class h extends s {
         
         // 恢復原始色圖到 WASM 引擎（以備下次顏色切換）
         if (this._wasmEngine && this._wasmEngine.set_color_map) {
-            // Create a copy to avoid Rust aliasing issues
-            const colorMapCopy = new Uint32Array(this._colorMapUint);
+            // Create a copy as Uint8Array to avoid Rust aliasing issues
+            const colorMapCopy = new Uint8Array(this._colorMapUint);
             this._wasmEngine.set_color_map(colorMapCopy);
             console.log('[Spectrogram] Original color map restored');
         }
