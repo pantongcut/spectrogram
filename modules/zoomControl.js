@@ -148,6 +148,26 @@ function applyZoom() {
     if (typeof onAfterZoom === 'function') onAfterZoom();    
     updateZoomButtons();
   }
+  
+  // [New] 專供 Resize 拖曳期間使用：只更新數值狀態，不觸發 ws.zoom() 重繪
+  // 解決 Resize 時 Spectrogram 變黑/效能問題
+  function syncZoomLevelNoRender() {
+    computeMinZoomLevel(); // 根據新的容器寬度重新計算 Min
+    const maxZoom = computeMaxZoomLevel();
+    
+    // 如果之前是處於 Fit-To-Window 狀態 (zoomLevel 接近舊的 min)，
+    // 或者現在 zoomLevel 比新的 min 還小，就強制貼合新的 min
+    if (Math.abs(zoomLevel - minZoomLevel) < 0.1 || zoomLevel < minZoomLevel) {
+      zoomLevel = minZoomLevel;
+      // 在 Fit 模式下，因為 CSS 設為 100%，DOM 已經跟隨變動，無需設定 container.style.width
+    } else {
+      // 在 Zoom-In 模式下，雖然我們不重繪 Spectrogram (依靠拉伸)，
+      // 但我們需要讓 zoomLevel 變數保持不變，這樣 Axis 繪製才會正確
+      zoomLevel = Math.min(Math.max(zoomLevel, minZoomLevel), maxZoom);
+    }
+    
+    updateZoomButtons();
+  }
 
   function setZoomLevel(newZoom) {
     computeMinZoomLevel();
@@ -340,9 +360,9 @@ function applyZoom() {
     applyZoom,
     updateZoomButtons,
     getZoomLevel: () => zoomLevel,
-    // [New] 判斷是否處於最小縮放(適應視窗)狀態
     isAtMinZoom: () => Math.abs(zoomLevel - minZoomLevel) < 0.1, 
     setZoomLevel,
     resetZoomState,
+    syncZoomLevelNoRender, // Export new function
   };
 }

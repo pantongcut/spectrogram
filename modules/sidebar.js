@@ -261,6 +261,9 @@ function initSidebarResizer() {
       // Remove event listeners
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      
+      // Dispatch event to notify resize end (trigger sharp redraw)
+      sidebar.dispatchEvent(new CustomEvent('sidebar-resize-end', { bubbles: true }));
     };
 
     // Add event listeners

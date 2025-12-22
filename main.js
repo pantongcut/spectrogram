@@ -545,24 +545,31 @@ sidebarElem.addEventListener('sidebar-toggle', () => {
     }
   }, 310);
 });
-// [New] 監聽 Sidebar 拖動事件，即時更新時間軸和 Spectrogram 寬度
+
+// [New] 監聽 Sidebar 拖動事件
+// 策略：拖動時只更新變數與軸線，讓 Spectrogram 透過 CSS 自動拉伸 (避免變黑/卡頓)
 sidebarElem.addEventListener('sidebar-resizing', () => {
   containerWidth = container.clientWidth;
   
-  // 檢查是否處於「適應視窗」模式 (MinZoom)
-  if (zoomControl.isAtMinZoom()) {
-    // 強制重新計算 MinZoom 並應用 (維持 100% 寬度)
-    zoomControl.resetZoomState();
-  } else {
-    // 否則僅更新按鈕狀態和網格 (避免縮放比例跑掉)
-    zoomControl.applyZoom(); 
-  }
+  // 只同步 Zoom Level 數值，不觸發 ws.zoom()
+  zoomControl.syncZoomLevelNoRender();
   
-  // 重新繪製時間軸 (這會使用 axisRenderer.js 的 100% 邏輯)
+  // 重新繪製時間軸 (讓 Grid 跟隨)
   renderAxes();
   
   freqHoverControl?.refreshHover();
   autoIdControl?.updateMarkers();
+});
+
+// [New] 監聽 Sidebar 拖動結束
+// 策略：拖動結束後，才執行一次高品質重繪
+sidebarElem.addEventListener('sidebar-resize-end', () => {
+  if (zoomControl.isAtMinZoom()) {
+    zoomControl.resetZoomState();
+  } else {
+    zoomControl.applyZoom();
+  }
+  renderAxes();
 });
 
 const tagControl = initTagControl();
