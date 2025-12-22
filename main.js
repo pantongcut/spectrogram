@@ -608,15 +608,15 @@ if (toggleSmoothSwitch) {
 }
 
 async function applySampleRate(rate, reloadFile = true) {
-const prevRate = currentSampleRate;
-currentSampleRate = rate;
-const maxFreq = currentSampleRate / 2000;
+  const prevRate = currentSampleRate;
+  currentSampleRate = rate;
+  const maxFreq = currentSampleRate / 2000;
   // Displayed max should reflect Time Expansion mode (UI shows values *10)
   const dispMax = getTimeExpansionMode() ? (maxFreq * 10) : maxFreq;
   freqMaxInput.max = dispMax;
   freqMinInput.max = dispMax;
 
-const isManual = selectedSampleRate !== 'auto';
+  const isManual = selectedSampleRate !== 'auto';
 
   // When updating displayed inputs, convert back and forth between display
   // values and internal kHz values. Displayed values are multiplied by 10 in
@@ -637,37 +637,39 @@ const isManual = selectedSampleRate !== 'auto';
   currentFreqMax = parseFloat(freqMaxInput.value) / divisor;
   currentFreqMin = parseFloat(freqMinInput.value) / divisor;
 
-if (getWavesurfer()) {
-getWavesurfer().options.sampleRate = currentSampleRate;
-if (reloadFile) {
-const idx = getCurrentIndex();
-if (idx >= 0) {
-await fileLoaderControl.loadFileAtIndex(idx);
-}
-}
-}
-freqHoverControl?.hideHover();
-replacePlugin(
-getEffectiveColorMap(),
-spectrogramHeight,
-currentFreqMin,
-currentFreqMax,
-getOverlapPercent(),
-() => {
-duration = getWavesurfer().getDuration();
-    zoomControl.applyZoom();
-    renderAxes();
-    freqHoverControl?.refreshHover();
-    autoIdControl?.updateMarkers();
-    updateSpectrogramSettingsText();
-    restoreImageEnhancement(); // ✅ Restore Brightness/Contrast/Gain
-  },
-  undefined,  // fftSamples (use default)
-  undefined,  // windowFunc (use default)
-  isPeakModeActive(),  // peakMode (use default)
-  getPeakThreshold(),  // peakThreshold (use default)
-  handleColorMapChange  // onColorMapChanged callback
-);
+  if (getWavesurfer()) {
+    getWavesurfer().options.sampleRate = currentSampleRate;
+    if (reloadFile) {
+      const idx = getCurrentIndex();
+      if (idx >= 0) {
+        await fileLoaderControl.loadFileAtIndex(idx);
+      }
+    }
+  }
+  freqHoverControl?.hideHover();
+  replacePlugin(
+    getEffectiveColorMap(),
+    spectrogramHeight,
+    currentFreqMin,
+    currentFreqMax,
+    getOverlapPercent(),
+    () => {
+      duration = getWavesurfer().getDuration();
+      if (getWavesurfer().getDecodedData()) {
+          zoomControl.applyZoom();
+      }
+      renderAxes();
+      freqHoverControl?.refreshHover();
+      autoIdControl?.updateMarkers();
+      updateSpectrogramSettingsText();
+      restoreImageEnhancement(); // ✅ Restore Brightness/Contrast/Gain
+    },
+    undefined, // fftSamples (use default)
+    undefined, // windowFunc (use default)
+    isPeakModeActive(), // peakMode (use default)
+    getPeakThreshold(), // peakThreshold (use default)
+    handleColorMapChange // onColorMapChanged callback
+  );
 }
 
 async function handleSampleRate(rate) {
@@ -1268,7 +1270,9 @@ function handleFftSize(size) {
     getOverlapPercent(),
     () => {
       duration = getWavesurfer().getDuration();
-      zoomControl.applyZoom();
+      if (getWavesurfer().getDecodedData()) {
+          zoomControl.applyZoom();
+      }
       renderAxes();
       freqHoverControl?.refreshHover();
       autoIdControl?.updateMarkers();
@@ -1295,7 +1299,9 @@ function handleWindowType(type) {
     getOverlapPercent(),
     () => {
       duration = getWavesurfer().getDuration();
-      zoomControl.applyZoom();
+      if (getWavesurfer().getDecodedData()) {
+          zoomControl.applyZoom();
+      }
       renderAxes();
       freqHoverControl?.refreshHover();
       autoIdControl?.updateMarkers();
@@ -1311,84 +1317,88 @@ function handleWindowType(type) {
 }
 
 function handleOverlapChange() {
-const colorMap = getEffectiveColorMap();
-freqHoverControl?.hideHover();
-replacePlugin(
-colorMap,
-spectrogramHeight,
-currentFreqMin,
-currentFreqMax,
-getOverlapPercent(),
-() => {
-freqHoverControl?.refreshHover();
-autoIdControl?.updateMarkers();
-duration = getWavesurfer().getDuration();
-zoomControl.applyZoom();
-renderAxes();
-updateSpectrogramSettingsText();
-restoreImageEnhancement(); // Restore brightness/contrast/gain settings
-},
-undefined,  // fftSamples (use default)
-undefined,  // windowFunc (use default)
-isPeakModeActive(),  // peakMode (use default)
-getPeakThreshold(),  // peakThreshold (use default)
-handleColorMapChange  // onColorMapChanged callback
-);
+  const colorMap = getEffectiveColorMap();
+  freqHoverControl?.hideHover();
+  replacePlugin(
+    colorMap,
+    spectrogramHeight,
+    currentFreqMin,
+    currentFreqMax,
+    getOverlapPercent(),
+    () => {
+      freqHoverControl?.refreshHover();
+      autoIdControl?.updateMarkers();
+      duration = getWavesurfer().getDuration();
+      if (getWavesurfer().getDecodedData()) {
+          zoomControl.applyZoom();
+      }
+      renderAxes();
+      updateSpectrogramSettingsText();
+      restoreImageEnhancement(); // Restore brightness/contrast/gain settings
+    },
+    undefined, // fftSamples (use default)
+    undefined, // windowFunc (use default)
+    isPeakModeActive(), // peakMode (use default)
+    getPeakThreshold(), // peakThreshold (use default)
+    handleColorMapChange // onColorMapChanged callback
+  );
 }
 
 function updateFrequencyRange(freqMin, freqMax) {
-const colorMap = getEffectiveColorMap();
-currentFreqMin = freqMin;
-currentFreqMax = freqMax;
+  const colorMap = getEffectiveColorMap();
+  currentFreqMin = freqMin;
+  currentFreqMax = freqMax;
 
-freqHoverControl?.hideHover();
-replacePlugin(
-colorMap,
-spectrogramHeight,
-freqMin,
-freqMax,
-getOverlapPercent(),
-() => {
-freqHoverControl?.refreshHover();
-autoIdControl?.updateMarkers();
-duration = getWavesurfer().getDuration();
-zoomControl.applyZoom();
-renderAxes();
-if (freqHoverControl) {
-freqHoverControl.setFrequencyRange(currentFreqMin, currentFreqMax);
-autoIdControl?.updateMarkers();
-}
-updateSpectrogramSettingsText();
-restoreImageEnhancement(); // Restore brightness/contrast/gain settings
-},
-undefined,  // fftSamples (use default)
-undefined,  // windowFunc (use default)
-isPeakModeActive(),  // peakMode (use default)
-getPeakThreshold(),  // peakThreshold (use default)
-handleColorMapChange  // onColorMapChanged callback
-);
+  freqHoverControl?.hideHover();
+  replacePlugin(
+    colorMap,
+    spectrogramHeight,
+    freqMin,
+    freqMax,
+    getOverlapPercent(),
+    () => {
+      freqHoverControl?.refreshHover();
+      autoIdControl?.updateMarkers();
+      duration = getWavesurfer().getDuration();
+      if (getWavesurfer().getDecodedData()) {
+          zoomControl.applyZoom();
+      }
+      renderAxes();
+      if (freqHoverControl) {
+        freqHoverControl.setFrequencyRange(currentFreqMin, currentFreqMax);
+        autoIdControl?.updateMarkers();
+      }
+      updateSpectrogramSettingsText();
+      restoreImageEnhancement(); // Restore brightness/contrast/gain settings
+    },
+    undefined, // fftSamples (use default)
+    undefined, // windowFunc (use default)
+    isPeakModeActive(), // peakMode (use default)
+    getPeakThreshold(), // peakThreshold (use default)
+    handleColorMapChange // onColorMapChanged callback
+  );
 }
 
 const clearAllBtn = document.getElementById('clearAllBtn');
 clearAllBtn.addEventListener('click', () => {
-clearFileList();
-sidebarControl.refresh('');
-replacePlugin(
-getEffectiveColorMap(),
-spectrogramHeight,
-currentFreqMin,
-currentFreqMax,
-getOverlapPercent(),
-() => {
-updateSpectrogramSettingsText();
-}
-);
-showDropOverlay();
-loadingOverlay.style.display = 'none';
-zoomControlsElem.style.display = 'none';
-guanoOutput.textContent = '(no file selected)';
-tagControl.updateTagButtonStates();
-document.dispatchEvent(new Event('file-list-cleared'));
+  clearFileList();
+  sidebarControl.refresh('');
+  replacePlugin(
+    getEffectiveColorMap(),
+    spectrogramHeight,
+    currentFreqMin,
+    currentFreqMax,
+    getOverlapPercent(),
+    () => {
+      updateSpectrogramSettingsText();
+    }
+  );
+  showDropOverlay();
+  loadingOverlay.style.display = 'none';
+  zoomControlsElem.style.display = 'none';
+  guanoOutput.textContent = '(no file selected)';
+  tagControl.updateTagButtonStates();
+  document.dispatchEvent(new Event('file-list-cleared'));
 });
 
 const clearTrashBtn = document.getElementById('clearTrashBtn');
