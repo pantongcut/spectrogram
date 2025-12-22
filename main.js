@@ -545,6 +545,26 @@ sidebarElem.addEventListener('sidebar-toggle', () => {
     }
   }, 310);
 });
+// [New] 監聽 Sidebar 拖動事件，即時更新時間軸和 Spectrogram 寬度
+sidebarElem.addEventListener('sidebar-resizing', () => {
+  containerWidth = container.clientWidth;
+  
+  // 檢查是否處於「適應視窗」模式 (MinZoom)
+  if (zoomControl.isAtMinZoom()) {
+    // 強制重新計算 MinZoom 並應用 (維持 100% 寬度)
+    zoomControl.resetZoomState();
+  } else {
+    // 否則僅更新按鈕狀態和網格 (避免縮放比例跑掉)
+    zoomControl.applyZoom(); 
+  }
+  
+  // 重新繪製時間軸 (這會使用 axisRenderer.js 的 100% 邏輯)
+  renderAxes();
+  
+  freqHoverControl?.refreshHover();
+  autoIdControl?.updateMarkers();
+});
+
 const tagControl = initTagControl();
 
 (async () => {

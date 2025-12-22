@@ -81,7 +81,14 @@ export function drawTimeAxis({
   // 更新 DOM
   axisElement.innerHTML = '';
   axisElement.appendChild(fragment);
-  axisElement.style.width = `${totalWidth}px`;
+  
+  // [Fix] 判斷寬度：如果計算出的總寬度跟容器寬度非常接近 (誤差 < 5px)，
+  // 則強制設為 '100%'，避免出現水平滾動條或右側白邊。
+  if (Math.abs(totalWidth - containerWidth) < 5) {
+    axisElement.style.width = '100%';
+  } else {
+    axisElement.style.width = `${totalWidth}px`;
+  }
   
   // 恢復邏輯：更新軸的單位標籤
   labelElement.textContent = step >= 1000 ? 'Time (s)' : 'Time (ms)';

@@ -340,6 +340,8 @@ function applyZoom() {
     applyZoom,
     updateZoomButtons,
     getZoomLevel: () => zoomLevel,
+    // [New] 判斷是否處於最小縮放(適應視窗)狀態
+    isAtMinZoom: () => Math.abs(zoomLevel - minZoomLevel) < 0.1, 
     setZoomLevel,
     resetZoomState,
   };

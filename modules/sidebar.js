@@ -241,6 +241,9 @@ function initSidebarResizer() {
 
       // Update sidebar width (instant, no transition due to .resizing class)
       sidebar.style.width = `${newWidth}px`;
+
+      // Dispatch event to notify layout changes (for spectrogram/axis resize)
+      sidebar.dispatchEvent(new CustomEvent('sidebar-resizing', { bubbles: true }));
     };
 
     // Handle mouseup
@@ -265,5 +268,3 @@ function initSidebarResizer() {
     document.addEventListener('mouseup', handleMouseUp);
   });
 }
-
-
