@@ -30,6 +30,12 @@ export class SpectrogramEngine {
    */
   get_global_max(): number;
   /**
+   * 釋放 WASM 記憶體而不銷毀引擎實例
+   * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+   * 避免雙重釋放錯誤和 JS GC 延遲
+   */
+  release_memory(): void;
+  /**
    * 獲取濾波器數量
    */
   get_num_filters(): number;
@@ -147,6 +153,12 @@ export class WaveformEngine {
    */
   load_channel(channel_idx: number, data: Float32Array): void;
   /**
+   * 釋放 WASM 記憶體而不銷毀引擎實例
+   * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+   * 避免雙重釋放錯誤和 JS GC 延遲
+   */
+  release_memory(): void;
+  /**
    * 獲取通道數量
    * 
    * # Returns
@@ -199,6 +211,21 @@ export class WaveformEngine {
 }
 
 /**
+ * 計算 Power Spectrum (使用 FFT，支持 Overlap)
+ * 
+ * # Arguments
+ * * `audio_data` - 音頻數據 (Float32Array)
+ * * `sample_rate` - 採樣率 (Hz)
+ * * `fft_size` - FFT 大小
+ * * `window_type` - 窗函數類型 (hann, hamming, blackman, gauss, rectangular, triangular)
+ * * `overlap_percent` - 重疊百分比 (0-99, 或 null/0 表示自動 75%)
+ * 
+ * # Returns
+ * 頻域功率譜 (dB 值)
+ */
+export function compute_power_spectrum(audio_data: Float32Array, sample_rate: number, fft_size: number, window_type: string, overlap_percent?: number | null): Float32Array;
+
+/**
  * 計算波形峰值用於可視化
  * 
  * 該函數對音頻通道進行下采樣，將其縮放為指定數量的峰值點。
@@ -228,14 +255,31 @@ export function compute_wave_peaks(channel_data: Float32Array, num_peaks: number
  */
 export function find_global_max(channel_data: Float32Array): number;
 
+/**
+ * 從 Power Spectrum 中找到峰值頻率
+ * 
+ * # Arguments
+ * * `spectrum` - Power Spectrum (dB 值)
+ * * `sample_rate` - 採樣率
+ * * `fft_size` - FFT 大小
+ * * `flow_hz` - 最低頻率 (Hz)
+ * * `fhigh_hz` - 最高頻率 (Hz)
+ * 
+ * # Returns
+ * 峰值頻率 (Hz)，如果未找到返回 0
+ */
+export function find_peak_frequency_from_spectrum(spectrum: Float32Array, sample_rate: number, fft_size: number, flow_hz: number, fhigh_hz: number): number;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly __wbg_spectrogramengine_free: (a: number, b: number) => void;
   readonly __wbg_waveformengine_free: (a: number, b: number) => void;
+  readonly compute_power_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
   readonly compute_wave_peaks: (a: number, b: number, c: number) => [number, number];
   readonly find_global_max: (a: number, b: number) => number;
+  readonly find_peak_frequency_from_spectrum: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly spectrogramengine_clear_filter_bank: (a: number) => void;
   readonly spectrogramengine_compute_spectrogram: (a: number, b: number, c: number, d: number) => [number, number];
   readonly spectrogramengine_compute_spectrogram_image: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
@@ -249,6 +293,7 @@ export interface InitOutput {
   readonly spectrogramengine_get_window_values: (a: number) => [number, number];
   readonly spectrogramengine_load_filter_bank: (a: number, b: number, c: number, d: number) => void;
   readonly spectrogramengine_new: (a: number, b: number, c: number, d: number) => number;
+  readonly spectrogramengine_release_memory: (a: number) => void;
   readonly spectrogramengine_set_color_map: (a: number, b: number, c: number) => void;
   readonly spectrogramengine_set_spectrum_config: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly waveformengine_clear: (a: number) => void;
@@ -257,6 +302,7 @@ export interface InitOutput {
   readonly waveformengine_get_peaks_in_range: (a: number, b: number, c: number, d: number, e: number) => [number, number];
   readonly waveformengine_load_channel: (a: number, b: number, c: number, d: number) => void;
   readonly waveformengine_new: () => number;
+  readonly waveformengine_release_memory: (a: number) => void;
   readonly waveformengine_resize: (a: number, b: number) => void;
   readonly __wbindgen_externrefs: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;

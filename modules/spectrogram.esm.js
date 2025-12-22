@@ -576,11 +576,11 @@ class h extends s {
         this.erbFilteredSpectrum = null;
         this.logFilteredSpectrum = null;
         
-        // Explicitly free WASM engine memory to prevent accumulation on reload
+        // Release WASM engine memory using soft release pattern
         if (this._wasmEngine) {
-            if (typeof this._wasmEngine.free === 'function') {
-                console.log('🗑️ [Spectrogram] Freeing WASM SpectrogramEngine memory');
-                this._wasmEngine.free();
+            if (typeof this._wasmEngine.release_memory === 'function') {
+                console.log('🗑️ [Spectrogram] Releasing WASM SpectrogramEngine memory');
+                this._wasmEngine.release_memory();
             }
             this._wasmEngine = null;
         }

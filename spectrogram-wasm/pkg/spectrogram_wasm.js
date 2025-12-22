@@ -194,6 +194,14 @@ export class SpectrogramEngine {
         return ret;
     }
     /**
+     * 釋放 WASM 記憶體而不銷毀引擎實例
+     * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+     * 避免雙重釋放錯誤和 JS GC 延遲
+     */
+    release_memory() {
+        wasm.spectrogramengine_release_memory(this.__wbg_ptr);
+    }
+    /**
      * 獲取濾波器數量
      * @returns {number}
      */
@@ -415,6 +423,14 @@ export class WaveformEngine {
         wasm.waveformengine_load_channel(this.__wbg_ptr, channel_idx, ptr0, len0);
     }
     /**
+     * 釋放 WASM 記憶體而不銷毀引擎實例
+     * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+     * 避免雙重釋放錯誤和 JS GC 延遲
+     */
+    release_memory() {
+        wasm.waveformengine_release_memory(this.__wbg_ptr);
+    }
+    /**
      * 獲取通道數量
      *
      * # Returns
@@ -550,36 +566,6 @@ export function compute_wave_peaks(channel_data, num_peaks) {
     const ptr0 = passArrayF32ToWasm0(channel_data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.compute_wave_peaks(ptr0, len0, num_peaks);
-    var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
-    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-    return v2;
-}
-
-/**
- * Detect segments in a spectrogram based on energy threshold
- *
- * # Arguments
- * * `spectrogram_flat` - Flattened spectrogram matrix (row-major, dB values)
- * * `num_cols` - Number of frequency bins (columns)
- * * `threshold_db` - Energy threshold in dB
- * * `sample_rate` - Sample rate in Hz
- * * `hop_size` - Hop size in samples
- * * `padding_ms` - Padding in milliseconds
- *
- * # Returns
- * Flattened array [start1, end1, start2, end2, ...] in seconds
- * @param {Float32Array} spectrogram_flat
- * @param {number} num_cols
- * @param {number} threshold_db
- * @param {number} sample_rate
- * @param {number} hop_size
- * @param {number} padding_ms
- * @returns {Float32Array}
- */
-export function detect_segments(spectrogram_flat, num_cols, threshold_db, sample_rate, hop_size, padding_ms) {
-    const ptr0 = passArrayF32ToWasm0(spectrogram_flat, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.detect_segments(ptr0, len0, num_cols, threshold_db, sample_rate, hop_size, padding_ms);
     var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
     return v2;

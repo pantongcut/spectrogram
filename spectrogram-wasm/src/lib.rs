@@ -673,6 +673,36 @@ impl SpectrogramEngine {
 
         result
     }
+
+    /// 釋放 WASM 記憶體而不銷毀引擎實例
+    /// 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+    /// 避免雙重釋放錯誤和 JS GC 延遲
+    #[wasm_bindgen]
+    pub fn release_memory(&mut self) {
+        // 替換所有大向量為空向量
+        self.window_values = Vec::new();
+        self.scratch_buffer = Vec::new();
+        self._output_buffer = Vec::new();
+        self.filter_bank = Vec::new();
+        self.last_magnitude_buffer = Vec::new();
+        self.color_map = Vec::new();
+        self.image_buffer = Vec::new();
+
+        // 強制分配器將記憶體歸還給 OS
+        self.window_values.shrink_to_fit();
+        self.scratch_buffer.shrink_to_fit();
+        self._output_buffer.shrink_to_fit();
+        self.filter_bank.shrink_to_fit();
+        self.last_magnitude_buffer.shrink_to_fit();
+        self.color_map.shrink_to_fit();
+        self.image_buffer.shrink_to_fit();
+
+        // 重置計數器和配置
+        self.num_filters = 0;
+        self.use_filter_bank = false;
+        self.last_num_frames = 0;
+        self.last_global_max = 0.0;
+    }
 }
 
 
@@ -965,6 +995,21 @@ impl WaveformEngine {
     #[wasm_bindgen]
     pub fn clear(&mut self) {
         self.channels.clear();
+    }
+
+    /// 釋放 WASM 記憶體而不銷毀引擎實例
+    /// 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+    /// 避免雙重釋放錯誤和 JS GC 延遲
+    #[wasm_bindgen]
+    pub fn release_memory(&mut self) {
+        // 清空所有通道
+        for channel in &mut self.channels {
+            channel.clear();
+            channel.shrink_to_fit();
+        }
+        // 清空通道向量本身
+        self.channels.clear();
+        self.channels.shrink_to_fit();
     }
 }
 

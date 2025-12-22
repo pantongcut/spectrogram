@@ -194,6 +194,14 @@ export class SpectrogramEngine {
         return ret;
     }
     /**
+     * 釋放 WASM 記憶體而不銷毀引擎實例
+     * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+     * 避免雙重釋放錯誤和 JS GC 延遲
+     */
+    release_memory() {
+        wasm.spectrogramengine_release_memory(this.__wbg_ptr);
+    }
+    /**
      * 獲取濾波器數量
      * @returns {number}
      */
@@ -413,6 +421,14 @@ export class WaveformEngine {
         const ptr0 = passArrayF32ToWasm0(data, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         wasm.waveformengine_load_channel(this.__wbg_ptr, channel_idx, ptr0, len0);
+    }
+    /**
+     * 釋放 WASM 記憶體而不銷毀引擎實例
+     * 這是"軟釋放"模式：清空所有向量並強制分配器歸還內存給 OS
+     * 避免雙重釋放錯誤和 JS GC 延遲
+     */
+    release_memory() {
+        wasm.waveformengine_release_memory(this.__wbg_ptr);
     }
     /**
      * 獲取通道數量
