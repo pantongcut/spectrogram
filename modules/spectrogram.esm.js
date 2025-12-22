@@ -544,9 +544,8 @@ class h extends s {
         this._createColorMapDropdown(),
         this.drawColorMapBar()
     }
-    destroy() {
+destroy() {
         // Clear all filter bank caches BEFORE clearing engine reference
-        // This ensures all borrowed references are released first
         this._filterBankCache = {};
         this._filterBankCacheByKey = {};
         this._filterBankFlat = null;
@@ -561,32 +560,34 @@ class h extends s {
         this._baseColorMapUint = null;
         this._activeColorMapUint = null;
         
-        // Clear last render data to release references
+        // Clear last render data
         this.lastRenderData = null;
-        
-        // Clear any intermediate buffers and data arrays
         this.fftData = null;
         this.powerSpectrum = null;
-        this.melFilteredSpectrum = null;
-        this.barkFilteredSpectrum = null;
-        this.erbFilteredSpectrum = null;
-        this.logFilteredSpectrum = null;
         
-        // [FIX] Force "Soft Release" to empty WASM vectors immediately
-        // Use release_memory instead of free to avoid double-free crashes
-        if (this._wasmEngine && typeof this._wasmEngine.release_memory === 'function') {
+        // [FIX] 安全釋放 WASM 記憶體 (Safe Release)
+        // 即使 release_memory 崩潰，也要確保 _wasmEngine 被設為 null，
+        // 這樣 JavaScript 端的垃圾回收器 (GC) 才能回收這個大對象。
+        if (this._wasmEngine) {
             try {
-                console.log('🗑️ [Spectrogram] Soft-releasing WASM memory on destroy');
-                this._wasmEngine.release_memory();
+                if (typeof this._wasmEngine.release_memory === 'function') {
+                    // console.log('🗑️ [Spectrogram] Soft-releasing WASM memory');
+                    this._wasmEngine.release_memory();
+                } else if (typeof this._wasmEngine.free === 'function') {
+                    this._wasmEngine.free();
+                }
             } catch (e) {
-                console.warn('⚠️ [Spectrogram] Error releasing memory:', e);
+                // 忽略 "memory access out of bounds" 等錯誤
+                // 這種錯誤通常發生在 WASM 記憶體已經被外部重置或 detach 時
+                // 這時候我們不需要做任何事，直接讓 JS 引用斷開即可
+                console.warn('⚠️ [Spectrogram] WASM cleanup warning (safe to ignore):', e.message);
+            } finally {
+                // CRITICAL: 無論如何都要切斷引用
+                this._wasmEngine = null;
             }
         }
         
-        // [FIX] Remove the reference so it can't be reused and allows GC
-        this._wasmEngine = null;
-        
-        // Clean up event listeners for color bar and dropdown
+        // Clean up event listeners
         if (this._colorBarClickHandler) {
             const colorBarCanvas = document.getElementById("color-bar");
             if (colorBarCanvas) {
@@ -610,6 +611,7 @@ class h extends s {
         this.wrapper = null),
         super.destroy()
     }
+    
     setColorMap(mapName) {
         this.colorMapName = mapName;
         
