@@ -1100,9 +1100,7 @@ class h extends s {
                     const viewMinHz = this.frequencyMin || 0;
                     const viewMaxHz = this.frequencyMax || (this.buffer.sampleRate / 2);
                     const viewRangeHz = viewMaxHz - viewMinHz;
-                    const totalBins = (this.scale !== "linear" && this._wasmEngine.get_num_filters() > 0) 
-                        ? this._wasmEngine.get_num_filters() 
-                        : (this.fftSamples / 2);
+                    const totalBins = imgHeight;
 
                     const xStep = canvasWidth / peaks.length;
                     
