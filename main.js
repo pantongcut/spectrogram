@@ -1665,16 +1665,27 @@ document.addEventListener("file-loaded", async () => {
   updateExpandBackBtn();
   autoIdControl?.reset();
   if (currentFile) {
-    const arrayBuf = await currentFile.arrayBuffer();
-    const ac = new (window.AudioContext || window.webkitAudioContext)();
-    const audioBuf = await ac.decodeAudioData(arrayBuf.slice(0));
-    // Prefer Wavesurfer decoded internal length for the original audio buffer when available
-    const wsDecodedLen = getWavesurfer()?.getDecodedData()?.length;
-    currentAudioBufferLength = wsDecodedLen || audioBuf.length;
-    // If a saved original length from expansion exists, clear it because we just loaded the real file
-    savedAudioBufferLengthBeforeExpand = null;
-    // Spectrogram rendering is now handled by Wavesurfer's Spectrogram plugin
-    updateSpectrogramSettingsText();
+    let ac = null;
+    try {
+      const arrayBuf = await currentFile.arrayBuffer();
+      ac = new (window.AudioContext || window.webkitAudioContext)();
+      const audioBuf = await ac.decodeAudioData(arrayBuf.slice(0));
+      // Prefer Wavesurfer decoded internal length for the original audio buffer when available
+      const wsDecodedLen = getWavesurfer()?.getDecodedData()?.length;
+      currentAudioBufferLength = wsDecodedLen || audioBuf.length;
+      // If a saved original length from expansion exists, clear it because we just loaded the real file
+      savedAudioBufferLengthBeforeExpand = null;
+      // Spectrogram rendering is now handled by Wavesurfer's Spectrogram plugin
+      updateSpectrogramSettingsText();
+    } catch (e) {
+      console.warn('Error detecting audio buffer length:', e);
+    } finally {
+      // Always close the context to free native audio resources
+      if (ac && ac.state !== 'closed') {
+        await ac.close();
+      }
+      ac = null;
+    }
   }
 });
 

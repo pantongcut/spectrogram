@@ -1355,6 +1355,10 @@ class u extends a {
     loadAudio(e, s, n, r) {
         return t(this, void 0, void 0, (function*() {
             var t;
+            // Clear old buffer reference immediately to help GC
+            if (this.decodedData) {
+                this.decodedData = null;
+            }
             if (this.emit("load", e),
             !this.options.media && this.isPlaying() && this.pause(),
             this.decodedData = null,
