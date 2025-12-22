@@ -1339,6 +1339,9 @@ async getFrequencies(t) {
                     this.gainDB,
                     this.rangeDB
                 );
+                
+                // [FIX] Clear the audioDataCopy reference immediately after WASM processing
+                audioDataCopy.fill(0);
 
                 const globalMaxLinear = this._wasmEngine.get_global_max();
                 const noiseFloorLinear = globalMaxLinear * 0.063; // -24dB 噪音線                
@@ -1352,7 +1355,8 @@ async getFrequencies(t) {
                 
                 for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
                     const frameStartIdx = frameIdx * outputSize;
-                    const outputFrame = fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize);
+                    // [FIX] Copy subarray instead of creating a view to avoid aliasing
+                    const outputFrame = new Uint8Array(fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize));
                     channelFrames.push(outputFrame);
 
                     if (this.options && this.options.peakMode) {

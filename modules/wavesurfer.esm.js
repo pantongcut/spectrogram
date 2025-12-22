@@ -1423,7 +1423,7 @@ class u extends a {
                             const channelData = this.decodedData.getChannelData(ch);
                             // Create a copy to avoid Rust aliasing issues
                             // WASM requires exclusive ownership of the data
-                            const channelDataCopy = new Float32Array(channelData);
+                            let channelDataCopy = new Float32Array(channelData);
                             this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
                             // [FIX] Release the temporary buffer immediately for faster GC
                             channelDataCopy = null;
