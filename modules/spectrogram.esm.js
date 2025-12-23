@@ -879,7 +879,10 @@ class h extends s {
         
         ctx.putImageData(imageData, 0, 0);
     }
+    // [修改] createCanvas: 嚴格保證只有一個 Canvas，防止疊加變黑
     createCanvas() {
+        if (this.canvas) return; // 如果已存在，直接返回，不要重複創建
+        
         this.canvas = i("canvas", {
             style: {
                 position: "absolute",
@@ -967,40 +970,29 @@ async render() {
         }
     }
 
+    // [修改] drawSpectrogram: 修正變黑與閾值問題
     drawSpectrogram(t) {
-        // [FIX] Validate input data before drawing
-        if (!t || (Array.isArray(t) && t.length === 0)) {
-            console.warn('[Spectrogram] drawSpectrogram called with invalid data, skipping');
-            return;
-        }
+        if (!t || (Array.isArray(t) && t.length === 0)) return;
         
         this.lastRenderData = t;
         if (!this.wrapper || !this.canvas) return;
+        if (!Array.isArray(t[0])) t = [t];
         
-        // [FIX] Safely handle data format detection
-        if (Array.isArray(t) && Array.isArray(t[0]) && typeof t[0][0] === 'number') {
-            if (!isNaN(t[0][0])) {
-                // Data is valid, continue
-            } else {
-                console.warn('[Spectrogram] Invalid frequency data detected');
-                return;
-            }
-        }
-        
-        if (!Array.isArray(t[0])) {
-            t = [t];
-        }
-        
-        // [CRITICAL FIX] Capture current render ID to detect obsolescence
-        // This prevents "Darkening/Stacking" when slider is moved rapidly
+        // Render ID 鎖定
         const currentRenderId = ++this._renderId;
 
         this.wrapper.style.height = this.height * t.length + "px";
-        this.canvas.width = this.getWidth(); // Clears the canvas
+        
+        // [關鍵] 明確清空畫布，雖然設置 width 會清空，但這行確保語意明確
+        this.canvas.width = this.getWidth(); 
         this.canvas.height = this.height * t.length;
         
         const canvasCtx = this.spectrCc;
         if (!canvasCtx || !this._wasmEngine) return;
+
+        // [關鍵] 確保混合模式正常，防止疊加變黑
+        canvasCtx.globalCompositeOperation = 'source-over';
+        canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
         const isSmooth = this.smoothMode || false;
         canvasCtx.imageSmoothingEnabled = isSmooth;
@@ -1008,24 +1000,17 @@ async render() {
 
         for (let channelIdx = 0; channelIdx < t.length; channelIdx++) {
             const channelData = t[channelIdx];
-            
             const canvasWidth = this.getWidth();
-
             if (canvasWidth <= 0) return;
             let renderPixels = isSmooth ? channelData : this.resample(channelData);
-            if (!renderPixels || renderPixels.length === 0) return;
+            if (!renderPixels || renderPixels.length === 0) continue;
             
-            const imgWidth = renderPixels.length; // Smooth: numFrames, Default: screenWidth
+            const imgWidth = renderPixels.length;
             const imgHeight = Array.isArray(renderPixels) && renderPixels[0] ? renderPixels[0].length : 1;
-
-            if (imgWidth <= 0 || imgHeight <= 0) {
-                return;
-            }
-
             let imgData = new ImageData(imgWidth, imgHeight);
-            
-            // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
-            if (this._activeColorMapUint && this._activeColorMapUint.length === 1024) {
+
+            // --- Image Data Filling ---
+            if (this._activeColorMapUint) {
                  if (Array.isArray(renderPixels) && renderPixels[0]) {
                     for (let x = 0; x < renderPixels.length; x++) {
                         for (let y = 0; y < renderPixels[x].length; y++) {
@@ -1052,9 +1037,8 @@ async render() {
                     }
                 }
             }
-            // ---------------------------------------------------
 
-            const sampleRate = this.buffer.sampleRate / 2;
+            const sampleRate = this.buffer ? (this.buffer.sampleRate / 2) : (this.frequencyMax || 256000/2);
             const freqMin = this.frequencyMin;
             const freqMax = this.frequencyMax;
             const u = this.hzToScale(freqMin) / this.hzToScale(sampleRate);
@@ -1063,8 +1047,7 @@ async render() {
             const sourceY = Math.round(imgHeight * (1 - p));
             const sourceHeight = Math.round(imgHeight * (p - u));
             
-            createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap => {
-                // [FIX 3] 終極防護：檢查 ID 是否過期 或 Context 已銷毀
+            createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap) => {
                 if (this._renderId !== currentRenderId || !this.spectrCc || !this.canvas) {
                      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
                      return;
@@ -1072,44 +1055,45 @@ async render() {
                 
                 const drawY = this.height * (channelIdx + 1 - p / f);
                 const drawH = this.height * p / f;
+                
+                // [防黑] 再次確保繪製前區域是乾淨的
+                // canvasCtx.clearRect(0, drawY, canvasWidth, drawH); // 這裡不用因為是 drawImage 覆蓋
+
                 canvasCtx.drawImage(bitmap, 0, drawY, canvasWidth, drawH);
 
-                // [FIX 1] 畫完立刻釋放 GPU 記憶體
-                if (bitmap && typeof bitmap.close === 'function') {
-                    bitmap.close();
-                }
-
-                // [FIX 2] 切斷閉包引用
+                if (bitmap && typeof bitmap.close === 'function') bitmap.close();
                 imgData = null; 
                 renderPixels = null;
 
-                // [NEW] Peak Mode 渲染邏輯更新 (支援多點/局部閾值)
+                // [修改] Peak Overlay 繪製
+                // 檢查 peakMode 是否開啟，並且數據是否存在
                 if (this.options && this.options.peakMode && this.peakBandArrayPerChannel && this.peakBandArrayPerChannel[channelIdx]) {
                     const peaks = this.peakBandArrayPerChannel[channelIdx];
                     const viewMinHz = this.frequencyMin || 0;
-                    const viewMaxHz = this.frequencyMax || (this.buffer.sampleRate / 2);
+                    const viewMaxHz = this.frequencyMax || sampleRate;
                     const viewRangeHz = viewMaxHz - viewMinHz;
                     const totalBins = imgHeight;
 
-                    // Re-calculate effective threshold here to support real-time slider updates
-                    // without needing to re-run getFrequencies just for threshold check
+                    // [關鍵修復] 調整閾值公式：從 0.1 起跳，而不是 0.6
                     let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-                    const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
-                    const thresholdU8 = effectiveThreshold * 255; 
+                    const effectiveThreshold = 0.10 + (Math.pow(sliderValue, 1.2) * 0.85); 
+                    const thresholdU8 = effectiveThreshold * 255;
 
                     const xStep = canvasWidth / peaks.length;
                     
+                    canvasCtx.fillStyle = "rgba(0, 255, 255, 0.9)"; // 亮青色
+
                     for (let i = 0; i < peaks.length; i++) {
-                        const framePeaks = peaks[i]; // 這是一個 Array
+                        const framePeaks = peaks[i];
                         if (!framePeaks || framePeaks.length === 0) continue;
 
                         for (let peakObj of framePeaks) {
-                            // [FIX] Visual Filtering based on current slider threshold
+                            // 使用即時閾值過濾
                             if (peakObj.magnitude < thresholdU8) continue;
 
                             let peakFreqHz;
                             if (this.scale === 'linear') {
-                                peakFreqHz = (peakObj.bin / totalBins) * (this.buffer.sampleRate / 2);
+                                peakFreqHz = (peakObj.bin / totalBins) * sampleRate;
                             } else {
                                 peakFreqHz = viewMinHz + (peakObj.bin / totalBins) * viewRangeHz;
                             }
@@ -1119,18 +1103,13 @@ async render() {
                                 const yPos = drawY + drawH - (yFraction * drawH);
                                 const xPos = i * xStep;
                                 
-                                // 樣式控制：主峰顯示亮青色，次峰顯示稍暗或半透明
-                                if (peakObj.isMainPeak) {
-                                    canvasCtx.fillStyle = "rgba(0, 255, 255, 0.9)"; // 亮青色
-                                } else {
-                                    canvasCtx.fillStyle = "rgba(0, 200, 255, 0.6)"; // 稍弱的藍色
-                                }
-                                canvasCtx.fillRect(xPos, yPos - 1, Math.max(1.5, xStep), 3);
+                                // 繪製 Peak 點
+                                canvasCtx.fillRect(xPos, yPos - 1.5, Math.max(2, xStep), 3);
                             }
                         }
                     }
                 }
-            }));
+            });
         }
         
         if (this.options.labels) {
@@ -1305,13 +1284,20 @@ async render() {
         this._filterBankFlat = null;
     }
 
+    // [修改] getFrequencies: 增加對 RAM 清除後的防護
     async getFrequencies(t, isRetry = false) {
-        // [FIX] 1. 初始檢查：如果沒有 Wrapper (已被銷毀)，直接退出
-        if (!this.options || !t || !this.wrapper) {
-            return;
+        if (!this.options || !this.wrapper) return;
+
+        // [關鍵修復] 如果傳入的 t (buffer) 是空的 (因為 RAM 被清除了)
+        // 且我們已經有 Peak 數據，就保留舊數據不要清空，直接返回
+        if (!t && this.peakBandArrayPerChannel && this.peakBandArrayPerChannel.length > 0) {
+            console.warn('[Spectrogram] Buffer cleared, keeping existing peak data.');
+            return null; // 返回 null 讓 render 知道沒新數據
         }
         
-        // 清除舊緩存以防止內存泄漏
+        if (!t) return; // 如果真的沒數據且沒緩存，就退出
+
+        // 只有在真的要重新計算時，才清空舊的 Peak 數據
         this.peakBandArrayPerChannel = [];
         
         var e, s;
@@ -1369,10 +1355,7 @@ async render() {
         }
         // --- End Filter Bank Logic ---
 
-        this.peakBandArrayPerChannel = [];
-        
-        let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+        // this.peakBandArrayPerChannel = []; // 移到上面去清空
 
         for (let e = 0; e < i; e++) {
             // [FIX] 3. 通道迴圈內的檢查：防止在計算途中切換檔案
@@ -1452,44 +1435,39 @@ async render() {
                 const outputFrame = new Uint8Array(fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize));
                 channelFrames.push(outputFrame);
 
-                // [FIX] ALWAYS calculate peaks if Peak Mode is on, but store magnitude for later filtering
-                // We loosen the filter here to allow slider adjustment later in drawSpectrogram
-                if (this.options && this.options.peakMode) {
-                    const localMaxLinear = frameMaxMagnitudes[frameIdx];
+                // [關鍵] 始終計算並儲存 Peak，但在 draw 時才決定是否顯示
+                // 這樣即使 RAM 被清空，只要 Spectrogram 還在，Peak 數據就還在
+                const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
-                    if (localMaxLinear < noiseFloorLinear) {
-                        channelPeakLists.push([]); 
-                        continue; 
-                    }
+                if (localMaxLinear < noiseFloorLinear) {
+                    channelPeakLists.push([]); 
+                    continue; 
+                }
 
-                    let localMaxU8 = 0;
+                let localMaxU8 = 0;
+                for(let k=0; k < outputSize; k++) {
+                    if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
+                }
+
+                // 使用極低的基礎閾值儲存所有可能的 Peak
+                const baseThresholdU8 = 5; 
+                const framePeaks = [];
+                
+                if (localMaxU8 > baseThresholdU8) { 
                     for(let k=0; k < outputSize; k++) {
-                        if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
-                    }
-
-                    // Store peaks with a very low baseline threshold so we can filter dynamically later
-                    const baseThresholdU8 = 10; 
-                    const framePeaks = [];
-                    
-                    if (localMaxU8 > baseThresholdU8) { 
-                        for(let k=0; k < outputSize; k++) {
-                            // Store potentially relevant peaks (above minimal noise floor)
-                            if (outputFrame[k] >= baseThresholdU8) {
-                                framePeaks.push({
-                                    bin: k,
-                                    magnitude: outputFrame[k],
-                                    isMainPeak: outputFrame[k] === localMaxU8
-                                });
-                            }
+                        if (outputFrame[k] >= baseThresholdU8) {
+                            framePeaks.push({
+                                bin: k,
+                                magnitude: outputFrame[k], // 儲存原始強度 0-255
+                                isMainPeak: outputFrame[k] === localMaxU8
+                            });
                         }
                     }
-                    channelPeakLists.push(framePeaks);
                 }
+                channelPeakLists.push(framePeaks);
             }
             
-            if (this.options && this.options.peakMode) {
-                this.peakBandArrayPerChannel.push(channelPeakLists);
-            }
+            this.peakBandArrayPerChannel.push(channelPeakLists);
             h.push(channelFrames)
         }
         return h
