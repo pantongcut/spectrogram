@@ -109,15 +109,18 @@ export function initFileLoader({
 
   async function loadFile(file) {
     if (!file) return;
-    
-    // [STEP 0: 建立視覺快照 (防止閃爍)]
-    // 在我們殺死舊數據前，先用一張「假圖片」蓋住畫面
-    // 這樣使用者就看不到中間的「全白/閃爍」瞬間
+
+    console.log(`📂 [FileLoader] Start loading: ${file.name}`);
+
+    // [STEP 0: 建立視覺快照]
     const container = document.getElementById("spectrogram-only");
     if (container) {
-        const oldCanvas = container.querySelector("canvas");
-        // 只有當舊 Canvas 存在且有寬度時才截圖
+        // 確保我們只抓取真正的頻譜圖 Canvas，而不是上次殘留的 Snapshot (如果有)
+        const oldCanvas = container.querySelector("canvas:not(#spectrogram-transition-snapshot)");
+        
         if (oldCanvas && oldCanvas.width > 0) {
+            console.log(`📸 [Snapshot] Creating snapshot from old canvas (${oldCanvas.width}x${oldCanvas.height})...`);
+            
             const snapshot = document.createElement("canvas");
             snapshot.id = "spectrogram-transition-snapshot";
             snapshot.width = oldCanvas.width;
@@ -127,14 +130,19 @@ export function initFileLoader({
             snapshot.style.left = "0";
             snapshot.style.width = "100%";
             snapshot.style.height = "100%";
-            snapshot.style.zIndex = "100"; // 確保蓋在最上面
-            snapshot.style.pointerEvents = "none"; // 讓滑鼠可以穿透
+            snapshot.style.zIndex = "100";
+            snapshot.style.pointerEvents = "none";
 
             const ctx = snapshot.getContext("2d");
-            // 將舊 Canvas 的像素複製到快照上
             ctx.drawImage(oldCanvas, 0, 0);
             container.appendChild(snapshot);
+            
+            console.log('📸 [Snapshot] Snapshot appended to DOM.');
+        } else {
+            console.log('📸 [Snapshot] No valid old canvas found. Skipping snapshot.');
         }
+    } else {
+        console.warn('📸 [Snapshot] Container #spectrogram-only not found!');
     }
 
     // [STEP 1: 暴力清理舊狀態 (RAM 歸零)] 
