@@ -109,7 +109,6 @@ export async function replacePlugin(
         // [FIX] 強制清理舊 Canvas 以釋放 GPU 記憶體
         const oldCanvas = container.querySelector("canvas");
         if (oldCanvas) {
-            oldCanvas.getContext('2d').clearRect(0, 0, oldCanvas.width, oldCanvas.height);
             oldCanvas.width = 0;
             oldCanvas.height = 0;
             oldCanvas.remove();
@@ -325,53 +324,4 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
     console.warn('Failed to create WASM SpectrogramEngine:', error);
     return null;
   }
-}
-/**
- * 閒置清理程式：當用戶停止操作時呼叫
- * 這會清除所有快取、釋放 WASM
- */
-export async function runIdleCleanup() {
-    // 防止在沒有插件時執行
-    if (!plugin && !analysisWasmEngine) return;
-
-    // [FIX] 如果 Spectrogram 正在忙碌 (Rendering)，絕對不要打擾它
-    // 這會導致 "Rust value borrowed" 錯誤
-    if (plugin && plugin._isRendering) {
-        console.log('⏳ [Idle Cleanup] Spectrogram 正在忙碌，跳過本次清理');
-        return;
-    }
-
-    console.log('🧹 [Idle Cleanup] 釋放閒置資源...');
-    
-    // 1. 清理 Spectrogram 內部
-    if (plugin) {
-        if (typeof plugin.clearFilterBankCache === 'function') {
-            plugin.clearFilterBankCache();
-        }
-        
-        // 嘗試重置 WASM 以縮減記憶體
-        if (plugin._wasmEngine && typeof plugin._reinitWasmEngine === 'function') {
-            // 這裡不需要 try-catch，因為我們已經在 _reinitWasmEngine 內部加了保護
-            plugin._reinitWasmEngine(); 
-        }
-    }
-
-    // 2. 清理全域分析用的 WASM 引擎
-    if (analysisWasmEngine) {
-        try {
-            if (typeof analysisWasmEngine.free === 'function') {
-                analysisWasmEngine.free();
-            }
-        } catch(e) {
-            console.warn('[Idle Cleanup] Analysis engine free skipped:', e.message);
-        }
-        analysisWasmEngine = null;
-    }
-    
-    // 3. 強制釋放 DOM 節點引用 (如果有殘留的 detached nodes)
-    if (window.gc) {
-        try { window.gc(); } catch(e) {}
-    }
-    
-    console.log('✨ [Idle Cleanup] 完成');
 }
