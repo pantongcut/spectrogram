@@ -1440,7 +1440,7 @@ _loadingAbortController = null;
                 this.decodedData = i.createBuffer(n, a || 0);
             } else if (s) {
                 try {
-                    const t = yield s.arrayBuffer();
+                    let t = yield s.arrayBuffer();
                     if (signal.aborted) return;
                     
                     // [FIX 3] 在進行重型解碼前，再給一次喘息機會
