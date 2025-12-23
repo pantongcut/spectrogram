@@ -565,6 +565,11 @@ class h extends s {
         this.fftData = null;
         this.powerSpectrum = null;
         
+        // [FIX] 關鍵修正：釋放 Spectrogram 持有的原始 AudioBuffer 引用
+        // 這解決了 300MB+ 記憶體無法釋放的問題
+        this.buffer = null;
+        this.peakBandArrayPerChannel = null;
+
         // [FIX] 強制釋放 WASM 記憶體 (Hard Release)
         // 必須調用 free() 來銷毀 Rust 結構體，否則 WASM 線性記憶體無法被重複利用
         if (this._wasmEngine) {

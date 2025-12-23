@@ -1664,6 +1664,15 @@ class u extends a {
             this._wasmWaveformEngine = null;
         }
 
+        // [FIX] 關鍵修正：釋放 WaveSurfer 實例持有的原始 AudioBuffer
+        this.decodedData = null;
+
+        // [FIX] 關鍵修正：釋放 WebAudio Backend 持有的播放緩衝區
+        // 因為 super.destroy() 認為這是外部媒體而不進行清理，我們必須手動干預
+        if (this.media && typeof this.media.buffer !== 'undefined') {
+             this.media.buffer = null;
+        }
+        
         super.destroy()
     }
 }
