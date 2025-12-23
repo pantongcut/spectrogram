@@ -173,27 +173,34 @@ export async function replacePlugin(
           requestAnimationFrame(() => {
               // 再次檢查 plugin 是否存在
               if (plugin) {
-                  plugin.render();
                   
-                  // [FIX] 延遲移除快照，解決閃爍問題
-                  // 因為 plugin.render() 內部的 drawImage 是非同步的 (createImageBitmap.then)
-                  // 我們必須晚一點點移除快照，確保新圖已經畫在 Canvas 上了
-                  // 100ms 足夠讓 createImageBitmap 完成，同時對使用者來說是無感的
-                  setTimeout(() => {
-                      const snapshot = document.getElementById("spectrogram-transition-snapshot");
-                      if (snapshot) {
-                          console.log('📸 [Snapshot] removing snapshot from BODY (delayed).');
-                          
-                          // 可以加一個簡單的 fade-out 效果讓過渡更滑順 (選做)
-                          snapshot.style.transition = 'opacity 0.1s ease-out';
-                          snapshot.style.opacity = '0';
-                          
-                          // 等淡出動畫結束後再移除 DOM
-                          setTimeout(() => {
-                              snapshot.remove();
-                          }, 100);
-                      }
-                  }, 50); // 50ms 延遲，覆蓋 drawImage 的執行時間
+                  // [FIX] 改用事件驅動：監聽插件的 'ready' 事件
+                  // 這是最準確的時間點，代表 drawImage 已經執行完畢
+                  plugin.once('ready', () => {
+                      console.log('📸 [Snapshot] Spectrogram is ready. Starting fade-out sequence.');
+                      
+                      // Double RAF: 強制瀏覽器先將新畫好的 Canvas 渲染上屏 (Paint)
+                      // 這是消除「微閃爍」的最後一哩路，確保新圖已經在螢幕上了，才把舊圖拿掉
+                      requestAnimationFrame(() => {
+                          requestAnimationFrame(() => {
+                              const snapshot = document.getElementById("spectrogram-transition-snapshot");
+                              if (snapshot) {
+                                  // 開始淡出動畫
+                                  snapshot.style.transition = 'opacity 0.1s ease-out';
+                                  snapshot.style.opacity = '0';
+                                  
+                                  // 等待動畫結束後移除 DOM
+                                  setTimeout(() => {
+                                      snapshot.remove();
+                                      console.log('📸 [Snapshot] Removed from DOM.');
+                                  }, 150); // 比 0.1s 稍長一點確保安全
+                              }
+                          });
+                      });
+                  });
+
+                  // 觸發渲染 (這會啟動異步繪圖，完成後會觸發上面的 ready)
+                  plugin.render();
               }
               
               if (typeof onRendered === 'function') onRendered();
