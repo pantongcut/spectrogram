@@ -146,7 +146,7 @@ export function initFileLoader({
                 left: `${rect.left}px`,
                 width: `${rect.width}px`,
                 height: `${rect.height}px`,
-                zIndex: "9999", // 最高層級
+                zIndex: "10", // 最高層級
                 pointerEvents: "none",
                 boxSizing: "border-box"
             });
@@ -160,7 +160,7 @@ export function initFileLoader({
             console.log('📸 [Snapshot] Snapshot appended to BODY.');
 
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            
+
         } else {
             console.log('📸 [Snapshot] No valid old canvas found. Skipping.');
         }
