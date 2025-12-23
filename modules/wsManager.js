@@ -80,10 +80,11 @@ export async function replacePlugin(
 ) {
   if (!ws) throw new Error('Wavesurfer not initialized.');
   
-  // [FIX] 如果正在替換中，忽略本次請求，防止堆疊
-  if (isReplacing) {
-      console.warn('⚠️ [wsManager] Previous replacement still in progress, queuing...');
-      return; 
+  // [FIX 1] 排隊機制：如果上一個替換還在進行，我們等待它完成
+  // 這將「並行」的快速點擊轉換為「序列」執行，確保每一次都有機會執行銷毀和 GC
+  while (isReplacing) {
+      // 每 50ms 檢查一次，直到上一個任務完成
+      await new Promise(resolve => setTimeout(resolve, 50));
   }
   
   isReplacing = true;
@@ -96,7 +97,7 @@ export async function replacePlugin(
           ? Math.floor(fftSamples * (overlapPercent / 100))
           : null;
 
-      // 只有當 FFT Size, Window, ColorMap 或 頻率範圍改變時才 Rebuild
+      // 判斷是否需要完全重建 Plugin
       const needsRebuild = 
         !plugin ||
         colorMap !== currentColorMap ||
@@ -106,13 +107,14 @@ export async function replacePlugin(
         Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
 
       if (needsRebuild) {
-        // [FIX] 強制清理舊 Canvas 以釋放 GPU 記憶體
-        const oldCanvas = container.querySelector("canvas");
-        if (oldCanvas) {
-            oldCanvas.width = 0;
-            oldCanvas.height = 0;
-            oldCanvas.remove();
-        }
+        // [FIX 2] 強制清理舊 Canvas 以釋放 GPU 記憶體 (顯存)
+        // 在快速切換時，瀏覽器往往來不及回收 Canvas 佔用的顯存，這步很關鍵
+        const oldCanvases = container.querySelectorAll("canvas");
+        oldCanvases.forEach(canvas => {
+            canvas.width = 0;  // 歸零寬高是釋放顯存的最快方法
+            canvas.height = 0;
+            canvas.remove();
+        });
 
         // 銷毀舊插件
         if (plugin) {
@@ -121,6 +123,7 @@ export async function replacePlugin(
           }
           plugin = null;
           
+          // 清理 WASM 引擎
           if (analysisWasmEngine) {
             try {
               if (typeof analysisWasmEngine.free === 'function') {
@@ -132,9 +135,10 @@ export async function replacePlugin(
             analysisWasmEngine = null;
           }
           
-          // [FIX] 關鍵：暫停 50ms 讓瀏覽器執行垃圾回收 (GC)
-          // 這能有效防止連續加載時的記憶體暴衝
-          await new Promise(resolve => setTimeout(resolve, 50));
+          // [FIX 3] 關鍵：暫停 100ms 讓瀏覽器執行垃圾回收 (GC)
+          // 當你快速連續 load 時，這個「空檔」能讓 JS 引擎有機會回收上一個 5MB 的 wav buffer
+          // 如果設得太短 (如 10ms)，GC 可能還沒來得及啟動
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         currentColorMap = colorMap;
@@ -166,6 +170,7 @@ export async function replacePlugin(
         try {
           // 使用 RAF 避免阻塞 UI
           requestAnimationFrame(() => {
+              // 再次檢查 plugin 是否存在 (防止在 await 期間被銷毀)
               if (plugin) plugin.render();
               if (typeof onRendered === 'function') onRendered();
           });
@@ -173,10 +178,8 @@ export async function replacePlugin(
           console.warn('⚠️ Spectrogram render failed:', err);
         }
       } else {
-        // [FIX] 軟更新邏輯 (Soft Update Logic)
+        // [軟更新邏輯保持不變...]
         let shouldRender = false;
-
-        // 1. 檢查 Peak 參數
         if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
             currentPeakMode = peakMode;
             currentPeakThreshold = peakThreshold;
@@ -185,10 +188,7 @@ export async function replacePlugin(
                 plugin.options.peakThreshold = peakThreshold;
             }
         }
-
-        // 2. 檢查 Overlap 是否改變
         if (plugin && targetNoverlap !== plugin.noverlap) {
-            // 直接更新插件內部的參數
             plugin.noverlap = targetNoverlap;
             if (plugin.options) plugin.options.noverlap = targetNoverlap;
             shouldRender = true;
@@ -196,17 +196,14 @@ export async function replacePlugin(
 
         try {
             if (shouldRender) {
-                // 如果 Overlap 變了，必須重算頻譜
                 plugin.render();
             } else {
-                // 如果只有 Peak 變了，只重畫 Overlay
                 if (plugin && typeof plugin.updatePeakOverlay === 'function') {
                     plugin.updatePeakOverlay();
                 } else {
                     plugin.render();
                 }
             }
-            
             requestAnimationFrame(() => {
                 if (typeof onRendered === 'function') onRendered();
             });
@@ -215,7 +212,7 @@ export async function replacePlugin(
         }
       }
   } finally {
-      // 釋放鎖
+      // 釋放鎖，讓隊列中的下一個請求執行
       isReplacing = false;
   }
 }

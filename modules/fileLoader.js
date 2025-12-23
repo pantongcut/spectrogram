@@ -155,19 +155,19 @@ export function initFileLoader({
       onAfterLoad();
     }
     
-    // MEMORY CLEANUP: After loading new file, clean up resources
-    // Use longer delay to ensure WaveSurfer worker has finished decoding
+    // [FIX] 延遲清理：確保 WaveSurfer Worker 完成解碼，然後清理舊的 Object URL 和緩存
+    // 500ms 是經驗值，給予足夠的時間讓瀏覽器 GC 開始運作
     setTimeout(() => {
       try {
-        // Now safe to revoke old URL since new file is loaded
-        if (oldObjectUrl) {
+        // 現在安全地撤銷舊的 Object URL，因為新檔案已載入
+        if (oldObjectUrl && oldObjectUrl !== fileUrl) {
           URL.revokeObjectURL(oldObjectUrl);
           console.log('✅ [fileLoader] Revoked old Blob URL');
         }
         
-        // Clear any cached audio buffers in WaveSurfer backend
+        // 清理 WaveSurfer backend 中的任何快取音頻緩衝區
         if (wavesurfer && wavesurfer.backend) {
-          // More aggressive buffer clearing
+          // 更激進的緩衝區清理
           const keysToNull = [
             'audioBuffer', 'decodedData', 'buffer', 'data', 'rawData',
             'originalAudioBuffer', 'filteredBuffer', 'offlineContext',
@@ -181,7 +181,7 @@ export function initFileLoader({
           console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffers and nodes');
         }
         
-        // Try to force garbage collection by suggesting it to the browser
+        // 試圖強制垃圾回收的暗示
         if (window.gc) {
           window.gc();
           console.log('💾 [fileLoader] Triggered manual garbage collection');
@@ -189,10 +189,9 @@ export function initFileLoader({
       } catch (err) {
         console.warn('⚠️ [fileLoader] Error in cleanup:', err);
       }
-    }, 300);
+    }, 500);
     
     document.dispatchEvent(new Event('file-loaded'));
-    
   }
 
   fileInput.addEventListener('change', async (event) => {
