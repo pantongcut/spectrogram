@@ -1362,8 +1362,8 @@ async render() {
     }
 
     async getFrequencies(t, isRetry = false) {
-        // 檢查 this.options 是否為 null
-        if (!this.options || !t) {
+        // [FIX] 1. 初始檢查：如果沒有 Wrapper (已被銷毀)，直接退出
+        if (!this.options || !t || !this.wrapper) {
             return;
         }
         
@@ -1392,7 +1392,10 @@ async render() {
         await this._wasmReady;
         
         const currentFilterBankKey = `${this.scale}:${n}:${this.frequencyMin}:${this.frequencyMax}`;
-        
+
+        // [FIX] 2. 等待 WASM 就緒前的檢查
+        if (!this.wrapper) return;
+
         if (this.scale !== "linear") {
             if (this._lastFilterBankScale !== currentFilterBankKey) {
                 let c;
@@ -1428,6 +1431,11 @@ async render() {
         const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
         for (let e = 0; e < i; e++) {
+            // [FIX] 3. 通道迴圈內的檢查：防止在計算途中切換檔案
+            if (!this.wrapper || !this.canvas) {
+                return null;
+            }
+
             const s = t.getChannelData(e)
               , channelFrames = []
               , channelPeakLists = [];
@@ -1475,6 +1483,9 @@ async render() {
             
             // 清理 WASM 輸入數據引用
             audioDataCopy.fill(0);
+
+            // [FIX] 4. 計算完一個通道後再次檢查
+            if (!this.wrapper) return null;
 
             // 以下為正常的數據處理邏輯 (保持不變)
             const globalMaxLinear = this._wasmEngine.get_global_max();
