@@ -378,13 +378,4 @@ document.addEventListener('file-list-cleared', () => {
             });
         }
     }
-    
-    // [保險] 設置 2 秒超時，防止快照因為報錯而卡在螢幕上
-    setTimeout(() => {
-        const snapshot = document.getElementById("spectrogram-transition-snapshot");
-        if (snapshot) {
-             console.log('📸 [Snapshot] Timeout cleanup.');
-             snapshot.remove();
-        }
-    }, 2000);
 });
