@@ -647,11 +647,19 @@ destroy() {
     
     // [NEW] Public API for brightness/contrast/gain control
     setImageEnhancement(brightness, contrast, gain) {
+        // [OPTIMIZATION] Guard Clause: 如果數值沒有變化，直接忽略
+        // 使用一個微小的 epsilon (0.0001) 來處理浮點數比較
+        if (
+            Math.abs(this.imgParams.brightness - brightness) < 0.0001 &&
+            Math.abs(this.imgParams.contrast - contrast) < 0.0001 &&
+            Math.abs(this.imgParams.gain - gain) < 0.0001
+        ) {
+            return;
+        }
+
         this.imgParams.brightness = brightness;
         this.imgParams.contrast = contrast;
         this.imgParams.gain = gain;
-        
-        console.log('[Spectrogram] setImageEnhancement called:', { brightness, contrast, gain });
         
         this._updateActiveColorMap();
     }

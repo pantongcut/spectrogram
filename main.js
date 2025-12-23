@@ -78,7 +78,6 @@ function restoreImageEnhancement() {
     const { brightness, contrast, gain } = brightnessController.getSettings();
     const plugin = getPlugin();
     if (plugin && plugin.setImageEnhancement) {
-      console.log('[restoreImageEnhancement] Restoring settings:', { brightness, contrast, gain });
       plugin.setImageEnhancement(brightness, contrast, gain);
     }
   }
