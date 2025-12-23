@@ -209,32 +209,55 @@ export async function replacePlugin(
           console.warn('⚠️ Spectrogram render failed:', err);
         }
       } else {
-        // [軟更新邏輯保持不變...]
-        let shouldRender = false;
-        if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
+        // [Soft Update] 軟更新邏輯優化
+        let shouldRender = false;       // 需要重新計算 (WASM)
+        let shouldRefreshOnly = false;  // 只需要重畫 Canvas (Overlay)
+
+        // 檢查 Peak Mode 狀態變化
+        if (currentPeakMode !== peakMode) {
             currentPeakMode = peakMode;
-            currentPeakThreshold = peakThreshold;
-            if (plugin && plugin.options) {
-                plugin.options.peakMode = peakMode;
-                plugin.options.peakThreshold = peakThreshold;
+            if (plugin && plugin.options) plugin.options.peakMode = peakMode;
+            
+            // 如果是開啟 Peak Mode，必須計算 (因為之前可能沒算 Peak 數據)
+            if (peakMode === true) {
+                shouldRender = true;
+            } else {
+                // 如果是關閉，只需要重畫把線去掉即可，不用重算
+                shouldRefreshOnly = true;
             }
         }
+
+        // 檢查 Threshold 變化
+        if (currentPeakThreshold !== peakThreshold) {
+            currentPeakThreshold = peakThreshold;
+            if (plugin && plugin.options) plugin.options.peakThreshold = peakThreshold;
+            
+            // 調整閾值只需要重畫 Overlay，不需要重算 WASM
+            shouldRefreshOnly = true;
+        }
+
+        // 檢查 Overlap 變化
         if (plugin && targetNoverlap !== plugin.noverlap) {
             plugin.noverlap = targetNoverlap;
             if (plugin.options) plugin.options.noverlap = targetNoverlap;
+            // Overlap 改變會影響頻譜結構，必須重算
             shouldRender = true;
         }
 
         try {
             if (shouldRender) {
+                // 執行完整計算 (WASM FFT)
                 plugin.render();
-            } else {
-                if (plugin && typeof plugin.updatePeakOverlay === 'function') {
-                    plugin.updatePeakOverlay();
+            } else if (shouldRefreshOnly) {
+                // [關鍵] 執行輕量重繪 (只畫 Canvas，使用緩存數據)
+                // 這會觸發我們剛修改過的 drawSpectrogram，利用 _renderId 防止變黑
+                if (typeof plugin.refreshPeakOverlay === 'function') {
+                    plugin.refreshPeakOverlay();
                 } else {
-                    plugin.render();
+                    plugin.render(); // Fallback
                 }
             }
+            
             requestAnimationFrame(() => {
                 if (typeof onRendered === 'function') onRendered();
             });

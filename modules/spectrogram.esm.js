@@ -114,113 +114,6 @@ function i(t, e, s) {
     return null == s || s.appendChild(i),
     i
 }
-function a(t, e, s, r) {
-    switch (this.bufferSize = t,
-    this.sampleRate = e,
-    this.bandwidth = 2 / t * (e / 2),
-    this.sinTable = new Float32Array(t),
-    this.cosTable = new Float32Array(t),
-    this.windowValues = new Float32Array(t),
-    this.reverseTable = new Uint32Array(t),
-    this.peakBand = 0,
-    this.peak = 0,
-    s) {
-    case "bartlett":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = 2 / (t - 1) * ((t - 1) / 2 - Math.abs(i - (t - 1) / 2));
-        break;
-    case "bartlettHann":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = .62 - .48 * Math.abs(i / (t - 1) - .5) - .38 * Math.cos(2 * Math.PI * i / (t - 1));
-        break;
-    case "blackman":
-        for (r = r || .16,
-        i = 0; i < t; i++)
-            this.windowValues[i] = (1 - r) / 2 - .5 * Math.cos(2 * Math.PI * i / (t - 1)) + r / 2 * Math.cos(4 * Math.PI * i / (t - 1));
-        break;
-    case "cosine":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = Math.cos(Math.PI * i / (t - 1) - Math.PI / 2);
-        break;
-    case "gauss":
-        for (r = r || .25,
-        i = 0; i < t; i++)
-            this.windowValues[i] = Math.pow(Math.E, -.5 * Math.pow((i - (t - 1) / 2) / (r * (t - 1) / 2), 2));
-        break;
-    case "hamming":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = .54 - .46 * Math.cos(2 * Math.PI * i / (t - 1));
-        break;
-    case "hann":
-    case void 0:
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = .5 * (1 - Math.cos(2 * Math.PI * i / (t - 1)));
-        break;
-    case "lanczoz":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = Math.sin(Math.PI * (2 * i / (t - 1) - 1)) / (Math.PI * (2 * i / (t - 1) - 1));
-        break;
-    case "rectangular":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = 1;
-        break;
-    case "triangular":
-        for (i = 0; i < t; i++)
-            this.windowValues[i] = 2 / t * (t / 2 - Math.abs(i - (t - 1) / 2));
-        break;
-    default:
-        throw Error("No such window function '" + s + "'")
-    }
-    for (var i, a = 1, n = t >> 1; a < t; ) {
-        for (i = 0; i < a; i++)
-            this.reverseTable[i + a] = this.reverseTable[i] + n;
-        a <<= 1,
-        n >>= 1
-    }
-    for (i = 0; i < t; i++)
-        this.sinTable[i] = Math.sin(-Math.PI / i),
-        this.cosTable[i] = Math.cos(-Math.PI / i);
-    // allocate reusable temporary arrays to avoid per-call allocations
-    this._o = new Float32Array(t);
-    this._l = new Float32Array(t);
-    this._f = new Float32Array(t >> 1);
-
-    this.calculateSpectrum = function(t) {
-        var e, s, r, i = this.bufferSize, a = this.cosTable, n = this.sinTable, h = this.reverseTable, o = this._o, l = this._l, c = 2 / this.bufferSize, u = Math.sqrt, f = this._f, p = Math.floor(Math.log(i) / Math.LN2);
-        if (Math.pow(2, p) !== i)
-            throw "Invalid buffer size, must be a power of 2.";
-        if (i !== t.length)
-            throw "Supplied buffer is not the same size as defined FFT. FFT Size: " + i + " Buffer Size: " + t.length;
-        for (var d, w, g, b, M, m, y, v, T = 1, k = 0; k < i; k++)
-            o[k] = t[h[k]] * this.windowValues[h[k]],
-            l[k] = 0;
-        for (; T < i; ) {
-            d = a[T],
-            w = n[T],
-            g = 1,
-            b = 0;
-            for (var z = 0; z < T; z++) {
-                for (k = z; k < i; )
-                    m = g * o[M = k + T] - b * l[M],
-                    y = g * l[M] + b * o[M],
-                    o[M] = o[k] - m,
-                    l[M] = l[k] - y,
-                    o[k] += m,
-                    l[k] += y,
-                    k += T << 1;
-                g = (v = g) * d - b * w,
-                b = v * w + b * d
-            }
-            T <<= 1
-        }
-        k = 0;
-        for (var F = i / 2; k < F; k++)
-            (r = c * u((e = o[k]) * e + (s = l[k]) * s)) > this.peak && (this.peakBand = k,
-            this.peak = r),
-            f[k] = r;
-        return f
-    }
-}
 
 // Color map generation - optimized for bioacoustics
 function generateColorMapRGBA(mapName, gain = 1.0) {
@@ -418,6 +311,9 @@ class h extends s {
         this.numErbFilters = this.fftSamples / 2,
         this.createWrapper(),
         this.createCanvas();
+
+        // [FIX] Render ID to prevent race conditions during rapid updates
+        this._renderId = 0;
 
         // WASM integration
         this._wasmEngine = null;
@@ -1064,6 +960,13 @@ async render() {
         }
     }
 
+    // [NEW] 輕量化重繪方法：直接使用現有數據重畫，跳過 WASM
+    refreshPeakOverlay() {
+        if (this.lastRenderData) {
+            this.drawSpectrogram(this.lastRenderData);
+        }
+    }
+
     drawSpectrogram(t) {
         // [FIX] Validate input data before drawing
         if (!t || (Array.isArray(t) && t.length === 0)) {
@@ -1088,8 +991,12 @@ async render() {
             t = [t];
         }
         
+        // [CRITICAL FIX] Capture current render ID to detect obsolescence
+        // This prevents "Darkening/Stacking" when slider is moved rapidly
+        const currentRenderId = ++this._renderId;
+
         this.wrapper.style.height = this.height * t.length + "px";
-        this.canvas.width = this.getWidth();
+        this.canvas.width = this.getWidth(); // Clears the canvas
         this.canvas.height = this.height * t.length;
         
         const canvasCtx = this.spectrCc;
@@ -1118,10 +1025,6 @@ async render() {
             let imgData = new ImageData(imgWidth, imgHeight);
             
             // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
-            // (保持原本的 Color Map 填充邏輯，這裡省略以節省篇幅，請保留原文件該區塊代碼)
-            // ... [Insert Color Map Filling Logic Here] ...
-            // 這裡為了完整性，請確保您保留原有的這段 activeColorMapUint 填充循環
-            // ---------------------------------------------------
             if (this._activeColorMapUint && this._activeColorMapUint.length === 1024) {
                  if (Array.isArray(renderPixels) && renderPixels[0]) {
                     for (let x = 0; x < renderPixels.length; x++) {
@@ -1161,9 +1064,8 @@ async render() {
             const sourceHeight = Math.round(imgHeight * (p - u));
             
             createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap => {
-                // [FIX 3] 終極防護：如果 Context 已經被銷毀 (代表 destroy 被呼叫了)，
-                // 絕對不要執行 drawImage，並立刻關閉 bitmap
-                if (!this.spectrCc || !this.canvas) {
+                // [FIX 3] 終極防護：檢查 ID 是否過期 或 Context 已銷毀
+                if (this._renderId !== currentRenderId || !this.spectrCc || !this.canvas) {
                      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
                      return;
                 }
@@ -1172,13 +1074,12 @@ async render() {
                 const drawH = this.height * p / f;
                 canvasCtx.drawImage(bitmap, 0, drawY, canvasWidth, drawH);
 
-                // [FIX 1] 畫完立刻釋放 GPU 記憶體 (這非常重要！)
+                // [FIX 1] 畫完立刻釋放 GPU 記憶體
                 if (bitmap && typeof bitmap.close === 'function') {
                     bitmap.close();
                 }
 
-                // [FIX 2] 切斷閉包引用，讓 imgData 能立刻被 GC 回收
-                // 這些變數在閉包內會佔用大量 RAM，直到 Promise 結束很久後才釋放
+                // [FIX 2] 切斷閉包引用
                 imgData = null; 
                 renderPixels = null;
 
@@ -1190,6 +1091,12 @@ async render() {
                     const viewRangeHz = viewMaxHz - viewMinHz;
                     const totalBins = imgHeight;
 
+                    // Re-calculate effective threshold here to support real-time slider updates
+                    // without needing to re-run getFrequencies just for threshold check
+                    let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
+                    const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+                    const thresholdU8 = effectiveThreshold * 255; 
+
                     const xStep = canvasWidth / peaks.length;
                     
                     for (let i = 0; i < peaks.length; i++) {
@@ -1197,6 +1104,9 @@ async render() {
                         if (!framePeaks || framePeaks.length === 0) continue;
 
                         for (let peakObj of framePeaks) {
+                            // [FIX] Visual Filtering based on current slider threshold
+                            if (peakObj.magnitude < thresholdU8) continue;
+
                             let peakFreqHz;
                             if (this.scale === 'linear') {
                                 peakFreqHz = (peakObj.bin / totalBins) * (this.buffer.sampleRate / 2);
@@ -1542,6 +1452,8 @@ async render() {
                 const outputFrame = new Uint8Array(fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize));
                 channelFrames.push(outputFrame);
 
+                // [FIX] ALWAYS calculate peaks if Peak Mode is on, but store magnitude for later filtering
+                // We loosen the filter here to allow slider adjustment later in drawSpectrogram
                 if (this.options && this.options.peakMode) {
                     const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
@@ -1555,12 +1467,14 @@ async render() {
                         if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
                     }
 
-                    const cutoffU8 = localMaxU8 * effectiveThreshold;
+                    // Store peaks with a very low baseline threshold so we can filter dynamically later
+                    const baseThresholdU8 = 10; 
                     const framePeaks = [];
                     
-                    if (localMaxU8 > 10) { 
+                    if (localMaxU8 > baseThresholdU8) { 
                         for(let k=0; k < outputSize; k++) {
-                            if (outputFrame[k] >= cutoffU8) {
+                            // Store potentially relevant peaks (above minimal noise floor)
+                            if (outputFrame[k] >= baseThresholdU8) {
                                 framePeaks.push({
                                     bin: k,
                                     magnitude: outputFrame[k],
@@ -1634,69 +1548,11 @@ async render() {
             }
     }
 
-    /// 只更新Peak overlay，不重新計算頻譜 (用於快速更新Peak Threshold)
+    /// [DEPRECATED] Only useful if we had separate layers.
+    /// Since we use a single canvas, partial updates are destructive.
     updatePeakOverlay() {
-        if (!this.lastRenderData || !this.options || !this.options.peakMode) {
-            return;
-        }
-        
-        // 只有在有Peak數據時才重繪
-        if (!this.peakBandArrayPerChannel || this.peakBandArrayPerChannel.length === 0) {
-            return;
-        }
-
-        const canvasCtx = this.spectrCc;
-        if (!canvasCtx) return;
-
-        const canvasWidth = this.getWidth();
-        const t = this.lastRenderData;
-        const numChannels = Array.isArray(t[0]) ? t.length : 1;
-        
-        // Get updated effective threshold with new peakThreshold
-        const sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
-
-        // Redraw Peak overlay lines only
-        canvasCtx.strokeStyle = "rgb(255, 192, 0)";
-        canvasCtx.lineWidth = 1.5;
-
-        for (let channelIdx = 0; channelIdx < numChannels; channelIdx++) {
-            const startY = channelIdx * this.height;
-            
-            if (this.peakBandArrayPerChannel[channelIdx]) {
-                const peaks = this.peakBandArrayPerChannel[channelIdx];
-                const xStep = canvasWidth / peaks.length;
-
-                canvasCtx.beginPath();
-                let isFirstPoint = true;
-                
-                for (let i = 0; i < peaks.length; i++) {
-                    const framePeaks = peaks[i];
-                    if (!framePeaks || framePeaks.length === 0) continue;
-
-                    for (let peakIdx = 0; peakIdx < framePeaks.length; peakIdx++) {
-                        const freq = framePeaks[peakIdx];
-                        if (freq < effectiveThreshold) continue;
-
-                        const freqHz = freq * 1000;
-                        const viewMinHz = this.frequencyMin || 0;
-                        const viewMaxHz = this.frequencyMax || 64000;
-                        const freqNormalized = (freqHz - viewMinHz) / (viewMaxHz - viewMinHz);
-                        
-                        const y = startY + this.height * (1 - freqNormalized);
-                        const x = i * xStep + xStep / 2;
-                        
-                        if (isFirstPoint) {
-                            canvasCtx.moveTo(x, y);
-                            isFirstPoint = false;
-                        } else {
-                            canvasCtx.lineTo(x, y);
-                        }
-                    }
-                }
-                canvasCtx.stroke();
-            }
-        }
+        // No-op to prevent logic errors in wsManager
+        // Real update happens in drawSpectrogram via render() or refreshPeakOverlay()
     }
 
     resample(t) {
