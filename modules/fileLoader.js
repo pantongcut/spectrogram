@@ -107,7 +107,10 @@ export function initFileLoader({
     if (uploadOverlay) uploadOverlay.style.display = 'none';
   }
 
-// [STEP 0: 建立視覺快照 (防止閃爍)]
+  async function loadFile(file) {
+    if (!file) return;
+    
+    // [STEP 0: 建立視覺快照 (防止閃爍)]
     // 在我們殺死舊數據前，先用一張「假圖片」蓋住畫面
     // 這樣使用者就看不到中間的「全白/閃爍」瞬間
     const container = document.getElementById("spectrogram-only");
