@@ -112,16 +112,12 @@ export function initFileLoader({
 
     console.log(`📂 [FileLoader] Start loading: ${file.name}`);
 
-// [STEP 0: 建立視覺快照]
+    // [STEP 0: 建立視覺快照 (掛載到 Body 以防被誤刪)]
     const container = document.getElementById("spectrogram-only");
     if (container) {
-        // 嘗試抓取 Spectrogram Canvas
-        // 注意：如果你有其他 Canvas (如 Axis)，這裡可能會需要更精確的選擇器
-        // 通常 Spectrogram 的 Canvas 是最大的，或者它是 div > canvas 結構
+        // 尋找舊的 Canvas
         const canvases = container.querySelectorAll("canvas:not(#spectrogram-transition-snapshot)");
         let oldCanvas = null;
-        
-        // 簡單過濾：找面積最大的 Canvas (通常就是頻譜圖)
         let maxArea = 0;
         canvases.forEach(c => {
             const area = c.width * c.height;
@@ -134,65 +130,68 @@ export function initFileLoader({
         if (oldCanvas && oldCanvas.width > 0) {
             console.log(`📸 [Snapshot] Creating snapshot from old canvas (${oldCanvas.width}x${oldCanvas.height})...`);
             
+            // 獲取舊 Canvas 在螢幕上的絕對位置
+            const rect = oldCanvas.getBoundingClientRect();
+            
             const snapshot = document.createElement("canvas");
             snapshot.id = "spectrogram-transition-snapshot";
+            // 設定與舊 Canvas 相同的解析度
             snapshot.width = oldCanvas.width;
             snapshot.height = oldCanvas.height;
-            snapshot.style.position = "absolute";
-            snapshot.style.top = "0";
-            snapshot.style.left = "0";
-            snapshot.style.width = "100%";
-            snapshot.style.height = "100%";
-            snapshot.style.zIndex = "100";
-            snapshot.style.pointerEvents = "none";
+            
+            // 設定樣式：固定在螢幕上，完全覆蓋舊的位置
+            Object.assign(snapshot.style, {
+                position: "fixed", // 使用 fixed 避免受父容器 overflow 影響
+                top: `${rect.top}px`,
+                left: `${rect.left}px`,
+                width: `${rect.width}px`,
+                height: `${rect.height}px`,
+                zIndex: "9999", // 最高層級
+                pointerEvents: "none",
+                boxSizing: "border-box"
+            });
 
             const ctx = snapshot.getContext("2d");
             ctx.drawImage(oldCanvas, 0, 0);
-            container.appendChild(snapshot);
             
-            console.log('📸 [Snapshot] Snapshot appended to DOM.');
+            // [關鍵修改] 掛載到 body，確保不受 spectrogram-only 清理影響
+            document.body.appendChild(snapshot);
+            
+            console.log('📸 [Snapshot] Snapshot appended to BODY.');
         } else {
-            console.log('📸 [Snapshot] No valid old canvas found. Skipping snapshot.');
+            console.log('📸 [Snapshot] No valid old canvas found. Skipping.');
         }
-    } else {
-        console.warn('📸 [Snapshot] Container #spectrogram-only not found!');
     }
 
-    // [STEP 1: 暴力清理舊狀態 (RAM 歸零)] 
-    // 使用者現在看到的是 Snapshot，所以我們可以放心在後台進行破壞性清理
+    // [STEP 1: 暴力清理]
     if (wavesurfer) {
         try {
             wavesurfer.stop();
             wavesurfer.decodedData = null;
-            
             if (wavesurfer.backend) {
                 wavesurfer.backend.buffer = null;
                 if (wavesurfer.backend.source) {
                     try { wavesurfer.backend.source.disconnect(); } catch(e){}
                 }
             }
-
-            // 通知 Spectrogram 銷毀 (釋放顯存)
-            // 雖然這會移除舊 Canvas，但我們的 Snapshot 還在，所以不會閃爍
             document.dispatchEvent(new Event('file-list-cleared')); 
         } catch (e) {
             console.warn("Cleanup warning:", e);
         }
     }
-
-    // [STEP 2: 清理遺留的 ObjectURL]
+    
+    // ... (STEP 2, 3, 4, 5 保持原本 loadBlob 的代碼不變) ...
+    // [STEP 2]
     if (lastObjectUrl) {
         URL.revokeObjectURL(lastObjectUrl);
         lastObjectUrl = null;
     }
 
-    // --- Metadata 處理 (保持不變) ---
+    // [STEP 3]
     const detectedSampleRate = await getWavSampleRate(file);
-
     if (typeof onBeforeLoad === 'function') onBeforeLoad();
     if (typeof onFileLoaded === 'function') onFileLoaded(file);
     if (typeof onSampleRateDetected === 'function') await onSampleRateDetected(detectedSampleRate, true);
-    
     if (fileNameElem) fileNameElem.textContent = file.name;
 
     try {
@@ -205,7 +204,7 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // [STEP 3: 使用 loadBlob (RAM 不累積)]
+    // [STEP 4]
     try {
         await wavesurfer.loadBlob(file);
     } catch (err) {
@@ -214,16 +213,14 @@ export function initFileLoader({
         }
     }
 
+    // [STEP 5]
     if (typeof onPluginReplaced === 'function') {
       onPluginReplaced();
     }
-
     const sampleRate = detectedSampleRate || wavesurfer?.options?.sampleRate || 256000;
-
     if (typeof onAfterLoad === 'function') {
       onAfterLoad();
     }
-    
     document.dispatchEvent(new Event('file-loaded'));
   }
 

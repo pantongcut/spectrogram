@@ -169,26 +169,27 @@ export async function replacePlugin(
         }
 
         try {
+          // 使用 RAF 避免阻塞 UI
           requestAnimationFrame(() => {
+              // 再次檢查 plugin 是否存在
               if (plugin) {
                   plugin.render();
                   
-                  const container = document.getElementById("spectrogram-only");
-                  if (container) {
-                      const snapshot = document.getElementById("spectrogram-transition-snapshot");
-                      if (snapshot) {
-                          console.log('📸 [Snapshot] New spectrogram rendered. Removing snapshot now.');
-                          snapshot.remove();
-                      } else {
-                          // 這是 Debug 重點：如果這裡沒印出來，代表快照在渲染完成前就已經不見了
-                          console.log('📸 [Snapshot] Render done, but no snapshot found to remove.');
-                      }
+                  // [FIX: 移除 BODY 上的視覺快照]
+                  const snapshot = document.getElementById("spectrogram-transition-snapshot");
+                  if (snapshot) {
+                      console.log('📸 [Snapshot] New render complete. Removing snapshot from BODY.');
+                      snapshot.remove();
+                  } else {
+                      // 如果這裡印出來，代表快照被意外清除了
+                      console.log('📸 [Snapshot] Warning: Snapshot missing when trying to remove.');
                   }
               }
+              
               if (typeof onRendered === 'function') onRendered();
           });
         } catch (err) {
-            console.warn('⚠️ Spectrogram render failed:', err);
+          console.warn('⚠️ Spectrogram render failed:', err);
         }
       } else {
         // [軟更新邏輯保持不變...]
@@ -348,18 +349,25 @@ document.addEventListener('file-list-cleared', () => {
 
     const container = document.getElementById("spectrogram-only");
     if (container) {
-        // [修正] 不要選取所有 canvas，要排除掉快照
-        const canvases = container.querySelectorAll("canvas:not(#spectrogram-transition-snapshot)");
+        // 清理 container 內的所有 canvas
+        const canvases = container.querySelectorAll("canvas");
         
         if (canvases.length > 0) {
-            console.log(`🧹 [Cleanup] Force removing ${canvases.length} spectrogram canvases (keeping snapshot).`);
+            console.log(`🧹 [Cleanup] Removing ${canvases.length} canvases from container.`);
             canvases.forEach(canvas => {
                 canvas.width = 0;
                 canvas.height = 0;
                 canvas.remove();
             });
-        } else {
-            console.log('🧹 [Cleanup] No spectrogram canvases found to clean.');
         }
     }
+    
+    // [保險] 設置 2 秒超時，防止快照因為報錯而卡在螢幕上
+    setTimeout(() => {
+        const snapshot = document.getElementById("spectrogram-transition-snapshot");
+        if (snapshot) {
+             console.log('📸 [Snapshot] Timeout cleanup.');
+             snapshot.remove();
+        }
+    }, 2000);
 });
