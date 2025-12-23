@@ -1098,7 +1098,7 @@ async render() {
             
             const imgWidth = renderPixels.length; // Smooth: numFrames, Default: screenWidth
             const imgHeight = Array.isArray(renderPixels) && renderPixels[0] ? renderPixels[0].length : 1;
-            const imgData = new ImageData(imgWidth, imgHeight);
+            let imgData = new ImageData(imgWidth, imgHeight);
             
             // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
             // (保持原本的 Color Map 填充邏輯，這裡省略以節省篇幅，請保留原文件該區塊代碼)
