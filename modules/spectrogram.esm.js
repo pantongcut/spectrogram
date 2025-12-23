@@ -1471,6 +1471,12 @@ async render() {
             
             let fullU8Spectrum;
             try {
+                // [FIX] 終極防護：防止 ZoomControl 在引擎銷毀或切換時觸發重繪導致崩潰
+                if (!this._wasmEngine) {
+                    audioDataCopy.fill(0); // 清理內存
+                    return null; // 直接返回，不做任何事
+                }
+
                 // 嘗試調用 WASM 計算
                 fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
                     audioDataCopy,
