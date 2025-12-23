@@ -987,10 +987,14 @@ class h extends s {
         }, this.wrapper),
         this.spectrCc = this.canvas.getContext("2d")
     }
-    async render() {
+async render() {
         var t;
         
-        // [FIX] Queue renders instead of skipping - set flag to indicate pending render
+        // [FIX] 1. 銷毀檢查：如果插件已被銷毀（DOM 不存在），直接終止
+        // 這是防止快速切換時 RAM 累積的第一道防線
+        if (!this.wrapper || !this.canvas) return;
+
+        // [FIX] 2. 渲染鎖：如果正在渲染，標記為待處理並返回，防止並行執行
         if (this._isRendering) {
             this._pendingRender = true;
             return;
@@ -1000,25 +1004,44 @@ class h extends s {
         this._pendingRender = false;
         
         try {
-            if (this.frequenciesDataUrl)
+            if (this.frequenciesDataUrl) {
                 this.loadFrequenciesData(this.frequenciesDataUrl);
-            else {
+            } else {
                 const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
+                
+                // 確保有解碼數據
                 if (e) {
+                    // 計算頻譜數據 (這是最耗時的步驟，包含 await)
                     const frequencies = await this.getFrequencies(e);
-                    // [FIX] Only draw if frequencies is valid (not null/undefined/empty)
+                    
+                    // [FIX] 3. 二次銷毀檢查：關鍵步驟！
+                    // 在 await 結束後，必須再次檢查 wrapper 是否還存在。
+                    // 因為在計算頻譜的幾百毫秒內，使用者可能已經切換了檔案 (觸發了 destroy)。
+                    // 如果這時繼續執行 drawSpectrogram，就會導致記憶體洩漏或錯誤。
+                    if (!this.wrapper || !this.canvas) return;
+
+                    // [FIX] 4. 數據有效性檢查
                     if (frequencies && Array.isArray(frequencies) && frequencies.length > 0) {
                         this.drawSpectrogram(frequencies);
                     }
                 }
             }
+        } catch (err) {
+            console.warn('[Spectrogram] Render error:', err);
         } finally {
             this._isRendering = false;
-            // [FIX] If a render was requested while we were busy, do it now
+            
+            // [FIX] 5. 處理待處理的渲染請求
+            // 如果在忙碌時有新的渲染請求進來，現在執行它
             if (this._pendingRender) {
                 this._pendingRender = false;
-                // Use setTimeout to avoid stack overflow
-                setTimeout(() => this.render(), 0);
+                // 使用 setTimeout 避免堆疊溢出，並讓 UI 執行緒有機會喘息
+                setTimeout(() => {
+                    // 再次檢查是否存在才執行
+                    if (this.wrapper && this.canvas) {
+                        this.render();
+                    }
+                }, 0);
             }
         }
     }
