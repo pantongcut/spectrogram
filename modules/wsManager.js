@@ -328,19 +328,21 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
 }
 /**
  * 閒置清理程式：當用戶停止操作時呼叫
- * 這會清除所有快取、釋放 WASM、並嘗試觸發 GC
+ * 這會清除所有快取、釋放 WASM
  */
 export async function runIdleCleanup() {
-    console.log('🧹 [Idle Cleanup] 開始深度清理記憶體...');
+    // 防止在沒有插件時執行
+    if (!plugin && !analysisWasmEngine) return;
+
+    console.log('🧹 [Idle Cleanup] 釋放閒置資源...');
     
-    // 1. 清理 Spectrogram 內部的所有快取
+    // 1. 清理 Spectrogram 內部
     if (plugin) {
         if (typeof plugin.clearFilterBankCache === 'function') {
             plugin.clearFilterBankCache();
         }
-        // 清除 WASM 內部的暫存區
-        if (typeof plugin._reinitWasmEngine === 'function') {
-            // 重新初始化引擎會釋放舊的線性記憶體增長
+        
+        if (plugin._wasmEngine && typeof plugin._reinitWasmEngine === 'function') {
             plugin._reinitWasmEngine(); 
         }
     }
@@ -348,24 +350,17 @@ export async function runIdleCleanup() {
     // 2. 清理全域分析用的 WASM 引擎
     if (analysisWasmEngine) {
         try {
-            analysisWasmEngine.free();
+            if (typeof analysisWasmEngine.free === 'function') {
+                analysisWasmEngine.free();
+            }
         } catch(e) {}
         analysisWasmEngine = null;
     }
 
-    // 3. [HACK] 記憶體壓力測試 (Memory Pressure)
-    // 分配一個 50MB 的臨時緩衝區，然後立即設為 null。
-    // 這會給 V8 引擎一個信號："記憶體波動很大，我應該趕快執行 Major GC"。
-    try {
-        let pressure = new Float32Array(1024 * 1024 * 12); // 約 48MB
-        for(let i=0; i<pressure.length; i+=1000) pressure[i] = Math.random();
-        pressure = null; 
-        
-        // 給一點時間讓 GC 反應
-        await new Promise(r => setTimeout(r, 100));
-    } catch (e) {
-        console.warn('Memory pressure failed:', e);
+    // 3. 強制釋放 DOM 節點引用 (如果有殘留的 detached nodes)
+    if (window.gc) {
+        try { window.gc(); } catch(e) {}
     }
     
-    console.log('✨ [Idle Cleanup] 清理完成');
+    console.log('✨ [Idle Cleanup] 完成');
 }

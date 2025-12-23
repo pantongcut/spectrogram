@@ -771,6 +771,21 @@ class h extends s {
     // [FIX] Reinitialize WASM engine when it becomes corrupted due to aliasing errors
     _reinitWasmEngine() {
         console.log('[Spectrogram] Reinitializing WASM engine due to aliasing errors');
+
+        // [CRITICAL FIX] 在 null 之前，必須顯式釋放舊的 WASM 記憶體
+        if (this._wasmEngine) {
+            try {
+                if (typeof this._wasmEngine.free === 'function') {
+                    this._wasmEngine.free();
+                } else if (typeof this._wasmEngine.release_memory === 'function') {
+                    this._wasmEngine.release_memory();
+                }
+            } catch (e) {
+                console.warn('[Spectrogram] Error freeing old engine during reinit:', e);
+            }
+        }
+
+        // 切斷引用
         this._wasmInitialized = false;
         this._wasmEngine = null;
         
@@ -783,13 +798,23 @@ class h extends s {
             if (this._wasmInitialized) return;
             this._wasmInitialized = true;
             
-            this._wasmEngine = new SpectrogramEngine(
-                this.fftSamples,
-                this.windowFunc,
-                this.alpha
-            );
-            
-            console.log('✅ [Spectrogram] WASM 引擎已重新初始化');
+            try {
+                this._wasmEngine = new SpectrogramEngine(
+                    this.fftSamples,
+                    this.windowFunc,
+                    this.alpha
+                );
+                
+                // 如果有之前設定過的 Color Map，記得重新應用
+                if (this._activeColorMapUint && this._wasmEngine.set_color_map) {
+                     const colorMapCopy = new Uint8Array(this._activeColorMapUint);
+                     this._wasmEngine.set_color_map(colorMapCopy);
+                }
+
+                console.log('✅ [Spectrogram] WASM 引擎已重新初始化 (Memory Freed)');
+            } catch (err) {
+                console.error('❌ [Spectrogram] WASM Re-init failed:', err);
+            }
         });
     }
 
