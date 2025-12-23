@@ -19,6 +19,7 @@ initScrollSync,
 setPeakMode,
 setPeakThreshold,
 setSmoothMode,
+runIdleCleanup,
 } from './modules/wsManager.js';
 
 import { initZoomControls } from './modules/zoomControl.js';
@@ -45,6 +46,25 @@ const spectrogramHeight = 800;
 let sidebarControl;
 let fileLoaderControl;
 let brightnessController = null; // Global reference to brightness control for settings restoration
+let idleCleanupTimer = null;
+
+// 定義一個重置閒置計時器的函數
+function scheduleIdleCleanup() {
+    // 如果有舊的計時器，取消它
+    if (idleCleanupTimer) {
+        clearTimeout(idleCleanupTimer);
+        idleCleanupTimer = null;
+    }
+
+    // 設定新的計時器：5 秒後執行清理
+    idleCleanupTimer = setTimeout(async () => {
+        // 只有當沒有在播放且沒有在拖曳時才清理
+        const ws = getWavesurfer();
+        if (ws && !ws.isPlaying() && !isDraggingProgress) {
+             await runIdleCleanup();
+        }
+    }, 5000); // 5000 ms = 5秒
+}
 
 /**
  * 在 Wavesurfer Spectrogram 上應用紅色 Peak 線
@@ -492,6 +512,10 @@ zoomControlsElem.style.display = 'flex';
 sidebarControl.refresh(file.name);
 },
 onBeforeLoad: () => {
+  if (idleCleanupTimer) {
+            clearTimeout(idleCleanupTimer);
+            idleCleanupTimer = null;
+        }
   if (demoFetchController) {
     demoFetchController.abort();
     demoFetchController = null;
@@ -522,6 +546,7 @@ onBeforeLoad: () => {
     freqHoverControl?.refreshHover();
     autoIdControl?.updateMarkers();
     updateSpectrogramSettingsText();
+    scheduleIdleCleanup();
   },
 onSampleRateDetected: autoSetSampleRate
 });
