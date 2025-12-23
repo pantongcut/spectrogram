@@ -1148,6 +1148,16 @@ async render() {
                 const drawH = this.height * p / f;
                 canvasCtx.drawImage(bitmap, 0, drawY, canvasWidth, drawH);
 
+                // [FIX 1] 畫完立刻釋放 GPU 記憶體 (這非常重要！)
+                if (bitmap && typeof bitmap.close === 'function') {
+                    bitmap.close();
+                }
+
+                // [FIX 2] 切斷閉包引用，讓 imgData 能立刻被 GC 回收
+                // 這些變數在閉包內會佔用大量 RAM，直到 Promise 結束很久後才釋放
+                imgData = null; 
+                renderPixels = null;
+
                 // [NEW] Peak Mode 渲染邏輯更新 (支援多點/局部閾值)
                 if (this.options && this.options.peakMode && this.peakBandArrayPerChannel && this.peakBandArrayPerChannel[channelIdx]) {
                     const peaks = this.peakBandArrayPerChannel[channelIdx];

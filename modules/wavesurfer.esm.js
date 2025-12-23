@@ -1443,11 +1443,17 @@ _loadingAbortController = null;
                     const t = yield s.arrayBuffer();
                     if (signal.aborted) return;
                     
-                    // [FIX] 在進行重型解碼前，再給一次喘息機會
+                    // [FIX 3] 在進行重型解碼前，再給一次喘息機會
                     // 這裡的解碼會產生巨大的 Float32Array，確保記憶體乾淨很重要
                     yield new Promise(r => setTimeout(r, 10));
                     
                     const decoded = yield i.decode(t, this.options.sampleRate);
+                    
+                    // [FIX 4 - 新增] 解碼完成後，立刻銷毀原始 ArrayBuffer
+                    // t 佔用了檔案大小的 RAM (3-5MB)，解碼後它就是垃圾了
+                    // 這裡手動設為 null 幫助引擎立刻識別
+                    t = null;
+
                     if (signal.aborted) return;
                     this.decodedData = decoded;
                 } catch (err) {
