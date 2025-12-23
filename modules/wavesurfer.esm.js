@@ -503,11 +503,30 @@ class h extends e {
     }
     destroy() {
         var t, e;
-        this.subscriptions.forEach((t => t())),
-        this.container.remove(),
+        this.subscriptions.forEach((t => t()));
+        
+        // [FIX 1] 強制釋放所有 Canvas 的 GPU 顯存
+        // 僅僅 remove() 是不夠的，瀏覽器可能會保留 Backing Store 直到 JS 對象被完全 GC
+        if (this.container) {
+            const canvases = this.container.querySelectorAll('canvas');
+            canvases.forEach(canvas => {
+                canvas.width = 0;
+                canvas.height = 0;
+            });
+            this.container.remove();
+        }
+
         null === (t = this.resizeObserver) || void 0 === t || t.disconnect(),
         null === (e = this.unsubscribeOnScroll) || void 0 === e || e.forEach((t => t())),
-        this.unsubscribeOnScroll = []
+        this.unsubscribeOnScroll = [],
+        
+        // [FIX 2] 關鍵：釋放對巨大 AudioBuffer 的引用
+        // 之前這裡沒有清空，導致即使 WaveSurfer 釋放了，Renderer 仍抓著幾百 MB 的數據不放
+        this.audioData = null;
+        this.wrapper = null;
+        this.canvasWrapper = null;
+        this.progressWrapper = null;
+        this.scrollContainer = null;
     }
     createDelay(t=10) {
         let e, i;

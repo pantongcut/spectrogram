@@ -544,7 +544,7 @@ class h extends s {
         this._createColorMapDropdown(),
         this.drawColorMapBar()
     }
-destroy() {
+    destroy() {
         // Clear all filter bank caches BEFORE clearing engine reference
         this._filterBankCache = {};
         this._filterBankCacheByKey = {};
@@ -584,6 +584,25 @@ destroy() {
             }
         }
         
+        // [FIX] 強制釋放 Spectrogram Canvas 顯存
+        if (this.canvas) {
+            this.canvas.width = 0;
+            this.canvas.height = 0;
+            this.canvas.remove();
+            this.canvas = null;
+        }
+        
+        // 清除 Context 引用
+        this.spectrCc = null;
+
+        // 如果有 Labels Canvas，也一併清理
+        if (this.labelsEl) {
+            this.labelsEl.width = 0;
+            this.labelsEl.height = 0;
+            this.labelsEl.remove();
+            this.labelsEl = null;
+        }
+
         // Clean up event listeners
         if (this._colorBarClickHandler) {
             const colorBarCanvas = document.getElementById("color-bar");
