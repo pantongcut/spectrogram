@@ -109,6 +109,48 @@ export function initFileLoader({
 
   async function loadFile(file) {
     if (!file) return;
+
+    // ============================================================
+    // [STEP 1: 暴力清理舊狀態] 
+    // 這一步確保在載入新檔案前，RAM 是乾淨的 (歸零策略)
+    // ============================================================
+    if (wavesurfer) {
+        try {
+            // 1. 停止播放
+            wavesurfer.stop();
+            
+            // 2. 斬斷對上一張頻譜圖數據的引用
+            wavesurfer.decodedData = null;
+            
+            // 3. 清空 WebAudio Backend 的緩衝區
+            if (wavesurfer.backend) {
+                wavesurfer.backend.buffer = null;
+                // 如果有 source node，斷開連接
+                if (wavesurfer.backend.source) {
+                    try { wavesurfer.backend.source.disconnect(); } catch(e){}
+                }
+            }
+
+            // 4. 發送事件通知 Spectrogram 插件立即自我銷毀 (釋放 GPU 顯存)
+            // 這會觸發我們在 wsManager 中寫的 canvas.width=0 邏輯
+            document.dispatchEvent(new Event('file-list-cleared')); 
+        } catch (e) {
+            console.warn("Cleanup warning:", e);
+        }
+    }
+
+    // ============================================================
+    // [STEP 2: 清理遺留的 ObjectURL]
+    // 雖然我們現在改用 loadBlob，但為了保險起見，如果之前有殘留的 URL，先清掉
+    // ============================================================
+    if (lastObjectUrl) {
+        URL.revokeObjectURL(lastObjectUrl);
+        lastObjectUrl = null;
+    }
+
+    // ============================================================
+    // [STEP 3: Metadata 讀取 (保持原有功能不變)]
+    // ============================================================
     const detectedSampleRate = await getWavSampleRate(file);
 
     if (typeof onBeforeLoad === 'function') {
@@ -137,14 +179,27 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    const fileUrl = URL.createObjectURL(file);
-    // Don't revoke old URL yet - WaveSurfer might still be using it
-    // Store it for later revocation
-    const oldObjectUrl = lastObjectUrl;
-    lastObjectUrl = fileUrl;
+    // ============================================================
+    // [STEP 4: 核心修改 - 改用 loadBlob]
+    // 舊代碼: const fileUrl = URL.createObjectURL(file); await wavesurfer.load(fileUrl);
+    // 新代碼: 直接傳遞 file 對象
+    // ============================================================
+    try {
+        // loadBlob 會直接讀取 File 對象的內存，不會生成需要手動 revoke 的 URL
+        // 配合 wavesurfer.esm.js 中的 try...finally { s = null }，
+        // 一旦載入被中斷或完成，檔案引用會立即消失，GC 可以馬上回收。
+        await wavesurfer.loadBlob(file);
+    } catch (err) {
+        // 如果是因為快速切換導致的 AbortError (中斷)，這是正常的，忽略它
+        // 這樣控制台就不會報紅字
+        if (err.name !== 'AbortError' && err.message !== 'The user aborted a request.') {
+            console.warn("Load error:", err);
+        }
+    }
 
-    await wavesurfer.load(fileUrl);
-
+    // ============================================================
+    // [STEP 5: 後續處理 (保持原有功能不變)]
+    // ============================================================
     if (typeof onPluginReplaced === 'function') {
       onPluginReplaced();
     }
@@ -154,42 +209,6 @@ export function initFileLoader({
     if (typeof onAfterLoad === 'function') {
       onAfterLoad();
     }
-    
-    // [FIX] 延遲清理：確保 WaveSurfer Worker 完成解碼，然後清理舊的 Object URL 和緩存
-    // 500ms 是經驗值，給予足夠的時間讓瀏覽器 GC 開始運作
-    setTimeout(() => {
-      try {
-        // 現在安全地撤銷舊的 Object URL，因為新檔案已載入
-        if (oldObjectUrl && oldObjectUrl !== fileUrl) {
-          URL.revokeObjectURL(oldObjectUrl);
-          console.log('✅ [fileLoader] Revoked old Blob URL');
-        }
-        
-        // 清理 WaveSurfer backend 中的任何快取音頻緩衝區
-        if (wavesurfer && wavesurfer.backend) {
-          // 更激進的緩衝區清理
-          const keysToNull = [
-            'audioBuffer', 'decodedData', 'buffer', 'data', 'rawData',
-            'originalAudioBuffer', 'filteredBuffer', 'offlineContext',
-            'convolver', 'analyser', 'scriptProcessor', 'gainNode'
-          ];
-          keysToNull.forEach(key => {
-            if (wavesurfer.backend[key]) {
-              wavesurfer.backend[key] = null;
-            }
-          });
-          console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffers and nodes');
-        }
-        
-        // 試圖強制垃圾回收的暗示
-        if (window.gc) {
-          window.gc();
-          console.log('💾 [fileLoader] Triggered manual garbage collection');
-        }
-      } catch (err) {
-        console.warn('⚠️ [fileLoader] Error in cleanup:', err);
-      }
-    }, 500);
     
     document.dispatchEvent(new Event('file-loaded'));
   }

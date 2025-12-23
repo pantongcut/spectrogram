@@ -322,3 +322,26 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
     return null;
   }
 }
+
+document.addEventListener('file-list-cleared', () => {
+    // 1. 銷毀 Plugin 實例
+    if (plugin) {
+        if (typeof plugin.destroy === 'function') {
+            plugin.destroy();
+        }
+        plugin = null;
+    }
+
+    // 2. 暴力清理 DOM 和 顯存
+    // 即使 plugin.destroy() 失敗，這一步也能保證 GPU 記憶體被釋放
+    const container = document.getElementById("spectrogram-only");
+    if (container) {
+        const canvases = container.querySelectorAll("canvas");
+        canvases.forEach(canvas => {
+            canvas.width = 0;  // 關鍵：歸零釋放顯存
+            canvas.height = 0;
+            canvas.remove();
+        });
+    }
+
+});
