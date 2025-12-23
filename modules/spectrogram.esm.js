@@ -1144,6 +1144,13 @@ async render() {
             const sourceHeight = Math.round(imgHeight * (p - u));
             
             createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap => {
+                // [FIX 3] 終極防護：如果 Context 已經被銷毀 (代表 destroy 被呼叫了)，
+                // 絕對不要執行 drawImage，並立刻關閉 bitmap
+                if (!this.spectrCc || !this.canvas) {
+                     if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+                     return;
+                }
+                
                 const drawY = this.height * (channelIdx + 1 - p / f);
                 const drawH = this.height * p / f;
                 canvasCtx.drawImage(bitmap, 0, drawY, canvasWidth, drawH);

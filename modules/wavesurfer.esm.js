@@ -1497,6 +1497,11 @@ _loadingAbortController = null;
             this.decodedData && (this.emit("decode", this.getDuration()),
             this.renderer.render(this.decodedData)),
             this.emit("ready", this.getDuration())
+
+            // [FIX 5 - 最終補漏] 顯式釋放 Fetch 回來的 Blob
+            // 你的 RAM 累積 (334MB) 正是這些 Blob 堆積的結果
+            s = null; 
+            e = null; // url string 也順便清空
         }))
     }
     load(e, i, s) {
