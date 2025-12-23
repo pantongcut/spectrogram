@@ -1675,7 +1675,7 @@ _loadingAbortController = null;
     destroy() {
         var t;
         this.emit("destroy"),
-        null === (t = this.abortController) || void 0 === t || t.abort(),
+        null === (t = this.abortController) || void 0 === t || t.abort();
         
         // [FIX] 中斷任何正在進行的音頻載入任務
         if (this._loadingAbortController) {
