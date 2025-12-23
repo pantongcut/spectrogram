@@ -114,6 +114,113 @@ function i(t, e, s) {
     return null == s || s.appendChild(i),
     i
 }
+function a(t, e, s, r) {
+    switch (this.bufferSize = t,
+    this.sampleRate = e,
+    this.bandwidth = 2 / t * (e / 2),
+    this.sinTable = new Float32Array(t),
+    this.cosTable = new Float32Array(t),
+    this.windowValues = new Float32Array(t),
+    this.reverseTable = new Uint32Array(t),
+    this.peakBand = 0,
+    this.peak = 0,
+    s) {
+    case "bartlett":
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = 2 / (t - 1) * ((t - 1) / 2 - Math.abs(i - (t - 1) / 2));
+        break;
+    case "bartlettHann":
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = .62 - .48 * Math.abs(i / (t - 1) - .5) - .38 * Math.cos(2 * Math.PI * i / (t - 1));
+        break;
+    case "blackman":
+        for (r = r || .16,
+        i = 0; i < t; i++)
+            this.windowValues[i] = (1 - r) / 2 - .5 * Math.cos(2 * Math.PI * i / (t - 1)) + r / 2 * Math.cos(4 * Math.PI * i / (t - 1));
+        break;
+    case "cosine":
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = Math.cos(Math.PI * i / (t - 1) - Math.PI / 2);
+        break;
+    case "gauss":
+        for (r = r || .25,
+        i = 0; i < t; i++)
+            this.windowValues[i] = Math.pow(Math.E, -.5 * Math.pow((i - (t - 1) / 2) / (r * (t - 1) / 2), 2));
+        break;
+    case "hamming":
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = .54 - .46 * Math.cos(2 * Math.PI * i / (t - 1));
+        break;
+    case "hann":
+    case void 0:
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = .5 * (1 - Math.cos(2 * Math.PI * i / (t - 1)));
+        break;
+    case "lanczoz":
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = Math.sin(Math.PI * (2 * i / (t - 1) - 1)) / (Math.PI * (2 * i / (t - 1) - 1));
+        break;
+    case "rectangular":
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = 1;
+        break;
+    case "triangular":
+        for (i = 0; i < t; i++)
+            this.windowValues[i] = 2 / t * (t / 2 - Math.abs(i - (t - 1) / 2));
+        break;
+    default:
+        throw Error("No such window function '" + s + "'")
+    }
+    for (var i, a = 1, n = t >> 1; a < t; ) {
+        for (i = 0; i < a; i++)
+            this.reverseTable[i + a] = this.reverseTable[i] + n;
+        a <<= 1,
+        n >>= 1
+    }
+    for (i = 0; i < t; i++)
+        this.sinTable[i] = Math.sin(-Math.PI / i),
+        this.cosTable[i] = Math.cos(-Math.PI / i);
+    // allocate reusable temporary arrays to avoid per-call allocations
+    this._o = new Float32Array(t);
+    this._l = new Float32Array(t);
+    this._f = new Float32Array(t >> 1);
+
+    this.calculateSpectrum = function(t) {
+        var e, s, r, i = this.bufferSize, a = this.cosTable, n = this.sinTable, h = this.reverseTable, o = this._o, l = this._l, c = 2 / this.bufferSize, u = Math.sqrt, f = this._f, p = Math.floor(Math.log(i) / Math.LN2);
+        if (Math.pow(2, p) !== i)
+            throw "Invalid buffer size, must be a power of 2.";
+        if (i !== t.length)
+            throw "Supplied buffer is not the same size as defined FFT. FFT Size: " + i + " Buffer Size: " + t.length;
+        for (var d, w, g, b, M, m, y, v, T = 1, k = 0; k < i; k++)
+            o[k] = t[h[k]] * this.windowValues[h[k]],
+            l[k] = 0;
+        for (; T < i; ) {
+            d = a[T],
+            w = n[T],
+            g = 1,
+            b = 0;
+            for (var z = 0; z < T; z++) {
+                for (k = z; k < i; )
+                    m = g * o[M = k + T] - b * l[M],
+                    y = g * l[M] + b * o[M],
+                    o[M] = o[k] - m,
+                    l[M] = l[k] - y,
+                    o[k] += m,
+                    l[k] += y,
+                    k += T << 1;
+                g = (v = g) * d - b * w,
+                b = v * w + b * d
+            }
+            T <<= 1
+        }
+        k = 0;
+        for (var F = i / 2; k < F; k++)
+            (r = c * u((e = o[k]) * e + (s = l[k]) * s)) > this.peak && (this.peakBand = k,
+            this.peak = r),
+            f[k] = r;
+        return f
+    }
+}
 
 // Color map generation - optimized for bioacoustics
 function generateColorMapRGBA(mapName, gain = 1.0) {
@@ -311,9 +418,6 @@ class h extends s {
         this.numErbFilters = this.fftSamples / 2,
         this.createWrapper(),
         this.createCanvas();
-
-        // [FIX] Render ID to prevent race conditions during rapid updates
-        this._renderId = 0;
 
         // WASM integration
         this._wasmEngine = null;
@@ -879,10 +983,7 @@ class h extends s {
         
         ctx.putImageData(imageData, 0, 0);
     }
-    // [修改] createCanvas: 嚴格保證只有一個 Canvas，防止疊加變黑
     createCanvas() {
-        if (this.canvas) return; // 如果已存在，直接返回，不要重複創建
-        
         this.canvas = i("canvas", {
             style: {
                 position: "absolute",
@@ -963,36 +1064,36 @@ async render() {
         }
     }
 
-    // [NEW] 輕量化重繪方法：直接使用現有數據重畫，跳過 WASM
-    refreshPeakOverlay() {
-        if (this.lastRenderData) {
-            this.drawSpectrogram(this.lastRenderData);
-        }
-    }
-
-    // [修改] drawSpectrogram: 修正變黑與閾值問題
     drawSpectrogram(t) {
-        if (!t || (Array.isArray(t) && t.length === 0)) return;
+        // [FIX] Validate input data before drawing
+        if (!t || (Array.isArray(t) && t.length === 0)) {
+            console.warn('[Spectrogram] drawSpectrogram called with invalid data, skipping');
+            return;
+        }
         
         this.lastRenderData = t;
         if (!this.wrapper || !this.canvas) return;
-        if (!Array.isArray(t[0])) t = [t];
         
-        // Render ID 鎖定
-        const currentRenderId = ++this._renderId;
-
+        // [FIX] Safely handle data format detection
+        if (Array.isArray(t) && Array.isArray(t[0]) && typeof t[0][0] === 'number') {
+            if (!isNaN(t[0][0])) {
+                // Data is valid, continue
+            } else {
+                console.warn('[Spectrogram] Invalid frequency data detected');
+                return;
+            }
+        }
+        
+        if (!Array.isArray(t[0])) {
+            t = [t];
+        }
+        
         this.wrapper.style.height = this.height * t.length + "px";
-        
-        // [關鍵] 明確清空畫布，雖然設置 width 會清空，但這行確保語意明確
-        this.canvas.width = this.getWidth(); 
+        this.canvas.width = this.getWidth();
         this.canvas.height = this.height * t.length;
         
         const canvasCtx = this.spectrCc;
         if (!canvasCtx || !this._wasmEngine) return;
-
-        // [關鍵] 確保混合模式正常，防止疊加變黑
-        canvasCtx.globalCompositeOperation = 'source-over';
-        canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
         const isSmooth = this.smoothMode || false;
         canvasCtx.imageSmoothingEnabled = isSmooth;
@@ -1000,17 +1101,28 @@ async render() {
 
         for (let channelIdx = 0; channelIdx < t.length; channelIdx++) {
             const channelData = t[channelIdx];
+            
             const canvasWidth = this.getWidth();
+
             if (canvasWidth <= 0) return;
             let renderPixels = isSmooth ? channelData : this.resample(channelData);
-            if (!renderPixels || renderPixels.length === 0) continue;
+            if (!renderPixels || renderPixels.length === 0) return;
             
-            const imgWidth = renderPixels.length;
+            const imgWidth = renderPixels.length; // Smooth: numFrames, Default: screenWidth
             const imgHeight = Array.isArray(renderPixels) && renderPixels[0] ? renderPixels[0].length : 1;
-            let imgData = new ImageData(imgWidth, imgHeight);
 
-            // --- Image Data Filling ---
-            if (this._activeColorMapUint) {
+            if (imgWidth <= 0 || imgHeight <= 0) {
+                return;
+            }
+
+            let imgData = new ImageData(imgWidth, imgHeight);
+            
+            // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
+            // (保持原本的 Color Map 填充邏輯，這裡省略以節省篇幅，請保留原文件該區塊代碼)
+            // ... [Insert Color Map Filling Logic Here] ...
+            // 這裡為了完整性，請確保您保留原有的這段 activeColorMapUint 填充循環
+            // ---------------------------------------------------
+            if (this._activeColorMapUint && this._activeColorMapUint.length === 1024) {
                  if (Array.isArray(renderPixels) && renderPixels[0]) {
                     for (let x = 0; x < renderPixels.length; x++) {
                         for (let y = 0; y < renderPixels[x].length; y++) {
@@ -1037,8 +1149,9 @@ async render() {
                     }
                 }
             }
+            // ---------------------------------------------------
 
-            const sampleRate = this.buffer ? (this.buffer.sampleRate / 2) : (this.frequencyMax || 256000/2);
+            const sampleRate = this.buffer.sampleRate / 2;
             const freqMin = this.frequencyMin;
             const freqMax = this.frequencyMax;
             const u = this.hzToScale(freqMin) / this.hzToScale(sampleRate);
@@ -1047,53 +1160,46 @@ async render() {
             const sourceY = Math.round(imgHeight * (1 - p));
             const sourceHeight = Math.round(imgHeight * (p - u));
             
-            createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap) => {
-                if (this._renderId !== currentRenderId || !this.spectrCc || !this.canvas) {
+            createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap => {
+                // [FIX 3] 終極防護：如果 Context 已經被銷毀 (代表 destroy 被呼叫了)，
+                // 絕對不要執行 drawImage，並立刻關閉 bitmap
+                if (!this.spectrCc || !this.canvas) {
                      if (bitmap && typeof bitmap.close === 'function') bitmap.close();
                      return;
                 }
                 
                 const drawY = this.height * (channelIdx + 1 - p / f);
                 const drawH = this.height * p / f;
-                
-                // [防黑] 再次確保繪製前區域是乾淨的
-                // canvasCtx.clearRect(0, drawY, canvasWidth, drawH); // 這裡不用因為是 drawImage 覆蓋
-
                 canvasCtx.drawImage(bitmap, 0, drawY, canvasWidth, drawH);
 
-                if (bitmap && typeof bitmap.close === 'function') bitmap.close();
+                // [FIX 1] 畫完立刻釋放 GPU 記憶體 (這非常重要！)
+                if (bitmap && typeof bitmap.close === 'function') {
+                    bitmap.close();
+                }
+
+                // [FIX 2] 切斷閉包引用，讓 imgData 能立刻被 GC 回收
+                // 這些變數在閉包內會佔用大量 RAM，直到 Promise 結束很久後才釋放
                 imgData = null; 
                 renderPixels = null;
 
-                // [修改] Peak Overlay 繪製
-                // 檢查 peakMode 是否開啟，並且數據是否存在
+                // [NEW] Peak Mode 渲染邏輯更新 (支援多點/局部閾值)
                 if (this.options && this.options.peakMode && this.peakBandArrayPerChannel && this.peakBandArrayPerChannel[channelIdx]) {
                     const peaks = this.peakBandArrayPerChannel[channelIdx];
                     const viewMinHz = this.frequencyMin || 0;
-                    const viewMaxHz = this.frequencyMax || sampleRate;
+                    const viewMaxHz = this.frequencyMax || (this.buffer.sampleRate / 2);
                     const viewRangeHz = viewMaxHz - viewMinHz;
                     const totalBins = imgHeight;
 
-                    // [關鍵修復] 調整閾值公式：從 0.1 起跳，而不是 0.6
-                    let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-                    const effectiveThreshold = 0.10 + (Math.pow(sliderValue, 1.2) * 0.85); 
-                    const thresholdU8 = effectiveThreshold * 255;
-
                     const xStep = canvasWidth / peaks.length;
                     
-                    canvasCtx.fillStyle = "rgba(0, 255, 255, 0.9)"; // 亮青色
-
                     for (let i = 0; i < peaks.length; i++) {
-                        const framePeaks = peaks[i];
+                        const framePeaks = peaks[i]; // 這是一個 Array
                         if (!framePeaks || framePeaks.length === 0) continue;
 
                         for (let peakObj of framePeaks) {
-                            // 使用即時閾值過濾
-                            if (peakObj.magnitude < thresholdU8) continue;
-
                             let peakFreqHz;
                             if (this.scale === 'linear') {
-                                peakFreqHz = (peakObj.bin / totalBins) * sampleRate;
+                                peakFreqHz = (peakObj.bin / totalBins) * (this.buffer.sampleRate / 2);
                             } else {
                                 peakFreqHz = viewMinHz + (peakObj.bin / totalBins) * viewRangeHz;
                             }
@@ -1103,13 +1209,18 @@ async render() {
                                 const yPos = drawY + drawH - (yFraction * drawH);
                                 const xPos = i * xStep;
                                 
-                                // 繪製 Peak 點
-                                canvasCtx.fillRect(xPos, yPos - 1.5, Math.max(2, xStep), 3);
+                                // 樣式控制：主峰顯示亮青色，次峰顯示稍暗或半透明
+                                if (peakObj.isMainPeak) {
+                                    canvasCtx.fillStyle = "rgba(0, 255, 255, 0.9)"; // 亮青色
+                                } else {
+                                    canvasCtx.fillStyle = "rgba(0, 200, 255, 0.6)"; // 稍弱的藍色
+                                }
+                                canvasCtx.fillRect(xPos, yPos - 1, Math.max(1.5, xStep), 3);
                             }
                         }
                     }
                 }
-            });
+            }));
         }
         
         if (this.options.labels) {
@@ -1284,20 +1395,13 @@ async render() {
         this._filterBankFlat = null;
     }
 
-    // [修改] getFrequencies: 增加對 RAM 清除後的防護
     async getFrequencies(t, isRetry = false) {
-        if (!this.options || !this.wrapper) return;
-
-        // [關鍵修復] 如果傳入的 t (buffer) 是空的 (因為 RAM 被清除了)
-        // 且我們已經有 Peak 數據，就保留舊數據不要清空，直接返回
-        if (!t && this.peakBandArrayPerChannel && this.peakBandArrayPerChannel.length > 0) {
-            console.warn('[Spectrogram] Buffer cleared, keeping existing peak data.');
-            return null; // 返回 null 讓 render 知道沒新數據
+        // [FIX] 1. 初始檢查：如果沒有 Wrapper (已被銷毀)，直接退出
+        if (!this.options || !t || !this.wrapper) {
+            return;
         }
         
-        if (!t) return; // 如果真的沒數據且沒緩存，就退出
-
-        // 只有在真的要重新計算時，才清空舊的 Peak 數據
+        // 清除舊緩存以防止內存泄漏
         this.peakBandArrayPerChannel = [];
         
         var e, s;
@@ -1355,7 +1459,10 @@ async render() {
         }
         // --- End Filter Bank Logic ---
 
-        // this.peakBandArrayPerChannel = []; // 移到上面去清空
+        this.peakBandArrayPerChannel = [];
+        
+        let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
+        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
         for (let e = 0; e < i; e++) {
             // [FIX] 3. 通道迴圈內的檢查：防止在計算途中切換檔案
@@ -1435,39 +1542,40 @@ async render() {
                 const outputFrame = new Uint8Array(fullU8Spectrum.subarray(frameStartIdx, frameStartIdx + outputSize));
                 channelFrames.push(outputFrame);
 
-                // [關鍵] 始終計算並儲存 Peak，但在 draw 時才決定是否顯示
-                // 這樣即使 RAM 被清空，只要 Spectrogram 還在，Peak 數據就還在
-                const localMaxLinear = frameMaxMagnitudes[frameIdx];
+                if (this.options && this.options.peakMode) {
+                    const localMaxLinear = frameMaxMagnitudes[frameIdx];
 
-                if (localMaxLinear < noiseFloorLinear) {
-                    channelPeakLists.push([]); 
-                    continue; 
-                }
+                    if (localMaxLinear < noiseFloorLinear) {
+                        channelPeakLists.push([]); 
+                        continue; 
+                    }
 
-                let localMaxU8 = 0;
-                for(let k=0; k < outputSize; k++) {
-                    if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
-                }
-
-                // 使用極低的基礎閾值儲存所有可能的 Peak
-                const baseThresholdU8 = 5; 
-                const framePeaks = [];
-                
-                if (localMaxU8 > baseThresholdU8) { 
+                    let localMaxU8 = 0;
                     for(let k=0; k < outputSize; k++) {
-                        if (outputFrame[k] >= baseThresholdU8) {
-                            framePeaks.push({
-                                bin: k,
-                                magnitude: outputFrame[k], // 儲存原始強度 0-255
-                                isMainPeak: outputFrame[k] === localMaxU8
-                            });
+                        if (outputFrame[k] > localMaxU8) localMaxU8 = outputFrame[k];
+                    }
+
+                    const cutoffU8 = localMaxU8 * effectiveThreshold;
+                    const framePeaks = [];
+                    
+                    if (localMaxU8 > 10) { 
+                        for(let k=0; k < outputSize; k++) {
+                            if (outputFrame[k] >= cutoffU8) {
+                                framePeaks.push({
+                                    bin: k,
+                                    magnitude: outputFrame[k],
+                                    isMainPeak: outputFrame[k] === localMaxU8
+                                });
+                            }
                         }
                     }
+                    channelPeakLists.push(framePeaks);
                 }
-                channelPeakLists.push(framePeaks);
             }
             
-            this.peakBandArrayPerChannel.push(channelPeakLists);
+            if (this.options && this.options.peakMode) {
+                this.peakBandArrayPerChannel.push(channelPeakLists);
+            }
             h.push(channelFrames)
         }
         return h
@@ -1526,11 +1634,69 @@ async render() {
             }
     }
 
-    /// [DEPRECATED] Only useful if we had separate layers.
-    /// Since we use a single canvas, partial updates are destructive.
+    /// 只更新Peak overlay，不重新計算頻譜 (用於快速更新Peak Threshold)
     updatePeakOverlay() {
-        // No-op to prevent logic errors in wsManager
-        // Real update happens in drawSpectrogram via render() or refreshPeakOverlay()
+        if (!this.lastRenderData || !this.options || !this.options.peakMode) {
+            return;
+        }
+        
+        // 只有在有Peak數據時才重繪
+        if (!this.peakBandArrayPerChannel || this.peakBandArrayPerChannel.length === 0) {
+            return;
+        }
+
+        const canvasCtx = this.spectrCc;
+        if (!canvasCtx) return;
+
+        const canvasWidth = this.getWidth();
+        const t = this.lastRenderData;
+        const numChannels = Array.isArray(t[0]) ? t.length : 1;
+        
+        // Get updated effective threshold with new peakThreshold
+        const sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
+        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+
+        // Redraw Peak overlay lines only
+        canvasCtx.strokeStyle = "rgb(255, 192, 0)";
+        canvasCtx.lineWidth = 1.5;
+
+        for (let channelIdx = 0; channelIdx < numChannels; channelIdx++) {
+            const startY = channelIdx * this.height;
+            
+            if (this.peakBandArrayPerChannel[channelIdx]) {
+                const peaks = this.peakBandArrayPerChannel[channelIdx];
+                const xStep = canvasWidth / peaks.length;
+
+                canvasCtx.beginPath();
+                let isFirstPoint = true;
+                
+                for (let i = 0; i < peaks.length; i++) {
+                    const framePeaks = peaks[i];
+                    if (!framePeaks || framePeaks.length === 0) continue;
+
+                    for (let peakIdx = 0; peakIdx < framePeaks.length; peakIdx++) {
+                        const freq = framePeaks[peakIdx];
+                        if (freq < effectiveThreshold) continue;
+
+                        const freqHz = freq * 1000;
+                        const viewMinHz = this.frequencyMin || 0;
+                        const viewMaxHz = this.frequencyMax || 64000;
+                        const freqNormalized = (freqHz - viewMinHz) / (viewMaxHz - viewMinHz);
+                        
+                        const y = startY + this.height * (1 - freqNormalized);
+                        const x = i * xStep + xStep / 2;
+                        
+                        if (isFirstPoint) {
+                            canvasCtx.moveTo(x, y);
+                            isFirstPoint = false;
+                        } else {
+                            canvasCtx.lineTo(x, y);
+                        }
+                    }
+                }
+                canvasCtx.stroke();
+            }
+        }
     }
 
     resample(t) {

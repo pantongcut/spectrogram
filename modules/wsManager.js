@@ -108,25 +108,14 @@ export async function replacePlugin(
         Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
 
       if (needsRebuild) {
-        // [關鍵修復] 徹底移除舊 Canvas
-        // 使用 while 迴圈確保移除乾淨，解決 "變黑" (Stacking) 問題
-        if (container) {
-            while (container.firstChild) {
-                if (container.firstChild.tagName === 'CANVAS' || container.firstChild.className === 'spec-wrapper') {
-                    // 如果是 Canvas，先設寬高為 0 釋放顯存
-                    if (container.firstChild.tagName === 'CANVAS') {
-                        container.firstChild.width = 0;
-                        container.firstChild.height = 0;
-                    }
-                }
-                container.removeChild(container.firstChild);
-            }
-        }
-        
-        // 額外檢查：如果 plugin 物件還存在 wrapper，也手動移除
-        if (plugin && plugin.wrapper) {
-            plugin.wrapper.remove();
-        }
+        // [FIX 2] 強制清理舊 Canvas 以釋放 GPU 記憶體 (顯存)
+        // 在快速切換時，瀏覽器往往來不及回收 Canvas 佔用的顯存，這步很關鍵
+        const oldCanvases = container.querySelectorAll("canvas");
+        oldCanvases.forEach(canvas => {
+            canvas.width = 0;  // 歸零寬高是釋放顯存的最快方法
+            canvas.height = 0;
+            canvas.remove();
+        });
 
         // 銷毀舊插件
         if (plugin) {
@@ -148,6 +137,8 @@ export async function replacePlugin(
           }
           
           // [FIX 3] 關鍵：暫停 100ms 讓瀏覽器執行垃圾回收 (GC)
+          // 當你快速連續 load 時，這個「空檔」能讓 JS 引擎有機會回收上一個 5MB 的 wav buffer
+          // 如果設得太短 (如 10ms)，GC 可能還沒來得及啟動
           await new Promise(resolve => setTimeout(resolve, 100));
         }
 
@@ -189,6 +180,7 @@ export async function replacePlugin(
                       console.log('📸 [Snapshot] Spectrogram is ready. Starting fade-out sequence.');
                       
                       // Double RAF: 強制瀏覽器先將新畫好的 Canvas 渲染上屏 (Paint)
+                      // 這是消除「微閃爍」的最後一哩路，確保新圖已經在螢幕上了，才把舊圖拿掉
                       requestAnimationFrame(() => {
                           requestAnimationFrame(() => {
                               const snapshot = document.getElementById("spectrogram-transition-snapshot");
@@ -217,50 +209,32 @@ export async function replacePlugin(
           console.warn('⚠️ Spectrogram render failed:', err);
         }
       } else {
-        // [Soft Update] 軟更新邏輯優化
-        let shouldRender = false;       // 需要重新計算 (WASM)
-        let shouldRefreshOnly = false;  // 只需要重畫 Canvas (Overlay)
-
-        // 檢查 Peak Mode 狀態變化
-        if (currentPeakMode !== peakMode) {
+        // [軟更新邏輯保持不變...]
+        let shouldRender = false;
+        if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
             currentPeakMode = peakMode;
-            if (plugin && plugin.options) plugin.options.peakMode = peakMode;
-            
-            // 只要切換 Peak Mode，我們只重畫，因為現在數據始終被計算好了
-            shouldRefreshOnly = true;
-        }
-
-        // 檢查 Threshold 變化
-        if (currentPeakThreshold !== peakThreshold) {
             currentPeakThreshold = peakThreshold;
-            if (plugin && plugin.options) plugin.options.peakThreshold = peakThreshold;
-            
-            // 調整閾值只需要重畫 Overlay，不需要重算 WASM
-            shouldRefreshOnly = true;
+            if (plugin && plugin.options) {
+                plugin.options.peakMode = peakMode;
+                plugin.options.peakThreshold = peakThreshold;
+            }
         }
-
-        // 檢查 Overlap 變化
         if (plugin && targetNoverlap !== plugin.noverlap) {
             plugin.noverlap = targetNoverlap;
             if (plugin.options) plugin.options.noverlap = targetNoverlap;
-            // Overlap 改變會影響頻譜結構，必須重算
             shouldRender = true;
         }
 
         try {
             if (shouldRender) {
-                // 執行完整計算 (WASM FFT)
                 plugin.render();
-            } else if (shouldRefreshOnly) {
-                // [關鍵] 執行輕量重繪 (只畫 Canvas，使用緩存數據)
-                // 這會觸發我們剛修改過的 drawSpectrogram，利用 _renderId 防止變黑
-                if (typeof plugin.refreshPeakOverlay === 'function') {
-                    plugin.refreshPeakOverlay();
+            } else {
+                if (plugin && typeof plugin.updatePeakOverlay === 'function') {
+                    plugin.updatePeakOverlay();
                 } else {
-                    plugin.render(); // Fallback
+                    plugin.render();
                 }
             }
-            
             requestAnimationFrame(() => {
                 if (typeof onRendered === 'function') onRendered();
             });
