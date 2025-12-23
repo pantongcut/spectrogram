@@ -334,6 +334,13 @@ export async function runIdleCleanup() {
     // 防止在沒有插件時執行
     if (!plugin && !analysisWasmEngine) return;
 
+    // [FIX] 如果 Spectrogram 正在忙碌 (Rendering)，絕對不要打擾它
+    // 這會導致 "Rust value borrowed" 錯誤
+    if (plugin && plugin._isRendering) {
+        console.log('⏳ [Idle Cleanup] Spectrogram 正在忙碌，跳過本次清理');
+        return;
+    }
+
     console.log('🧹 [Idle Cleanup] 釋放閒置資源...');
     
     // 1. 清理 Spectrogram 內部
@@ -342,7 +349,9 @@ export async function runIdleCleanup() {
             plugin.clearFilterBankCache();
         }
         
+        // 嘗試重置 WASM 以縮減記憶體
         if (plugin._wasmEngine && typeof plugin._reinitWasmEngine === 'function') {
+            // 這裡不需要 try-catch，因為我們已經在 _reinitWasmEngine 內部加了保護
             plugin._reinitWasmEngine(); 
         }
     }
@@ -353,10 +362,12 @@ export async function runIdleCleanup() {
             if (typeof analysisWasmEngine.free === 'function') {
                 analysisWasmEngine.free();
             }
-        } catch(e) {}
+        } catch(e) {
+            console.warn('[Idle Cleanup] Analysis engine free skipped:', e.message);
+        }
         analysisWasmEngine = null;
     }
-
+    
     // 3. 強制釋放 DOM 節點引用 (如果有殘留的 detached nodes)
     if (window.gc) {
         try { window.gc(); } catch(e) {}

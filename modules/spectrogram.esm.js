@@ -769,10 +769,10 @@ class h extends s {
     }
 
     // [FIX] Reinitialize WASM engine when it becomes corrupted due to aliasing errors
-    _reinitWasmEngine() {
-        console.log('[Spectrogram] Reinitializing WASM engine due to aliasing errors');
-
-        // [CRITICAL FIX] 在 null 之前，必須顯式釋放舊的 WASM 記憶體
+_reinitWasmEngine() {
+        console.log('[Spectrogram] Resetting WASM engine...');
+        
+        // [CRITICAL FIX] 嘗試釋放，但如果失敗（因為 borrowed），則強制放棄
         if (this._wasmEngine) {
             try {
                 if (typeof this._wasmEngine.free === 'function') {
@@ -781,20 +781,24 @@ class h extends s {
                     this._wasmEngine.release_memory();
                 }
             } catch (e) {
-                console.warn('[Spectrogram] Error freeing old engine during reinit:', e);
+                // 這就是解決你 Error 的關鍵：
+                // 如果 Rust 說 "value is borrowed"，我們無法手動 free。
+                // 我們只能記錄警告，然後直接將其設為 null，讓它變成孤兒物件等待 GC。
+                console.warn('[Spectrogram] ⚠️ Force-dropping locked WASM engine (borrowed state):', e.message);
             }
         }
 
-        // 切斷引用
+        // 無論 free 是否成功，這裡都必須切斷引用，這樣才能建立新的
         this._wasmInitialized = false;
         this._wasmEngine = null;
         
-        // Reset error tracking
+        // 重置錯誤計數
         this._wasmErrorCount = 0;
         this._lastWasmErrorTime = 0;
         
-        // Reinitialize
+        // 重新初始化 Promise
         this._wasmReady = wasmReady.then(() => {
+            // 防止並發重入
             if (this._wasmInitialized) return;
             this._wasmInitialized = true;
             
@@ -807,11 +811,12 @@ class h extends s {
                 
                 // 如果有之前設定過的 Color Map，記得重新應用
                 if (this._activeColorMapUint && this._wasmEngine.set_color_map) {
+                     // 必須複製一份，因為舊的記憶體位置可能已經失效
                      const colorMapCopy = new Uint8Array(this._activeColorMapUint);
                      this._wasmEngine.set_color_map(colorMapCopy);
                 }
 
-                console.log('✅ [Spectrogram] WASM 引擎已重新初始化 (Memory Freed)');
+                console.log('✅ [Spectrogram] WASM 引擎已重新初始化 (Safe Reset)');
             } catch (err) {
                 console.error('❌ [Spectrogram] WASM Re-init failed:', err);
             }
