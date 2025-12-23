@@ -1374,7 +1374,7 @@ class u extends a {
     // [FIX] 新增一個屬性來追蹤當前的載入任務
 _loadingAbortController = null;
 
-    loadAudio(e, s, n, r) {
+loadAudio(e, s, n, r) {
         return t(this, void 0, void 0, (function*() {
             // 1. 中斷上一次載入
             if (this._loadingAbortController) {
@@ -1383,125 +1383,128 @@ _loadingAbortController = null;
             }
             this._loadingAbortController = new AbortController();
             const signal = this._loadingAbortController.signal;
-
-            var t;
             
-            // [FIX] 步驟 A: 極致的清理
-            // 顯式切斷所有可能的大型數據引用
-            if (this.decodedData) this.decodedData = null;
-            if (this.media && this.media.buffer) this.media.buffer = null;
-            if (this._wasmWaveformEngine && typeof this._wasmWaveformEngine.clear === 'function') {
-                this._wasmWaveformEngine.clear();
-            }
+            // 定義 t 在 try 外面，確保 finally 可以訪問
+            let t = null;
 
-            // [FIX] 步驟 B: 給 GC 的「喘息時間」 (Breathing Room)
-            // 這是解決你 "等待幾秒才能釋放" 問題的關鍵代碼。
-            // 我們暫停 50ms，讓 V8 引擎有機會在分配下一個 5MB 記憶體之前，先回收上一個 5MB。
-            yield new Promise(resolve => setTimeout(resolve, 50));
-
-            // [FIX] 檢查點
-            if (signal.aborted) return;
-
-            if (this.emit("load", e),
-            !this.options.media && this.isPlaying() && this.pause(),
-            // 再次確保數據為空
-            this.decodedData = null, 
-            this.stopAtPosition = null,
-            !s && !n) {
-                // ... (原本的 fetch 邏輯保持不變) ...
-                const i = this.options.fetchParams || {};
-                i.signal = signal;
-                const n = t => this.emit("loading", t);
-                try {
-                    s = yield o.fetchBlob(e, n, i);
-                } catch (err) {
-                    if (err.name === 'AbortError') return;
-                    throw err;
+            try {
+                // [FIX] 步驟 A: 極致的清理
+                if (this.decodedData) this.decodedData = null;
+                if (this.media && this.media.buffer) this.media.buffer = null;
+                if (this._wasmWaveformEngine && typeof this._wasmWaveformEngine.clear === 'function') {
+                    this._wasmWaveformEngine.clear();
                 }
-                const r = this.options.blobMimeType;
-                r && (s = new Blob([s],{ type: r }))
-            }
-            
-            if (signal.aborted) return;
-            this.setSrc(e, s);
-            
-            const a = yield new Promise((t => {
-                const e = r || this.getDuration();
-                e ? t(e) : this.mediaSubscriptions.push(this.onMediaEvent("loadedmetadata", ( () => t(this.getDuration())), { once: !0 }))
-            }));
-            
-            if (!e && !s) {
-                const t = this.getMediaElement();
-                t instanceof d && (t.duration = a)
-            }
-            
-            // ... (解碼邏輯保持不變) ...
-            if (n) {
-                this.decodedData = i.createBuffer(n, a || 0);
-            } else if (s) {
-                try {
-                    let t = yield s.arrayBuffer();
-                    if (signal.aborted) return;
-                    
-                    // [FIX 3] 在進行重型解碼前，再給一次喘息機會
-                    // 這裡的解碼會產生巨大的 Float32Array，確保記憶體乾淨很重要
-                    yield new Promise(r => setTimeout(r, 10));
-                    
-                    const decoded = yield i.decode(t, this.options.sampleRate);
-                    
-                    // [FIX 4 - 新增] 解碼完成後，立刻銷毀原始 ArrayBuffer
-                    // t 佔用了檔案大小的 RAM (3-5MB)，解碼後它就是垃圾了
-                    // 這裡手動設為 null 幫助引擎立刻識別
-                    t = null;
 
-                    if (signal.aborted) return;
-                    this.decodedData = decoded;
-                } catch (err) {
-                    if (signal.aborted) return;
-                    throw err;
-                }
-            }
-            
-            // ... (WASM 載入邏輯保持不變) ...
-            if (this.decodedData && !signal.aborted) {
-                try {
-                     // ... (WASM 初始化與加載代碼) ...
-                     if (!this._wasmWaveformEngine && typeof globalThis !== 'undefined' && globalThis._spectrogramWasm) {
-                        try {
-                            if (globalThis._spectrogramWasm.WaveformEngine) {
-                                this._wasmWaveformEngine = new globalThis._spectrogramWasm.WaveformEngine();
-                            }
-                        } catch (e) { }
+                // [FIX] 步驟 B: 給 GC 的「喘息時間」
+                yield new Promise(resolve => setTimeout(resolve, 50));
+
+                if (signal.aborted) return;
+
+                if (this.emit("load", e),
+                !this.options.media && this.isPlaying() && this.pause(),
+                this.decodedData = null, 
+                this.stopAtPosition = null,
+                !s && !n) {
+                    const i = this.options.fetchParams || {};
+                    i.signal = signal;
+                    const n = t => this.emit("loading", t);
+                    try {
+                        s = yield o.fetchBlob(e, n, i);
+                    } catch (err) {
+                        if (err.name === 'AbortError') return;
+                        throw err;
                     }
-                    
-                    if (this._wasmWaveformEngine) {
-                        const numChannels = this.decodedData.numberOfChannels;
+                    const r = this.options.blobMimeType;
+                    r && (s = new Blob([s],{ type: r }))
+                }
+                
+                if (signal.aborted) return;
+                this.setSrc(e, s);
+                
+                const a = yield new Promise((t => {
+                    const e = r || this.getDuration();
+                    e ? t(e) : this.mediaSubscriptions.push(this.onMediaEvent("loadedmetadata", ( () => t(this.getDuration())), { once: !0 }))
+                }));
+                
+                if (!e && !s) {
+                    const t = this.getMediaElement();
+                    t instanceof d && (t.duration = a)
+                }
+                
+                if (n) {
+                    this.decodedData = i.createBuffer(n, a || 0);
+                } else if (s) {
+                    try {
+                        // [FIX] 使用外部定義的 let t
+                        t = yield s.arrayBuffer();
                         if (signal.aborted) return;
-                        if (typeof this._wasmWaveformEngine.clear === 'function') {
-                            this._wasmWaveformEngine.clear();
-                        }
-                        this._wasmWaveformEngine.resize(numChannels);
-                        for (let ch = 0; ch < numChannels; ch++) {
-                            if (signal.aborted) return;
-                            const channelData = this.decodedData.getChannelData(ch);
-                            let channelDataCopy = new Float32Array(channelData);
-                            this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
-                            channelDataCopy = null;
-                        }
+                        
+                        yield new Promise(r => setTimeout(r, 10));
+                        
+                        const decoded = yield i.decode(t, this.options.sampleRate);
+                        
+                        // [FIX] 解碼成功後立即釋放 (這裡釋放是為了優化成功路徑)
+                        t = null;
+
+                        if (signal.aborted) return;
+                        this.decodedData = decoded;
+                    } catch (err) {
+                        if (signal.aborted) return;
+                        throw err;
                     }
-                } catch (e) { }
+                }
+                
+                // ... (WASM 初始化與加載代碼保持不變) ...
+                if (this.decodedData && !signal.aborted) {
+                    try {
+                        if (!this._wasmWaveformEngine && typeof globalThis !== 'undefined' && globalThis._spectrogramWasm) {
+                            try {
+                                if (globalThis._spectrogramWasm.WaveformEngine) {
+                                    this._wasmWaveformEngine = new globalThis._spectrogramWasm.WaveformEngine();
+                                }
+                            } catch (e) { }
+                        }
+                        
+                        if (this._wasmWaveformEngine) {
+                            const numChannels = this.decodedData.numberOfChannels;
+                            if (signal.aborted) return;
+                            if (typeof this._wasmWaveformEngine.clear === 'function') {
+                                this._wasmWaveformEngine.clear();
+                            }
+                            this._wasmWaveformEngine.resize(numChannels);
+                            for (let ch = 0; ch < numChannels; ch++) {
+                                if (signal.aborted) return;
+                                const channelData = this.decodedData.getChannelData(ch);
+                                // 注意：這裡如果建立 Float32Array 副本，WASM 讀取完應立即釋放
+                                // 但因為這裡是同步操作循環，JS 引擎通常能處理
+                                let channelDataCopy = new Float32Array(channelData);
+                                this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
+                                channelDataCopy = null; 
+                            }
+                        }
+                    } catch (e) { }
+                }
+                
+                if (signal.aborted) return;
+
+                this.decodedData && (this.emit("decode", this.getDuration()),
+                this.renderer.render(this.decodedData)),
+                this.emit("ready", this.getDuration())
+
+            } finally {
+                // [CRITICAL FIX] 終極清理區塊
+                // 無論是 return (Abort), throw (Error), 還是正常結束，這裡都會執行
+                
+                // 1. 釋放原始 ArrayBuffer (如果還沒被釋放)
+                t = null;
+                
+                // 2. 釋放 Blob (這是解決 334MB 累積的關鍵)
+                // s 是閉包變數，如果不手動 null，Generator 暫停時它會一直活著
+                s = null;
+                
+                // 3. 釋放 URL 字符串
+                e = null;
             }
-            
-            if (signal.aborted) return;
-
-            this.decodedData && (this.emit("decode", this.getDuration()),
-            this.renderer.render(this.decodedData)),
-            this.emit("ready", this.getDuration())
-
-            // [FIX 5 - 最終補漏] 顯式釋放 Fetch 回來的 Blob
-            // 你的 RAM 累積 (334MB) 正是這些 Blob 堆積的結果
-            s = null; 
-            e = null; // url string 也順便清空
         }))
     }
     load(e, i, s) {
