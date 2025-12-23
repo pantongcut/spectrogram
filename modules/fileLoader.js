@@ -107,67 +107,69 @@ export function initFileLoader({
     if (uploadOverlay) uploadOverlay.style.display = 'none';
   }
 
-  async function loadFile(file) {
-    if (!file) return;
+// [STEP 0: 建立視覺快照 (防止閃爍)]
+    // 在我們殺死舊數據前，先用一張「假圖片」蓋住畫面
+    // 這樣使用者就看不到中間的「全白/閃爍」瞬間
+    const container = document.getElementById("spectrogram-only");
+    if (container) {
+        const oldCanvas = container.querySelector("canvas");
+        // 只有當舊 Canvas 存在且有寬度時才截圖
+        if (oldCanvas && oldCanvas.width > 0) {
+            const snapshot = document.createElement("canvas");
+            snapshot.id = "spectrogram-transition-snapshot";
+            snapshot.width = oldCanvas.width;
+            snapshot.height = oldCanvas.height;
+            snapshot.style.position = "absolute";
+            snapshot.style.top = "0";
+            snapshot.style.left = "0";
+            snapshot.style.width = "100%";
+            snapshot.style.height = "100%";
+            snapshot.style.zIndex = "100"; // 確保蓋在最上面
+            snapshot.style.pointerEvents = "none"; // 讓滑鼠可以穿透
 
-    // ============================================================
-    // [STEP 1: 暴力清理舊狀態] 
-    // 這一步確保在載入新檔案前，RAM 是乾淨的 (歸零策略)
-    // ============================================================
+            const ctx = snapshot.getContext("2d");
+            // 將舊 Canvas 的像素複製到快照上
+            ctx.drawImage(oldCanvas, 0, 0);
+            container.appendChild(snapshot);
+        }
+    }
+
+    // [STEP 1: 暴力清理舊狀態 (RAM 歸零)] 
+    // 使用者現在看到的是 Snapshot，所以我們可以放心在後台進行破壞性清理
     if (wavesurfer) {
         try {
-            // 1. 停止播放
             wavesurfer.stop();
-            
-            // 2. 斬斷對上一張頻譜圖數據的引用
             wavesurfer.decodedData = null;
             
-            // 3. 清空 WebAudio Backend 的緩衝區
             if (wavesurfer.backend) {
                 wavesurfer.backend.buffer = null;
-                // 如果有 source node，斷開連接
                 if (wavesurfer.backend.source) {
                     try { wavesurfer.backend.source.disconnect(); } catch(e){}
                 }
             }
 
-            // 4. 發送事件通知 Spectrogram 插件立即自我銷毀 (釋放 GPU 顯存)
-            // 這會觸發我們在 wsManager 中寫的 canvas.width=0 邏輯
+            // 通知 Spectrogram 銷毀 (釋放顯存)
+            // 雖然這會移除舊 Canvas，但我們的 Snapshot 還在，所以不會閃爍
             document.dispatchEvent(new Event('file-list-cleared')); 
         } catch (e) {
             console.warn("Cleanup warning:", e);
         }
     }
 
-    // ============================================================
     // [STEP 2: 清理遺留的 ObjectURL]
-    // 雖然我們現在改用 loadBlob，但為了保險起見，如果之前有殘留的 URL，先清掉
-    // ============================================================
     if (lastObjectUrl) {
         URL.revokeObjectURL(lastObjectUrl);
         lastObjectUrl = null;
     }
 
-    // ============================================================
-    // [STEP 3: Metadata 讀取 (保持原有功能不變)]
-    // ============================================================
+    // --- Metadata 處理 (保持不變) ---
     const detectedSampleRate = await getWavSampleRate(file);
 
-    if (typeof onBeforeLoad === 'function') {
-      onBeforeLoad();
-    }
-
-    if (typeof onFileLoaded === 'function') {
-      onFileLoaded(file);
-    }
-
-    if (typeof onSampleRateDetected === 'function') {
-      await onSampleRateDetected(detectedSampleRate, true);
-    }
+    if (typeof onBeforeLoad === 'function') onBeforeLoad();
+    if (typeof onFileLoaded === 'function') onFileLoaded(file);
+    if (typeof onSampleRateDetected === 'function') await onSampleRateDetected(detectedSampleRate, true);
     
-    if (fileNameElem) {
-      fileNameElem.textContent = file.name;
-    }
+    if (fileNameElem) fileNameElem.textContent = file.name;
 
     try {
       const result = await extractGuanoMetadata(file);
@@ -179,27 +181,15 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // ============================================================
-    // [STEP 4: 核心修改 - 改用 loadBlob]
-    // 舊代碼: const fileUrl = URL.createObjectURL(file); await wavesurfer.load(fileUrl);
-    // 新代碼: 直接傳遞 file 對象
-    // ============================================================
+    // [STEP 3: 使用 loadBlob (RAM 不累積)]
     try {
-        // loadBlob 會直接讀取 File 對象的內存，不會生成需要手動 revoke 的 URL
-        // 配合 wavesurfer.esm.js 中的 try...finally { s = null }，
-        // 一旦載入被中斷或完成，檔案引用會立即消失，GC 可以馬上回收。
         await wavesurfer.loadBlob(file);
     } catch (err) {
-        // 如果是因為快速切換導致的 AbortError (中斷)，這是正常的，忽略它
-        // 這樣控制台就不會報紅字
         if (err.name !== 'AbortError' && err.message !== 'The user aborted a request.') {
             console.warn("Load error:", err);
         }
     }
 
-    // ============================================================
-    // [STEP 5: 後續處理 (保持原有功能不變)]
-    // ============================================================
     if (typeof onPluginReplaced === 'function') {
       onPluginReplaced();
     }

@@ -170,8 +170,24 @@ export async function replacePlugin(
         try {
           // 使用 RAF 避免阻塞 UI
           requestAnimationFrame(() => {
-              // 再次檢查 plugin 是否存在 (防止在 await 期間被銷毀)
-              if (plugin) plugin.render();
+              // 再次檢查 plugin 是否存在
+              if (plugin) {
+                  plugin.render();
+                  
+                  // [FIX: 移除視覺快照]
+                  // 當新的 plugin.render() 執行後，新圖已經畫在底層了
+                  // 這時候我們移除蓋在上面的快照，使用者就會看到新圖
+                  // 整個過程因為是疊加的，所以不會有白畫面閃爍
+                  const container = document.getElementById("spectrogram-only");
+                  if (container) {
+                      const snapshot = document.getElementById("spectrogram-transition-snapshot");
+                      if (snapshot) {
+                          // 可以加一點點延遲或 CSS transition 讓它淡出，這裡直接移除
+                          snapshot.remove();
+                      }
+                  }
+              }
+              
               if (typeof onRendered === 'function') onRendered();
           });
         } catch (err) {
@@ -344,4 +360,9 @@ document.addEventListener('file-list-cleared', () => {
         });
     }
 
+    // [新增] 超時保護：如果 1 秒後快照還在 (可能是加載失敗)，強制移除，避免擋住畫面
+    setTimeout(() => {
+        const snapshot = document.getElementById("spectrogram-transition-snapshot");
+        if (snapshot) snapshot.remove();
+    }, 1000);
 });
