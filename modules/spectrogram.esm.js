@@ -1103,10 +1103,18 @@ async render() {
             const channelData = t[channelIdx];
             
             const canvasWidth = this.getWidth();
+
+            if (canvasWidth <= 0) return;
             let renderPixels = isSmooth ? channelData : this.resample(channelData);
+            if (!renderPixels || renderPixels.length === 0) return;
             
             const imgWidth = renderPixels.length; // Smooth: numFrames, Default: screenWidth
             const imgHeight = Array.isArray(renderPixels) && renderPixels[0] ? renderPixels[0].length : 1;
+
+            if (imgWidth <= 0 || imgHeight <= 0) {
+                return;
+            }
+
             let imgData = new ImageData(imgWidth, imgHeight);
             
             // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
