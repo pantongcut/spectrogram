@@ -1631,7 +1631,7 @@ class u extends a {
         this.subscriptions.forEach((t => t())),
         this.unsubscribePlayerEvents(),
         this.timer.destroy(),
-        this.renderer.destroy(),
+        this.renderer.destroy();
 
         // [FIX] 顯式釋放 WaveformEngine WASM 資源
         if (this._wasmWaveformEngine) {
