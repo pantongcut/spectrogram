@@ -112,7 +112,15 @@ export function initFileLoader({
 
     console.log(`📂 [FileLoader] Start loading: ${file.name}`);
 
-    // [STEP 0: 建立視覺快照 (掛載到 Body 以防被誤刪)]
+    // ============================================================
+    // [STEP 0: 視覺快照管理 (單例模式)]
+    // ============================================================
+    
+    // 1. 殺死所有殘留的快照 (防止堆疊)
+    // 這是解決 RAM 累積的隱藏關鍵：如果舊快照沒刪乾淨，它會佔用顯存
+    const existingSnapshots = document.querySelectorAll('#spectrogram-transition-snapshot');
+    existingSnapshots.forEach(s => s.remove());
+
     const container = document.getElementById("spectrogram-only");
     if (container) {
         // 尋找舊的 Canvas
@@ -153,8 +161,6 @@ export function initFileLoader({
 
             const ctx = snapshot.getContext("2d");
             ctx.drawImage(oldCanvas, 0, 0);
-            
-            // [關鍵修改] 掛載到 body，確保不受 spectrogram-only 清理影響
             document.body.appendChild(snapshot);
             
             console.log('📸 [Snapshot] Snapshot appended to BODY.');
@@ -170,6 +176,7 @@ export function initFileLoader({
     if (wavesurfer) {
         try {
             wavesurfer.stop();
+            wavesurfer.empty();
             wavesurfer.decodedData = null;
             if (wavesurfer.backend) {
                 wavesurfer.backend.buffer = null;
@@ -209,6 +216,7 @@ export function initFileLoader({
 
     // [STEP 4]
     try {
+        await new Promise(r => setTimeout(r, 20));
         await wavesurfer.loadBlob(file);
     } catch (err) {
         if (err.name !== 'AbortError' && err.message !== 'The user aborted a request.') {
