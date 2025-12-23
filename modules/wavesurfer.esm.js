@@ -1372,91 +1372,83 @@ class u extends a {
         return this.plugins
     }
     // [FIX] 新增一個屬性來追蹤當前的載入任務
-    _loadingAbortController = null;
+_loadingAbortController = null;
+
     loadAudio(e, s, n, r) {
         return t(this, void 0, void 0, (function*() {
-            // [FIX] 1. 立即中斷上一次正在進行的載入任務
+            // 1. 中斷上一次載入
             if (this._loadingAbortController) {
                 this._loadingAbortController.abort();
                 this._loadingAbortController = null;
             }
-            
-            // [FIX] 2. 建立新的中斷控制器
             this._loadingAbortController = new AbortController();
             const signal = this._loadingAbortController.signal;
 
             var t;
             
-            // Clear old buffer reference immediately to help GC
-            if (this.decodedData) {
-                this.decodedData = null;
+            // [FIX] 步驟 A: 極致的清理
+            // 顯式切斷所有可能的大型數據引用
+            if (this.decodedData) this.decodedData = null;
+            if (this.media && this.media.buffer) this.media.buffer = null;
+            if (this._wasmWaveformEngine && typeof this._wasmWaveformEngine.clear === 'function') {
+                this._wasmWaveformEngine.clear();
             }
-            
-            // [FIX] 3. 檢查點：如果已被中斷，立即停止
+
+            // [FIX] 步驟 B: 給 GC 的「喘息時間」 (Breathing Room)
+            // 這是解決你 "等待幾秒才能釋放" 問題的關鍵代碼。
+            // 我們暫停 50ms，讓 V8 引擎有機會在分配下一個 5MB 記憶體之前，先回收上一個 5MB。
+            yield new Promise(resolve => setTimeout(resolve, 50));
+
+            // [FIX] 檢查點
             if (signal.aborted) return;
 
             if (this.emit("load", e),
             !this.options.media && this.isPlaying() && this.pause(),
-            this.decodedData = null,
+            // 再次確保數據為空
+            this.decodedData = null, 
             this.stopAtPosition = null,
             !s && !n) {
+                // ... (原本的 fetch 邏輯保持不變) ...
                 const i = this.options.fetchParams || {};
-                
-                // 將我們的主 signal 傳遞給 fetch
                 i.signal = signal;
-                
                 const n = t => this.emit("loading", t);
-                
                 try {
                     s = yield o.fetchBlob(e, n, i);
                 } catch (err) {
-                    if (err.name === 'AbortError') return; // 靜默處理中斷
+                    if (err.name === 'AbortError') return;
                     throw err;
                 }
-                
                 const r = this.options.blobMimeType;
-                r && (s = new Blob([s],{
-                    type: r
-                }))
+                r && (s = new Blob([s],{ type: r }))
             }
             
-            // [FIX] 4. 檢查點：在設置 src 之前檢查
             if (signal.aborted) return;
-
             this.setSrc(e, s);
             
             const a = yield new Promise((t => {
                 const e = r || this.getDuration();
-                e ? t(e) : this.mediaSubscriptions.push(this.onMediaEvent("loadedmetadata", ( () => t(this.getDuration())), {
-                    once: !0
-                }))
-            }
-            ));
+                e ? t(e) : this.mediaSubscriptions.push(this.onMediaEvent("loadedmetadata", ( () => t(this.getDuration())), { once: !0 }))
+            }));
             
             if (!e && !s) {
                 const t = this.getMediaElement();
                 t instanceof d && (t.duration = a)
             }
             
-            // [FIX] 5. 關鍵解碼階段：這是在背景最耗記憶體的地方
+            // ... (解碼邏輯保持不變) ...
             if (n) {
                 this.decodedData = i.createBuffer(n, a || 0);
             } else if (s) {
                 try {
                     const t = yield s.arrayBuffer();
-                    
-                    // [FIX] 6. 檢查點：ArrayBuffer 讀取後，解碼前
                     if (signal.aborted) return;
-
-                    // 這裡的 decode 需要一點時間，我們等待它完成
+                    
+                    // [FIX] 在進行重型解碼前，再給一次喘息機會
+                    // 這裡的解碼會產生巨大的 Float32Array，確保記憶體乾淨很重要
+                    yield new Promise(r => setTimeout(r, 10));
+                    
                     const decoded = yield i.decode(t, this.options.sampleRate);
-                    
-                    // [FIX] 7. 檢查點：解碼完成後，檢查是否還需要這份數據
-                    // 如果這時使用者已經點了下一個檔案，signal.aborted 會是 true
-                    if (signal.aborted) {
-                        return; // 直接丟棄 decoded 數據，不賦值給 this.decodedData
-                    }
-                    
+                    if (signal.aborted) return;
                     this.decodedData = decoded;
                 } catch (err) {
                     if (signal.aborted) return;
@@ -1464,11 +1456,11 @@ class u extends a {
                 }
             }
             
-            // [FIX] 8. WASM 載入階段
+            // ... (WASM 載入邏輯保持不變) ...
             if (this.decodedData && !signal.aborted) {
                 try {
-                    // 如果 _wasmWaveformEngine 還沒初始化，嘗試重新初始化
-                    if (!this._wasmWaveformEngine && typeof globalThis !== 'undefined' && globalThis._spectrogramWasm) {
+                     // ... (WASM 初始化與加載代碼) ...
+                     if (!this._wasmWaveformEngine && typeof globalThis !== 'undefined' && globalThis._spectrogramWasm) {
                         try {
                             if (globalThis._spectrogramWasm.WaveformEngine) {
                                 this._wasmWaveformEngine = new globalThis._spectrogramWasm.WaveformEngine();
@@ -1476,22 +1468,15 @@ class u extends a {
                         } catch (e) { }
                     }
                     
-                    // 現在加載音頻數據到 WASM
                     if (this._wasmWaveformEngine) {
                         const numChannels = this.decodedData.numberOfChannels;
-                        
-                        // [FIX] 檢查點
                         if (signal.aborted) return;
-
                         if (typeof this._wasmWaveformEngine.clear === 'function') {
                             this._wasmWaveformEngine.clear();
                         }
                         this._wasmWaveformEngine.resize(numChannels);
-                        
                         for (let ch = 0; ch < numChannels; ch++) {
-                            // [FIX] 迴圈內檢查點：如果檔案很大，這裡會跑很久
                             if (signal.aborted) return;
-
                             const channelData = this.decodedData.getChannelData(ch);
                             let channelDataCopy = new Float32Array(channelData);
                             this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
@@ -1506,8 +1491,7 @@ class u extends a {
             this.decodedData && (this.emit("decode", this.getDuration()),
             this.renderer.render(this.decodedData)),
             this.emit("ready", this.getDuration())
-        }
-        ))
+        }))
     }
     load(e, i, s) {
         return t(this, void 0, void 0, (function*() {
