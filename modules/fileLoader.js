@@ -158,6 +158,9 @@ export function initFileLoader({
             document.body.appendChild(snapshot);
             
             console.log('📸 [Snapshot] Snapshot appended to BODY.');
+
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            
         } else {
             console.log('📸 [Snapshot] No valid old canvas found. Skipping.');
         }
