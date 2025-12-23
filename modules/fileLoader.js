@@ -112,11 +112,24 @@ export function initFileLoader({
 
     console.log(`📂 [FileLoader] Start loading: ${file.name}`);
 
-    // [STEP 0: 建立視覺快照]
+// [STEP 0: 建立視覺快照]
     const container = document.getElementById("spectrogram-only");
     if (container) {
-        // 確保我們只抓取真正的頻譜圖 Canvas，而不是上次殘留的 Snapshot (如果有)
-        const oldCanvas = container.querySelector("canvas:not(#spectrogram-transition-snapshot)");
+        // 嘗試抓取 Spectrogram Canvas
+        // 注意：如果你有其他 Canvas (如 Axis)，這裡可能會需要更精確的選擇器
+        // 通常 Spectrogram 的 Canvas 是最大的，或者它是 div > canvas 結構
+        const canvases = container.querySelectorAll("canvas:not(#spectrogram-transition-snapshot)");
+        let oldCanvas = null;
+        
+        // 簡單過濾：找面積最大的 Canvas (通常就是頻譜圖)
+        let maxArea = 0;
+        canvases.forEach(c => {
+            const area = c.width * c.height;
+            if (area > maxArea) {
+                maxArea = area;
+                oldCanvas = c;
+            }
+        });
         
         if (oldCanvas && oldCanvas.width > 0) {
             console.log(`📸 [Snapshot] Creating snapshot from old canvas (${oldCanvas.width}x${oldCanvas.height})...`);

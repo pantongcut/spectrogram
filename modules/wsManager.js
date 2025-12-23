@@ -55,6 +55,7 @@ export function createSpectrogramPlugin({
     colorMap,
     peakMode,
     peakThreshold,
+    container: document.getElementById("spectrogram-only")
   };
 
   if (noverlap !== null) {
