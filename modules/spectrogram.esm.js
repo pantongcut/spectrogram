@@ -565,24 +565,21 @@ destroy() {
         this.fftData = null;
         this.powerSpectrum = null;
         
-        // [FIX] 安全釋放 WASM 記憶體 (Safe Release)
-        // 即使 release_memory 崩潰，也要確保 _wasmEngine 被設為 null，
-        // 這樣 JavaScript 端的垃圾回收器 (GC) 才能回收這個大對象。
+        // [FIX] 強制釋放 WASM 記憶體 (Hard Release)
+        // 必須調用 free() 來銷毀 Rust 結構體，否則 WASM 線性記憶體無法被重複利用
         if (this._wasmEngine) {
             try {
-                if (typeof this._wasmEngine.release_memory === 'function') {
-                    // console.log('🗑️ [Spectrogram] Soft-releasing WASM memory');
-                    this._wasmEngine.release_memory();
-                } else if (typeof this._wasmEngine.free === 'function') {
+                // 優先調用 free()，這是 wasm-bindgen 產生的標準析構函數
+                if (typeof this._wasmEngine.free === 'function') {
                     this._wasmEngine.free();
+                } else if (typeof this._wasmEngine.release_memory === 'function') {
+                    // 只有在沒有 free 時才退而求其次 (這種情況通常不應發生)
+                    this._wasmEngine.release_memory();
                 }
             } catch (e) {
-                // 忽略 "memory access out of bounds" 等錯誤
-                // 這種錯誤通常發生在 WASM 記憶體已經被外部重置或 detach 時
-                // 這時候我們不需要做任何事，直接讓 JS 引用斷開即可
-                console.warn('⚠️ [Spectrogram] WASM cleanup warning (safe to ignore):', e.message);
+                console.warn('⚠️ [Spectrogram] WASM cleanup warning:', e.message);
             } finally {
-                // CRITICAL: 無論如何都要切斷引用
+                // CRITICAL: 切斷引用，允許 JS GC 回收 Wrapper
                 this._wasmEngine = null;
             }
         }

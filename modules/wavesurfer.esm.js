@@ -1632,6 +1632,19 @@ class u extends a {
         this.unsubscribePlayerEvents(),
         this.timer.destroy(),
         this.renderer.destroy(),
+
+        // [FIX] 顯式釋放 WaveformEngine WASM 資源
+        if (this._wasmWaveformEngine) {
+            try {
+                if (typeof this._wasmWaveformEngine.free === 'function') {
+                    this._wasmWaveformEngine.free();
+                }
+            } catch (e) {
+                console.warn('[WaveSurfer] WASM cleanup warning:', e);
+            }
+            this._wasmWaveformEngine = null;
+        }
+
         super.destroy()
     }
 }
