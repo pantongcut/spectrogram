@@ -564,7 +564,7 @@ async function calculateBatCallParams(sel) {
     return null;
   }
 
-  function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duration, rectObj, startTime, endTime) {
+function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duration, rectObj, startTime, endTime, existingBatCall = null) {
     const selObj = { 
       data: { startTime, endTime, Flow, Fhigh }, 
       rect: rectObj, 
@@ -626,10 +626,9 @@ async function calculateBatCallParams(sel) {
       showSelectionContextMenu(e, selObj);
     });
 
-    // [CRITICAL CHANGE] 邏輯分流
+    // [修正] 邏輯分流：如果有傳入 existingBatCall，直接使用，不重新計算
     if (existingBatCall) {
-        // 情況 A: 如果有傳入現成的 BatCall (來自 Auto Detection)
-        // 直接使用，完全跳過重新計算
+        // 情況 A: 來自 Auto Detection，直接使用黃金數據
         selObj.data.batCall = existingBatCall;
         
         // 立即更新 Tooltip 顯示
@@ -637,8 +636,7 @@ async function calculateBatCallParams(sel) {
             updateTooltipValues(selObj, 0, 0, 0, 0);
         }
     } else if (judgeDurationMs < 100) {
-        // 情況 B: 如果是用戶手畫的框 (沒有 existingBatCall)
-        // 才執行異步重新計算
+        // 情況 B: 手動畫框，執行異步計算
         calculateBatCallParams(selObj).catch(err => {
             console.error('計算詳細參數失敗:', err);
         });
@@ -1225,26 +1223,19 @@ function updateTooltipValues(sel, left, top, width, height) {
     const freqRange = maxFrequency - minFrequency;
 
     // 定義 Padding 參數
-    const PAD_FREQ_KHZ = 10; // 上下各加 10 kHz，保留雜訊層以便二次分析
-    const PAD_TIME_S = 0.005; // 左右各加 5 ms
+    const PAD_FREQ_KHZ = 10; 
+    const PAD_TIME_S = 0.005; 
 
     calls.forEach(call => {
-      // 1. 應用 Padding 並強制限制在視圖/錄音範圍內 (Clamping)
-      
-      // 時間：左右加 5ms，限制在 [0, duration]
+      // 1. 應用 Padding 並強制限制在視圖範圍內
       const startTime = Math.max(0, call.startTime_s - PAD_TIME_S);
       const endTime = Math.min(getDuration(), call.endTime_s + PAD_TIME_S);
-      
-      // 頻率：上下加 10kHz，限制在 [minFrequency, maxFrequency]
-      // 這樣 Box 就不會畫到視圖外面去
       const flow = Math.max(minFrequency, call.lowFreq_kHz - PAD_FREQ_KHZ);
       const fhigh = Math.min(maxFrequency, call.highFreq_kHz + PAD_FREQ_KHZ);
 
-      // 2. 計算像素座標 (基於加寬後的邊界)
+      // 2. 計算像素座標
       const left = (startTime / getDuration()) * actualWidth;
       const width = ((endTime - startTime) / getDuration()) * actualWidth;
-      
-      // Y軸是倒置的 (0在頂部 = Max Freq)
       const top = (1 - (fhigh - minFrequency) / freqRange) * spectrogramHeight;
       const height = ((fhigh - flow) / freqRange) * spectrogramHeight;
 
@@ -1259,23 +1250,17 @@ function updateTooltipValues(sel, left, top, width, height) {
       viewer.appendChild(selectionRect);
 
       // 4. 創建 Selection 對象
-      // 這裡的 Bandwidth/Duration 是指「Selection Box」的物理大小
-      // 包含了 Padding，確保它是合法的分析視窗
       const Bandwidth = fhigh - flow;
       const Duration = endTime - startTime;
 
-      // 這樣 createTooltip 就會知道 "我已經有數據了，不需要重算"
       const selObj = createTooltip(
         left, top, width, height, 
         fhigh, flow, Bandwidth, Duration, 
         selectionRect, startTime, endTime,
-        call // <--- 傳入 existingBatCall
+        call // <--- [重要] 這裡必須傳入 call 作為 existingBatCall
       );
 
-      // 5. 注入原始偵測數據
-      // Tooltip 會優先顯示這裡面的精確數值 (Peak, Knee 等)
-      // 這樣既保證了視覺上的 Box 足夠大 (包含雜訊)，又保證了顯示的數據是精確的 Signal 參數
-      selObj.data.batCall = call;
+      // 5. (可選) 注入原始偵測數據
       selObj.data.peakFreq = call.peakFreq_kHz;
 
       // 6. 預設隱藏 Tooltip
@@ -1284,7 +1269,7 @@ function updateTooltipValues(sel, left, top, width, height) {
         selObj.tooltip.style.display = 'none';
       }
       
-      console.log(`[FrequencyHover] Created selection: Time ${startTime.toFixed(3)}-${endTime.toFixed(3)}s, Freq ${fhigh.toFixed(1)}-${flow.toFixed(1)}kHz`);
+      console.log(`[FrequencyHover] Created padded selection: Time ${startTime.toFixed(3)}-${endTime.toFixed(3)}s, Freq ${fhigh.toFixed(1)}-${flow.toFixed(1)}kHz`);
     });
   }
 
