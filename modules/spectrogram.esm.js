@@ -1098,7 +1098,7 @@ async render() {
             
             const imgWidth = renderPixels.length; // Smooth: numFrames, Default: screenWidth
             const imgHeight = Array.isArray(renderPixels) && renderPixels[0] ? renderPixels[0].length : 1;
-            let imgData = new ImageData(imgWidth, imgHeight);
+            const imgData = new ImageData(imgWidth, imgHeight);
             
             // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
             // (保持原本的 Color Map 填充邏輯，這裡省略以節省篇幅，請保留原文件該區塊代碼)
@@ -1144,26 +1144,9 @@ async render() {
             const sourceHeight = Math.round(imgHeight * (p - u));
             
             createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap => {
-                // [FIX 3] 終極防護：如果 Context 已經被銷毀 (代表 destroy 被呼叫了)，
-                // 絕對不要執行 drawImage，並立刻關閉 bitmap
-                if (!this.spectrCc || !this.canvas) {
-                     if (bitmap && typeof bitmap.close === 'function') bitmap.close();
-                     return;
-                }
-                
                 const drawY = this.height * (channelIdx + 1 - p / f);
                 const drawH = this.height * p / f;
                 canvasCtx.drawImage(bitmap, 0, drawY, canvasWidth, drawH);
-
-                // [FIX 1] 畫完立刻釋放 GPU 記憶體 (這非常重要！)
-                if (bitmap && typeof bitmap.close === 'function') {
-                    bitmap.close();
-                }
-
-                // [FIX 2] 切斷閉包引用，讓 imgData 能立刻被 GC 回收
-                // 這些變數在閉包內會佔用大量 RAM，直到 Promise 結束很久後才釋放
-                imgData = null; 
-                renderPixels = null;
 
                 // [NEW] Peak Mode 渲染邏輯更新 (支援多點/局部閾值)
                 if (this.options && this.options.peakMode && this.peakBandArrayPerChannel && this.peakBandArrayPerChannel[channelIdx]) {
