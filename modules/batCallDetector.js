@@ -3877,37 +3877,37 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       this.config.enableBackwardEndFreqScan = this.config.enableBackwardEndFreqScan !== false;
     }
     
-    // ============================================================
+// ============================================================
     // [2025 NEW] Populate Frequency Contour for Peak Mode Visualization
-    // 修正 V2：嚴格限制時間範圍，並處理平滑邊界效應
+    // 修正 V3：放寬過濾條件以確保線條顯示，同時保持去噪效果
     // ============================================================
     call.frequencyContour = [];
     
     const startTimeS = call.startTime_s;
     const endTimeS = call.endTime_s;
     
-    // 決定過濾閾值
+    // 決定過濾閾值 - 放寬標準
+    // 使用 robustNoiseFloor_dB，但緩衝區改為 +3dB (原 +6dB) 以避免過度過濾弱信號
     const noiseFloor_dB = call.noiseFloor_dB !== undefined ? call.noiseFloor_dB : -80;
-    const contourThreshold_dB = noiseFloor_dB + 6; // [調整] 提高到 +6dB 避免畫出背景雜訊
+    // [ADJUST] Lower threshold to +3dB above noise floor (was +6dB)
+    const contourThreshold_dB = noiseFloor_dB + 3; 
     
-    // 計算有效幀索引範圍 (避免遍歷整個 spectrogram slice)
-    // frameFrequencies 是原始數據，smoothedFrequencies 是平滑後數據
-    // 我們只取 [newStartFrameIdx, newEndFrameIdx] 區間
-    // 這些索引在 detectCalls 步驟中已經計算，但在這裡我們通過時間反推最安全
-    
+    // 計算有效幀索引範圍
     for (let i = 0; i < smoothedFrequencies.length; i++) {
-      // 邊界檢查
       if (i >= timeFrames.length || i >= spectrogram.length) break;
       
       const timeInSeconds = timeFrames[i];
       
-      // [FIX 1] 嚴格時間過濾：只保留 Call 內部的點
-      // 這會切斷頭尾連接到 0 或雜訊的直線
-      if (timeInSeconds < startTimeS || timeInSeconds > endTimeS) {
+      // [FIX 1] 邊界寬容度：允許 +/- 1 幀的誤差，避免因為浮點數精度丟失頭尾
+      // 確保至少保留 Start 和 End 之間的點
+      // timeFrameDuration 是一個 frame 的時間長度
+      const timeFrameDuration = timeFrames[1] - timeFrames[0];
+      const tolerance = timeFrameDuration * 0.5;
+
+      if (timeInSeconds < (startTimeS - tolerance) || timeInSeconds > (endTimeS + tolerance)) {
         continue;
       }
 
-      // [FIX 2] 獲取頻率和功率
       const freqHz = smoothedFrequencies[i];
       const framePower = spectrogram[i];
       
@@ -3920,15 +3920,41 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         peakBinPower = framePower[peakBinIdx];
       }
       
-      // [FIX 3] 嚴格能量過濾 & 頻率有效性檢查
-      // 確保頻率不為 0 且能量高於背景
-      if (freqHz > 1000 && peakBinPower > contourThreshold_dB) {
+      // [FIX 2] 能量過濾與強制保留
+      // 邏輯：
+      // 1. 如果能量 > 閾值 -> 保留
+      // 2. 如果是 Start 或 End 點附近的幀 (關鍵幀) -> 強制保留，即使能量稍低 (避免斷頭斷尾)
+      const isKeyFrame = Math.abs(timeInSeconds - startTimeS) < timeFrameDuration * 2 || 
+                         Math.abs(timeInSeconds - endTimeS) < timeFrameDuration * 2;
+
+      // 如果是關鍵幀，允許低至 noiseFloor 的能量
+      const effectiveThreshold = isKeyFrame ? noiseFloor_dB : contourThreshold_dB;
+
+      if (freqHz > 1000 && peakBinPower > effectiveThreshold) {
         call.frequencyContour.push({
           time_s: timeInSeconds,
           freq_kHz: freqHz / 1000,
           power_dB: peakBinPower
         });
       }
+    }
+    
+    // [Validation] 如果過濾後點太少 (< 3)，則回退到不過濾 (顯示原始偵測結果)
+    // 這保證了即使是很弱的信號也能被畫出來，而不是消失
+    if (call.frequencyContour.length < 3) {
+        call.frequencyContour = []; // Clear
+        // Fallback loop: Add all points within time range regardless of power
+        for (let i = 0; i < smoothedFrequencies.length; i++) {
+            if (i >= timeFrames.length) break;
+            const t = timeFrames[i];
+            if (t >= startTimeS && t <= endTimeS) {
+                 call.frequencyContour.push({
+                    time_s: t,
+                    freq_kHz: smoothedFrequencies[i] / 1000,
+                    power_dB: -100 // Dummy power
+                 });
+            }
+        }
     }
     
     // ============================================================
