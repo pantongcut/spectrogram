@@ -82,7 +82,10 @@
           <i class="fa-solid fa-clock-rotate-left"></i>
         </button>
         <button id="peakBtn" class="sidebar-button" title="Peak Tracking Mode">
-          <i class="fa-solid fa-life-ring"></i>
+          <i class="fa-solid fa-wave-square"></i>
+        </button>
+        <button id="autoDetectBtn" class="sidebar-button" title="Auto Detection Mode">
+          <i class="fa-solid fa-robot"></i>
         </button>
         <button id="themeToggleBtn" class="sidebar-button" title="Toggle Dark/Light Mode">
           <i class="fa-solid fa-moon"></i>
@@ -151,6 +154,19 @@
             <span class="slider round"></span>
           </label>
         </label>
+      </div>
+      <!-- Auto Detection Tool Bar -->
+      <div id="auto-detect-tool-bar" class="tool-bar-submenu">
+        <div class="tool-item">
+          <label>Detection Threshold:</label>
+          <input type="range" id="autoDetectThresholdSlider" min="-100" max="0" step="1" value="-60">
+          <span id="autoDetectThresholdVal">-60 dB</span>
+        </div>
+        <div class="tool-item">
+          <button id="runAutoDetectBtn" class="primary-btn">
+            <i class="fa-solid fa-play"></i> Run Detection
+          </button>
+        </div>
       </div>
       <div id="auto-id-panel" class="map-popup">
         <div class="popup-drag-bar">

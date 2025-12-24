@@ -228,75 +228,85 @@ export function getCurrentWindowType() {
   return currentWindowType;
 }
 
+/**
+ * [NEW 2025] 執行自動偵測的函數
+ * 這是獨立的功能，由 Auto Detection Toolbar 觸發
+ * @param {number} threshold_dB - 偵測閾值 (dB)，預設為 -60
+ */
+export function runAutoDetection(threshold_dB = -60) {
+  if (!ws) return;
+  const buffer = ws.getDecodedData();
+  
+  if (buffer && !isDetecting) {
+    isDetecting = true;
+    
+    // Show loading indicator
+    const loadingEl = document.getElementById('loading-overlay');
+    if (loadingEl) loadingEl.style.display = 'flex';
+
+    // 注入 WASM 引擎
+    const wasmEngine = getAnalysisWasmEngine();
+    if (wasmEngine) {
+      defaultDetector.wasmEngine = wasmEngine;
+      console.log("[wsManager] ✅ Injected WASM engine for Auto Detection");
+    } else {
+      console.warn("[wsManager] ⚠️ WASM engine unavailable, will fall back to JS");
+    }
+
+    // 獲取頻率範圍設置
+    let freqMin = 10;
+    let freqMax = 128;
+    if (plugin && plugin.options) {
+      freqMin = (plugin.options.frequencyMin || 10000) / 1000;
+      freqMax = (plugin.options.frequencyMax || 128000) / 1000;
+    }
+
+    // 執行偵測流程
+    (async () => {
+      try {
+        const calls = await defaultDetector.processFullFile(
+          buffer.getChannelData(0), 
+          buffer.sampleRate, 
+          freqMin, 
+          freqMax,
+          { 
+            threshold_dB: threshold_dB,  // 使用 Slider 傳入的值
+            padding_ms: 10
+          }
+        );
+        
+        console.log(`[wsManager] Auto Detection complete: ${calls.length} calls detected (Threshold: ${threshold_dB}dB)`);
+        
+        document.dispatchEvent(new CustomEvent('bat-calls-detected', { 
+          detail: calls,
+          bubbles: true,
+          cancelable: true
+        }));
+        
+      } catch (e) {
+        console.error('[wsManager] Auto detection failed:', e);
+      } finally {
+        isDetecting = false;
+        if (loadingEl) loadingEl.style.display = 'none';
+      }
+    })();
+  }
+}
+
+/**
+ * [REVERTED 2025] Peak Mode - 純視覺模式，不執行偵測
+ * 只更新內部狀態，Spectrogram 會根據 peakMode flag 顯示/隱藏 Peak Points
+ */
 export function setPeakMode(peakMode) {
   currentPeakMode = peakMode;
+  console.log(`[wsManager] Peak Mode set to: ${peakMode} (Visual-only, no detection)`);
   
-  // NEW (2025): If turning on Peak Mode, trigger full file detection
-  if (peakMode && ws) {
-    const buffer = ws.getDecodedData();
-    
-    // Prevent concurrent detection
-    if (buffer && !isDetecting) {
-      isDetecting = true;
-      
-      // Show loading indicator (optional)
-      const loadingEl = document.getElementById('loading-overlay');
-      if (loadingEl) loadingEl.style.display = 'flex';
-
-      // [FIX] 確保 Detector 擁有 WASM 引擎實例
-      // 獲取或創建 Analysis 專用引擎 (FFT 1024)
-      const wasmEngine = getAnalysisWasmEngine();
-      if (wasmEngine) {
-        defaultDetector.wasmEngine = wasmEngine;
-        console.log("[wsManager] ✅ Injected WASM engine into BatCallDetector (FastScan will use 20-50x acceleration)");
-      } else {
-        console.warn("[wsManager] ⚠️ WASM engine unavailable, will fall back to JS (slower)");
-      }
-
-      // Get frequency parameters from plugin or defaults
-      let freqMin = 10;    // kHz
-      let freqMax = 128;   // kHz
-      
-      if (plugin && plugin.options) {
-        freqMin = (plugin.options.frequencyMin || 10000) / 1000;
-        freqMax = (plugin.options.frequencyMax || 128000) / 1000;
-      }
-
-      (async () => {
-        try {
-          // Call processFullFile for two-pass detection
-          const calls = await defaultDetector.processFullFile(
-            buffer.getChannelData(0), 
-            buffer.sampleRate, 
-            freqMin, 
-            freqMax,
-            { 
-              threshold_dB: -60,  // Fast scan threshold
-              padding_ms: 10      // Padding before/after segments (ms)
-            }
-          );
-          
-          console.log(`[wsManager] Two-Pass Detection complete: ${calls.length} calls detected`);
-          
-          // [MODIFIED 2025] Event-based system: dispatch detected calls to UI layer
-          // Instead of calling plugin.setBatCalls(), emit a custom event
-          // This allows frequencyHover.js to create Selection Boxes directly
-          document.dispatchEvent(new CustomEvent('bat-calls-detected', { 
-            detail: calls,
-            bubbles: true,
-            cancelable: true
-          }));
-          
-          console.log(`[wsManager] ✅ Dispatched 'bat-calls-detected' event with ${calls.length} calls`);
-          
-        } catch (e) {
-          console.error('[wsManager] Full file detection failed:', e);
-        } finally {
-          isDetecting = false;
-          if (loadingEl) loadingEl.style.display = 'none';
-        }
-      })();
-    }
+  // 如果需要立即重新渲染，可以調用 replacePlugin
+  // 但通常 Plugin 已經在監聽狀態變化
+  if (plugin) {
+    // 更新 plugin 的 peak mode 選項
+    plugin.peakMode = peakMode;
+    console.log(`[wsManager] Updated plugin.peakMode to: ${peakMode}`);
   }
 }
 

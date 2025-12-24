@@ -39,6 +39,7 @@ import { showMessageBox } from './modules/messageBox.js';
 import { initAutoIdPanel } from './modules/autoIdPanel.js';
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
 import { initPeakControl, isPeakModeActive, getPeakThreshold } from './modules/peakControl.js';
+import { initAutoDetectionControl } from './modules/autoDetectionControl.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
 const spectrogramHeight = 800;
@@ -1584,6 +1585,9 @@ initPeakControl({
     );
   }
 });
+
+// [NEW 2025] 初始化 Auto Detection Control
+initAutoDetectionControl();
 
 autoIdControl = initAutoIdPanel({
   spectrogramHeight,

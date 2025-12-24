@@ -1205,7 +1205,6 @@ function updateTooltipValues(sel, left, top, width, height) {
    * @param {Array} calls - Array of BatCall objects from batCallDetector
    */
   function addAutoSelections(calls) {
-    // 1. Clear existing selections (optional - clear previous detections)
     clearSelections();
 
     if (!calls || calls.length === 0) return;
@@ -1214,24 +1213,20 @@ function updateTooltipValues(sel, left, top, width, height) {
     const freqRange = maxFrequency - minFrequency;
 
     calls.forEach(call => {
-      // 2. Calculate pixel coordinates from call parameters
-      // Time -> X coordinate
+      // Calculate pixel coordinates from call parameters
       const startTime = call.startTime_s;
       const endTime = call.endTime_s;
       const left = (startTime / getDuration()) * actualWidth;
       const width = ((endTime - startTime) / getDuration()) * actualWidth;
 
       // Frequency -> Y coordinate (inverted, top = max freq)
-      // Use lowFreq_kHz and highFreq_kHz as frequency boundaries
       const flow = call.lowFreq_kHz; // kHz
       const fhigh = call.highFreq_kHz; // kHz
       
-      // Y-axis is inverted: 0 at top = Max Frequency, bottom = Min Frequency
-      // top corresponds to fhigh, bottom corresponds to flow
       const top = (1 - (fhigh - minFrequency) / freqRange) * spectrogramHeight;
       const height = ((fhigh - flow) / freqRange) * spectrogramHeight;
 
-      // 3. Create DOM element for selection rectangle
+      // Create DOM element for selection rectangle
       const selectionRect = document.createElement('div');
       selectionRect.className = 'selection-rect';
       selectionRect.style.left = `${left}px`;
@@ -1239,10 +1234,9 @@ function updateTooltipValues(sel, left, top, width, height) {
       selectionRect.style.width = `${width}px`;
       selectionRect.style.height = `${height}px`;
       
-      // Add to viewer
       viewer.appendChild(selectionRect);
 
-      // 4. Create selection object with call data embedded
+      // Create selection object with call data embedded
       const Bandwidth = fhigh - flow;
       const Duration = endTime - startTime;
 
@@ -1253,14 +1247,14 @@ function updateTooltipValues(sel, left, top, width, height) {
         selectionRect, startTime, endTime
       );
 
-      // [CRITICAL] Directly inject the detected BatCall object
-      // This enables Tooltip to display all detailed parameters without recalculation
+      // Directly inject the detected BatCall object
       selObj.data.batCall = call;
-      selObj.data.peakFreq = call.peakFreq_kHz; // Backup if needed
+      selObj.data.peakFreq = call.peakFreq_kHz;
 
-      // Immediately update tooltip content with call data
+      // [MODIFIED 2025] 預設隱藏 Tooltip，畫面更乾淨
       if (selObj.tooltip) {
-        updateTooltipValues(selObj, 0, 0, 0, 0);
+        updateTooltipValues(selObj, 0, 0, 0, 0); // 先更新數值
+        selObj.tooltip.style.display = 'none';   // 然後隱藏
       }
       
       console.log(`[FrequencyHover] Auto-created selection for call at ${startTime.toFixed(3)}s, freq: ${fhigh.toFixed(2)}-${flow.toFixed(2)} kHz`);
