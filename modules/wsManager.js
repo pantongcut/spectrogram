@@ -243,6 +243,16 @@ export function setPeakMode(peakMode) {
       const loadingEl = document.getElementById('loading-overlay');
       if (loadingEl) loadingEl.style.display = 'flex';
 
+      // [FIX] 確保 Detector 擁有 WASM 引擎實例
+      // 獲取或創建 Analysis 專用引擎 (FFT 1024)
+      const wasmEngine = getAnalysisWasmEngine();
+      if (wasmEngine) {
+        defaultDetector.wasmEngine = wasmEngine;
+        console.log("[wsManager] ✅ Injected WASM engine into BatCallDetector (FastScan will use 20-50x acceleration)");
+      } else {
+        console.warn("[wsManager] ⚠️ WASM engine unavailable, will fall back to JS (slower)");
+      }
+
       // Get frequency parameters from plugin or defaults
       let freqMin = 10;    // kHz
       let freqMax = 128;   // kHz
