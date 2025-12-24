@@ -571,29 +571,20 @@ class h extends s {
         this.peakBandArrayPerChannel = null;
 
         // [FIX] 強制釋放 WASM 記憶體 (Hard Release)
+        // 必須調用 free() 來銷毀 Rust 結構體，否則 WASM 線性記憶體無法被重複利用
         if (this._wasmEngine) {
             try {
+                // 優先調用 free()，這是 wasm-bindgen 產生的標準析構函數
                 if (typeof this._wasmEngine.free === 'function') {
                     this._wasmEngine.free();
                 } else if (typeof this._wasmEngine.release_memory === 'function') {
+                    // 只有在沒有 free 時才退而求其次 (這種情況通常不應發生)
                     this._wasmEngine.release_memory();
                 }
             } catch (e) {
-                const msg = (e.message || String(e)).toLowerCase();                
-                // 如果是以下任何一種情況，直接 return (靜音)，不要 console.warn
-                if (
-                    msg.includes('out of bounds') || 
-                    msg.includes('null') || 
-                    msg.includes('unreachable') ||
-                    msg.includes('memory access')
-                ) {
-                    // 良性錯誤：忽略
-                    return;
-                }
-                // 只有真的未知的錯誤才印出來
                 console.warn('⚠️ [Spectrogram] WASM cleanup warning:', e.message);
             } finally {
-                // CRITICAL: 無論釋放成功還是報錯，必須切斷 JS 引用
+                // CRITICAL: 切斷引用，允許 JS GC 回收 Wrapper
                 this._wasmEngine = null;
             }
         }
@@ -1103,18 +1094,10 @@ async render() {
             const channelData = t[channelIdx];
             
             const canvasWidth = this.getWidth();
-
-            if (canvasWidth <= 0) return;
             let renderPixels = isSmooth ? channelData : this.resample(channelData);
-            if (!renderPixels || renderPixels.length === 0) return;
             
             const imgWidth = renderPixels.length; // Smooth: numFrames, Default: screenWidth
             const imgHeight = Array.isArray(renderPixels) && renderPixels[0] ? renderPixels[0].length : 1;
-
-            if (imgWidth <= 0 || imgHeight <= 0) {
-                return;
-            }
-
             let imgData = new ImageData(imgWidth, imgHeight);
             
             // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
@@ -1479,12 +1462,6 @@ async render() {
             
             let fullU8Spectrum;
             try {
-                // [FIX] 終極防護：防止 ZoomControl 在引擎銷毀或切換時觸發重繪導致崩潰
-                if (!this._wasmEngine) {
-                    audioDataCopy.fill(0); // 清理內存
-                    return null; // 直接返回，不做任何事
-                }
-
                 // 嘗試調用 WASM 計算
                 fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
                     audioDataCopy,

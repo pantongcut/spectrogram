@@ -109,100 +109,23 @@ export function initFileLoader({
 
   async function loadFile(file) {
     if (!file) return;
-
-    console.log(`📂 [FileLoader] Start loading: ${file.name}`);
-
-    // ============================================================
-    // [STEP 0: 視覺快照管理 (單例模式)]
-    // ============================================================
-    
-    // 1. 殺死所有殘留的快照 (防止堆疊)
-    // 這是解決 RAM 累積的隱藏關鍵：如果舊快照沒刪乾淨，它會佔用顯存
-    const existingSnapshots = document.querySelectorAll('#spectrogram-transition-snapshot');
-    existingSnapshots.forEach(s => s.remove());
-
-    const container = document.getElementById("spectrogram-only");
-    if (container) {
-        // 尋找舊的 Canvas
-        const canvases = container.querySelectorAll("canvas:not(#spectrogram-transition-snapshot)");
-        let oldCanvas = null;
-        let maxArea = 0;
-        canvases.forEach(c => {
-            const area = c.width * c.height;
-            if (area > maxArea) {
-                maxArea = area;
-                oldCanvas = c;
-            }
-        });
-        
-        if (oldCanvas && oldCanvas.width > 0) {
-            console.log(`📸 [Snapshot] Creating snapshot from old canvas (${oldCanvas.width}x${oldCanvas.height})...`);
-            
-            // 獲取舊 Canvas 在螢幕上的絕對位置
-            const rect = oldCanvas.getBoundingClientRect();
-            
-            const snapshot = document.createElement("canvas");
-            snapshot.id = "spectrogram-transition-snapshot";
-            // 設定與舊 Canvas 相同的解析度
-            snapshot.width = oldCanvas.width;
-            snapshot.height = oldCanvas.height;
-            
-            // 設定樣式：固定在螢幕上，完全覆蓋舊的位置
-            Object.assign(snapshot.style, {
-                position: "fixed", // 使用 fixed 避免受父容器 overflow 影響
-                top: `${rect.top}px`,
-                left: `${rect.left}px`,
-                width: `${rect.width}px`,
-                height: `${rect.height}px`,
-                zIndex: "10", // 最高層級
-                pointerEvents: "none",
-                boxSizing: "border-box"
-            });
-
-            const ctx = snapshot.getContext("2d");
-            ctx.drawImage(oldCanvas, 0, 0);
-            document.body.appendChild(snapshot);
-            
-            console.log('📸 [Snapshot] Snapshot appended to BODY.');
-
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        } else {
-            console.log('📸 [Snapshot] No valid old canvas found. Skipping.');
-        }
-    }
-
-    // [STEP 1: 暴力清理]
-    if (wavesurfer) {
-        try {
-            wavesurfer.stop();
-            wavesurfer.empty();
-            wavesurfer.decodedData = null;
-            if (wavesurfer.backend) {
-                wavesurfer.backend.buffer = null;
-                if (wavesurfer.backend.source) {
-                    try { wavesurfer.backend.source.disconnect(); } catch(e){}
-                }
-            }
-            document.dispatchEvent(new Event('file-list-cleared')); 
-        } catch (e) {
-            console.warn("Cleanup warning:", e);
-        }
-    }
-    
-    // ... (STEP 2, 3, 4, 5 保持原本 loadBlob 的代碼不變) ...
-    // [STEP 2]
-    if (lastObjectUrl) {
-        URL.revokeObjectURL(lastObjectUrl);
-        lastObjectUrl = null;
-    }
-
-    // [STEP 3]
     const detectedSampleRate = await getWavSampleRate(file);
-    if (typeof onBeforeLoad === 'function') onBeforeLoad();
-    if (typeof onFileLoaded === 'function') onFileLoaded(file);
-    if (typeof onSampleRateDetected === 'function') await onSampleRateDetected(detectedSampleRate, true);
-    if (fileNameElem) fileNameElem.textContent = file.name;
+
+    if (typeof onBeforeLoad === 'function') {
+      onBeforeLoad();
+    }
+
+    if (typeof onFileLoaded === 'function') {
+      onFileLoaded(file);
+    }
+
+    if (typeof onSampleRateDetected === 'function') {
+      await onSampleRateDetected(detectedSampleRate, true);
+    }
+    
+    if (fileNameElem) {
+      fileNameElem.textContent = file.name;
+    }
 
     try {
       const result = await extractGuanoMetadata(file);
@@ -214,24 +137,60 @@ export function initFileLoader({
       guanoOutput.textContent = '(Error reading GUANO metadata)';
     }
 
-    // [STEP 4]
-    try {
-        await new Promise(r => setTimeout(r, 20));
-        await wavesurfer.loadBlob(file);
-    } catch (err) {
-        if (err.name !== 'AbortError' && err.message !== 'The user aborted a request.') {
-            console.warn("Load error:", err);
-        }
-    }
+    const fileUrl = URL.createObjectURL(file);
+    // Don't revoke old URL yet - WaveSurfer might still be using it
+    // Store it for later revocation
+    const oldObjectUrl = lastObjectUrl;
+    lastObjectUrl = fileUrl;
 
-    // [STEP 5]
+    await wavesurfer.load(fileUrl);
+
     if (typeof onPluginReplaced === 'function') {
       onPluginReplaced();
     }
+
     const sampleRate = detectedSampleRate || wavesurfer?.options?.sampleRate || 256000;
+
     if (typeof onAfterLoad === 'function') {
       onAfterLoad();
     }
+    
+    // [FIX] 延遲清理：確保 WaveSurfer Worker 完成解碼，然後清理舊的 Object URL 和緩存
+    // 500ms 是經驗值，給予足夠的時間讓瀏覽器 GC 開始運作
+    setTimeout(() => {
+      try {
+        // 現在安全地撤銷舊的 Object URL，因為新檔案已載入
+        if (oldObjectUrl && oldObjectUrl !== fileUrl) {
+          URL.revokeObjectURL(oldObjectUrl);
+          console.log('✅ [fileLoader] Revoked old Blob URL');
+        }
+        
+        // 清理 WaveSurfer backend 中的任何快取音頻緩衝區
+        if (wavesurfer && wavesurfer.backend) {
+          // 更激進的緩衝區清理
+          const keysToNull = [
+            'audioBuffer', 'decodedData', 'buffer', 'data', 'rawData',
+            'originalAudioBuffer', 'filteredBuffer', 'offlineContext',
+            'convolver', 'analyser', 'scriptProcessor', 'gainNode'
+          ];
+          keysToNull.forEach(key => {
+            if (wavesurfer.backend[key]) {
+              wavesurfer.backend[key] = null;
+            }
+          });
+          console.log('🗑️ [fileLoader] Cleared WaveSurfer audio buffers and nodes');
+        }
+        
+        // 試圖強制垃圾回收的暗示
+        if (window.gc) {
+          window.gc();
+          console.log('💾 [fileLoader] Triggered manual garbage collection');
+        }
+      } catch (err) {
+        console.warn('⚠️ [fileLoader] Error in cleanup:', err);
+      }
+    }, 500);
+    
     document.dispatchEvent(new Event('file-loaded'));
   }
 

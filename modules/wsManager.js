@@ -55,7 +55,6 @@ export function createSpectrogramPlugin({
     colorMap,
     peakMode,
     peakThreshold,
-    container: document.getElementById("spectrogram-only")
   };
 
   if (noverlap !== null) {
@@ -171,38 +170,8 @@ export async function replacePlugin(
         try {
           // 使用 RAF 避免阻塞 UI
           requestAnimationFrame(() => {
-              // 再次檢查 plugin 是否存在
-              if (plugin) {
-                  
-                  // [FIX] 改用事件驅動：監聽插件的 'ready' 事件
-                  // 這是最準確的時間點，代表 drawImage 已經執行完畢
-                  plugin.once('ready', () => {
-                      console.log('📸 [Snapshot] Spectrogram is ready. Starting fade-out sequence.');
-                      
-                      // Double RAF: 強制瀏覽器先將新畫好的 Canvas 渲染上屏 (Paint)
-                      // 這是消除「微閃爍」的最後一哩路，確保新圖已經在螢幕上了，才把舊圖拿掉
-                      requestAnimationFrame(() => {
-                          requestAnimationFrame(() => {
-                              const snapshot = document.getElementById("spectrogram-transition-snapshot");
-                              if (snapshot) {
-                                  // 開始淡出動畫
-                                  snapshot.style.transition = 'opacity 0.1s ease-out';
-                                  snapshot.style.opacity = '0';
-                                  
-                                  // 等待動畫結束後移除 DOM
-                                  setTimeout(() => {
-                                      snapshot.remove();
-                                      console.log('📸 [Snapshot] Removed from DOM.');
-                                  }, 150); // 比 0.1s 稍長一點確保安全
-                              }
-                          });
-                      });
-                  });
-
-                  // 觸發渲染 (這會啟動異步繪圖，完成後會觸發上面的 ready)
-                  plugin.render();
-              }
-              
+              // 再次檢查 plugin 是否存在 (防止在 await 期間被銷毀)
+              if (plugin) plugin.render();
               if (typeof onRendered === 'function') onRendered();
           });
         } catch (err) {
@@ -353,29 +322,3 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
     return null;
   }
 }
-
-document.addEventListener('file-list-cleared', () => {
-    console.log('🧹 [Cleanup] Received file-list-cleared event.');
-    
-    if (plugin) {
-        if (typeof plugin.destroy === 'function') {
-            plugin.destroy();
-        }
-        plugin = null;
-    }
-
-    const container = document.getElementById("spectrogram-only");
-    if (container) {
-        // 清理 container 內的所有 canvas
-        const canvases = container.querySelectorAll("canvas");
-        
-        if (canvases.length > 0) {
-            console.log(`🧹 [Cleanup] Removing ${canvases.length} canvases from container.`);
-            canvases.forEach(canvas => {
-                canvas.width = 0;
-                canvas.height = 0;
-                canvas.remove();
-            });
-        }
-    }
-});
