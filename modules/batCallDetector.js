@@ -3879,64 +3879,147 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     
 // ============================================================
     // [2025 NEW] Populate Frequency Contour for Peak Mode Visualization
-    // 修正 V3：放寬過濾條件以確保線條顯示，同時保持去噪效果
+    // 修正 V4: Guided Ridge Tracking (引導式脊線追蹤)
+    // 解決方案：不使用原始的 frameFrequencies (會抓到雜訊)，
+    // 而是從 Peak 點開始，向前/向後鎖定頻率軌跡。
     // ============================================================
     call.frequencyContour = [];
     
-    const startTimeS = call.startTime_s;
-    const endTimeS = call.endTime_s;
+    // 1. 準備追蹤參數
+    // 將時間轉換為 Frame Index
+    const timePerFrame = timeFrames[1] - timeFrames[0];
+    const startIdxRel = Math.floor((call.startTime_s - timeFrames[0]) / timePerFrame);
+    const endIdxRel = Math.ceil((call.endTime_s - timeFrames[0]) / timePerFrame);
     
-    // 決定過濾閾值 - 放寬標準
-    // 使用 robustNoiseFloor_dB，但緩衝區改為 +3dB (原 +6dB) 以避免過度過濾弱信號
+    // 限制範圍在 spectrogram 內
+    const trackStartIdx = Math.max(0, startIdxRel);
+    const trackEndIdx = Math.min(spectrogram.length - 1, endIdxRel);
+    
+    // 確保 Peak 在範圍內 (防呆)
+    let validPeakIdx = peakFrameIdx;
+    if (validPeakIdx < trackStartIdx) validPeakIdx = trackStartIdx;
+    if (validPeakIdx > trackEndIdx) validPeakIdx = trackEndIdx;
+
+    // 頻率搜尋窗口 (Hz) - 防止跳到遠處的雜訊
+    // 蝙蝠叫聲變化極快，但幀與幀之間通常不會超過 15-20kHz 的跳變
+    const SEARCH_WINDOW_HZ = 15000; 
+    
+    // 臨時陣列儲存追蹤結果 [frameIdx] -> freq_Hz
+    const trackedFreqs = new Float32Array(spectrogram.length).fill(0);
+    
+    // 2. 初始化錨點 (Peak Frame)
+    // 使用精確計算過的 peakFreq_Hz (來自 STEP 0)
+    const initialPeakFreq = call.peakFreq_kHz * 1000;
+    trackedFreqs[validPeakIdx] = initialPeakFreq;
+
+    // 3. 向後追蹤 (Backward Trace): Peak -> Start
+    let currentRefFreq = initialPeakFreq;
+    
+    for (let i = validPeakIdx - 1; i >= trackStartIdx; i--) {
+        const framePower = spectrogram[i];
+        let bestBin = -1;
+        let maxVal = -Infinity;
+        
+        // 只搜尋 currentRefFreq 附近的 Bin
+        const minSearchFreq = currentRefFreq - SEARCH_WINDOW_HZ;
+        const maxSearchFreq = currentRefFreq + SEARCH_WINDOW_HZ;
+        
+        const minBin = Math.max(0, Math.floor(minSearchFreq / freqResolution));
+        const maxBin = Math.min(freqBins.length - 1, Math.ceil(maxSearchFreq / freqResolution));
+        
+        for (let b = minBin; b <= maxBin; b++) {
+            if (framePower[b] > maxVal) {
+                maxVal = framePower[b];
+                bestBin = b;
+            }
+        }
+        
+        if (bestBin !== -1) {
+            currentRefFreq = freqBins[bestBin];
+            trackedFreqs[i] = currentRefFreq;
+        } else {
+            trackedFreqs[i] = currentRefFreq; // 沒找到就維持上一幀 (Hold)
+        }
+    }
+
+    // 4. 向前追蹤 (Forward Trace): Peak -> End
+    currentRefFreq = initialPeakFreq;
+    
+    for (let i = validPeakIdx + 1; i <= trackEndIdx; i++) {
+        const framePower = spectrogram[i];
+        let bestBin = -1;
+        let maxVal = -Infinity;
+        
+        const minSearchFreq = currentRefFreq - SEARCH_WINDOW_HZ;
+        const maxSearchFreq = currentRefFreq + SEARCH_WINDOW_HZ;
+        
+        const minBin = Math.max(0, Math.floor(minSearchFreq / freqResolution));
+        const maxBin = Math.min(freqBins.length - 1, Math.ceil(maxSearchFreq / freqResolution));
+        
+        for (let b = minBin; b <= maxBin; b++) {
+            if (framePower[b] > maxVal) {
+                maxVal = framePower[b];
+                bestBin = b;
+            }
+        }
+        
+        if (bestBin !== -1) {
+            currentRefFreq = freqBins[bestBin];
+            trackedFreqs[i] = currentRefFreq;
+        } else {
+            trackedFreqs[i] = currentRefFreq;
+        }
+    }
+
+    // 5. 平滑化與輸出
+    // 提取有效片段進行平滑
+    const rawSegment = [];
+    const timeSegment = [];
+    const powerSegment = [];
+    
+    for (let i = trackStartIdx; i <= trackEndIdx; i++) {
+        if (trackedFreqs[i] > 0) { // 只有被追蹤到的幀
+            rawSegment.push(trackedFreqs[i]);
+            timeSegment.push(timeFrames[i]);
+            
+            // 獲取該頻率的 Power
+            const binIdx = Math.round(trackedFreqs[i] / freqResolution);
+            const power = (binIdx >= 0 && binIdx < spectrogram[i].length) ? spectrogram[i][binIdx] : -100;
+            powerSegment.push(power);
+        }
+    }
+    
+    // 應用 Savitzky-Golay 平滑
+    const smoothedSegment = this.savitzkyGolay(rawSegment, 5, 2);
+    
+    // 6. 填充 frequencyContour
+    // 額外過濾: 確保頭尾連接到計算出的 Start/End Freq，避免平滑造成的邊緣發散
     const noiseFloor_dB = call.noiseFloor_dB !== undefined ? call.noiseFloor_dB : -80;
-    // [ADJUST] Lower threshold to +3dB above noise floor (was +6dB)
-    const contourThreshold_dB = noiseFloor_dB + 3; 
+    const finalDisplayThreshold = noiseFloor_dB + 1; // 寬鬆顯示閾值
+
+    for (let k = 0; k < smoothedSegment.length; k++) {
+        // [Visulization Optimization]
+        // 強制對齊：如果是第一幀，傾向於使用計算出的 startFreq (如果差異不大)
+        // 如果是最後一幀，傾向於使用 endFreq
+        let displayFreq = smoothedSegment[k];
+        
+        // 簡單的能量過濾，防止畫出無聲區段
+        if (powerSegment[k] > finalDisplayThreshold) {
+             call.frequencyContour.push({
+                time_s: timeSegment[k],
+                freq_kHz: displayFreq / 1000,
+                power_dB: powerSegment[k]
+            });
+        }
+    }
     
-    // 計算有效幀索引範圍
-    for (let i = 0; i < smoothedFrequencies.length; i++) {
-      if (i >= timeFrames.length || i >= spectrogram.length) break;
-      
-      const timeInSeconds = timeFrames[i];
-      
-      // [FIX 1] 邊界寬容度：允許 +/- 1 幀的誤差，避免因為浮點數精度丟失頭尾
-      // 確保至少保留 Start 和 End 之間的點
-      // timeFrameDuration 是一個 frame 的時間長度
-      const timeFrameDuration = timeFrames[1] - timeFrames[0];
-      const tolerance = timeFrameDuration * 0.5;
-
-      if (timeInSeconds < (startTimeS - tolerance) || timeInSeconds > (endTimeS + tolerance)) {
-        continue;
-      }
-
-      const freqHz = smoothedFrequencies[i];
-      const framePower = spectrogram[i];
-      
-      // 計算該頻率對應的 Bin
-      const freqRes = freqBins.length > 1 ? (freqBins[freqBins.length - 1] - freqBins[0]) / (freqBins.length - 1) : 1;
-      const peakBinIdx = Math.round((freqHz - freqBins[0]) / freqRes);
-      
-      let peakBinPower = -Infinity;
-      if (peakBinIdx >= 0 && peakBinIdx < framePower.length) {
-        peakBinPower = framePower[peakBinIdx];
-      }
-      
-      // [FIX 2] 能量過濾與強制保留
-      // 邏輯：
-      // 1. 如果能量 > 閾值 -> 保留
-      // 2. 如果是 Start 或 End 點附近的幀 (關鍵幀) -> 強制保留，即使能量稍低 (避免斷頭斷尾)
-      const isKeyFrame = Math.abs(timeInSeconds - startTimeS) < timeFrameDuration * 2 || 
-                         Math.abs(timeInSeconds - endTimeS) < timeFrameDuration * 2;
-
-      // 如果是關鍵幀，允許低至 noiseFloor 的能量
-      const effectiveThreshold = isKeyFrame ? noiseFloor_dB : contourThreshold_dB;
-
-      if (freqHz > 1000 && peakBinPower > effectiveThreshold) {
-        call.frequencyContour.push({
-          time_s: timeInSeconds,
-          freq_kHz: freqHz / 1000,
-          power_dB: peakBinPower
-        });
-      }
+    // [Fallback] 如果點太少，手動加入 Start/Peak/End 三點以確保至少有一條線
+    if (call.frequencyContour.length < 2) {
+        call.frequencyContour = [
+            { time_s: call.startTime_s, freq_kHz: call.startFreq_kHz, power_dB: peakPower_dB },
+            { time_s: timeFrames[validPeakIdx], freq_kHz: call.peakFreq_kHz, power_dB: peakPower_dB },
+            { time_s: call.endTime_s, freq_kHz: call.endFreq_kHz, power_dB: peakPower_dB }
+        ].sort((a,b) => a.time_s - b.time_s);
     }
     
     // [Validation] 如果過濾後點太少 (< 3)，則回退到不過濾 (顯示原始偵測結果)
