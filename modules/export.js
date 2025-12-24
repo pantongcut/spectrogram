@@ -336,11 +336,29 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
     return;
   }
 
+  // 1. 定義 Headers (加入 Time 欄位)
   const headers = [
-    "ID", "Start Time (s)", "End Time (s)", "Duration (ms)", 
-    "Low Freq (kHz)", "High Freq (kHz)", "Peak Freq (kHz)", 
-    "Knee Freq (kHz)", "Char Freq (kHz)", "Start Freq (kHz)", "End Freq (kHz)",
-    "Bandwidth (kHz)", "Peak Power (dB)", "SNR (dB)", "Quality"
+    "ID", 
+    "Start Time (s)", 
+    "End Time (s)", 
+    "Duration (ms)", 
+    
+    // Frequency & Time Pairs
+    "Low Freq (kHz)", "Low Freq Time (ms)", 
+    "High Freq (kHz)", "High Freq Time (ms)", 
+    "Peak Freq (kHz)", "Peak Freq Time (ms)", 
+    "Knee Freq (kHz)", "Knee Freq Time (ms)", 
+    "Char Freq (kHz)", "Char Freq Time (ms)", 
+    
+    // Other Freqs
+    "Start Freq (kHz)", 
+    "End Freq (kHz)",
+    
+    // Power & Quality
+    "Bandwidth (kHz)", 
+    "Peak Power (dB)", 
+    "SNR (dB)", 
+    "Quality"
   ];
 
   const rows = [headers];
@@ -351,13 +369,30 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
       call.startTime_s?.toFixed(4) || "",
       call.endTime_s?.toFixed(4) || "",
       call.duration_ms?.toFixed(2) || "",
+      
+      // Low Freq Pair
       call.lowFreq_kHz?.toFixed(2) || "",
+      call.lowFreq_ms?.toFixed(2) || "",
+      
+      // High Freq Pair
       call.highFreq_kHz?.toFixed(2) || "",
+      call.highFreqTime_ms?.toFixed(2) || "",
+      
+      // Peak Freq Pair
       call.peakFreq_kHz?.toFixed(2) || "",
+      call.peakFreqTime_ms?.toFixed(2) || "",
+      
+      // Knee Freq Pair
       call.kneeFreq_kHz?.toFixed(2) || "",
+      call.kneeFreq_ms?.toFixed(2) || "",
+      
+      // Char Freq Pair
       call.characteristicFreq_kHz?.toFixed(2) || "",
+      call.characteristicFreq_ms?.toFixed(2) || "",
+      
       call.startFreq_kHz?.toFixed(2) || "",
       call.endFreq_kHz?.toFixed(2) || "",
+      
       call.bandwidth_kHz?.toFixed(2) || "",
       call.peakPower_dB?.toFixed(1) || "",
       call.snr_dB?.toFixed(1) || "",
