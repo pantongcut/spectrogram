@@ -626,10 +626,22 @@ async function calculateBatCallParams(sel) {
       showSelectionContextMenu(e, selObj);
     });
 
-    if (judgeDurationMs < 100) {
-      calculateBatCallParams(selObj).catch(err => {
-        console.error('計算詳細參數失敗:', err);
-      });
+    // [CRITICAL CHANGE] 邏輯分流
+    if (existingBatCall) {
+        // 情況 A: 如果有傳入現成的 BatCall (來自 Auto Detection)
+        // 直接使用，完全跳過重新計算
+        selObj.data.batCall = existingBatCall;
+        
+        // 立即更新 Tooltip 顯示
+        if (selObj.tooltip) {
+            updateTooltipValues(selObj, 0, 0, 0, 0);
+        }
+    } else if (judgeDurationMs < 100) {
+        // 情況 B: 如果是用戶手畫的框 (沒有 existingBatCall)
+        // 才執行異步重新計算
+        calculateBatCallParams(selObj).catch(err => {
+            console.error('計算詳細參數失敗:', err);
+        });
     }
 
     return selObj;
@@ -1212,21 +1224,31 @@ function updateTooltipValues(sel, left, top, width, height) {
     const actualWidth = getDuration() * getZoomLevel();
     const freqRange = maxFrequency - minFrequency;
 
+    // 定義 Padding 參數
+    const PAD_FREQ_KHZ = 10; // 上下各加 10 kHz，保留雜訊層以便二次分析
+    const PAD_TIME_S = 0.005; // 左右各加 5 ms
+
     calls.forEach(call => {
-      // Calculate pixel coordinates from call parameters
-      const startTime = call.startTime_s;
-      const endTime = call.endTime_s;
+      // 1. 應用 Padding 並強制限制在視圖/錄音範圍內 (Clamping)
+      
+      // 時間：左右加 5ms，限制在 [0, duration]
+      const startTime = Math.max(0, call.startTime_s - PAD_TIME_S);
+      const endTime = Math.min(getDuration(), call.endTime_s + PAD_TIME_S);
+      
+      // 頻率：上下加 10kHz，限制在 [minFrequency, maxFrequency]
+      // 這樣 Box 就不會畫到視圖外面去
+      const flow = Math.max(minFrequency, call.lowFreq_kHz - PAD_FREQ_KHZ);
+      const fhigh = Math.min(maxFrequency, call.highFreq_kHz + PAD_FREQ_KHZ);
+
+      // 2. 計算像素座標 (基於加寬後的邊界)
       const left = (startTime / getDuration()) * actualWidth;
       const width = ((endTime - startTime) / getDuration()) * actualWidth;
-
-      // Frequency -> Y coordinate (inverted, top = max freq)
-      const flow = call.lowFreq_kHz; // kHz
-      const fhigh = call.highFreq_kHz; // kHz
       
+      // Y軸是倒置的 (0在頂部 = Max Freq)
       const top = (1 - (fhigh - minFrequency) / freqRange) * spectrogramHeight;
       const height = ((fhigh - flow) / freqRange) * spectrogramHeight;
 
-      // Create DOM element for selection rectangle
+      // 3. 創建 DOM 元素
       const selectionRect = document.createElement('div');
       selectionRect.className = 'selection-rect';
       selectionRect.style.left = `${left}px`;
@@ -1236,28 +1258,33 @@ function updateTooltipValues(sel, left, top, width, height) {
       
       viewer.appendChild(selectionRect);
 
-      // Create selection object with call data embedded
+      // 4. 創建 Selection 對象
+      // 這裡的 Bandwidth/Duration 是指「Selection Box」的物理大小
+      // 包含了 Padding，確保它是合法的分析視窗
       const Bandwidth = fhigh - flow;
       const Duration = endTime - startTime;
 
-      // Use existing createTooltip function to set up selection
+      // 這樣 createTooltip 就會知道 "我已經有數據了，不需要重算"
       const selObj = createTooltip(
         left, top, width, height, 
         fhigh, flow, Bandwidth, Duration, 
-        selectionRect, startTime, endTime
+        selectionRect, startTime, endTime,
+        call // <--- 傳入 existingBatCall
       );
 
-      // Directly inject the detected BatCall object
+      // 5. 注入原始偵測數據
+      // Tooltip 會優先顯示這裡面的精確數值 (Peak, Knee 等)
+      // 這樣既保證了視覺上的 Box 足夠大 (包含雜訊)，又保證了顯示的數據是精確的 Signal 參數
       selObj.data.batCall = call;
       selObj.data.peakFreq = call.peakFreq_kHz;
 
-      // [MODIFIED 2025] 預設隱藏 Tooltip，畫面更乾淨
+      // 6. 預設隱藏 Tooltip
       if (selObj.tooltip) {
-        updateTooltipValues(selObj, 0, 0, 0, 0); // 先更新數值
-        selObj.tooltip.style.display = 'none';   // 然後隱藏
+        updateTooltipValues(selObj, 0, 0, 0, 0);
+        selObj.tooltip.style.display = 'none';
       }
       
-      console.log(`[FrequencyHover] Auto-created selection for call at ${startTime.toFixed(3)}s, freq: ${fhigh.toFixed(2)}-${flow.toFixed(2)} kHz`);
+      console.log(`[FrequencyHover] Created selection: Time ${startTime.toFixed(3)}-${endTime.toFixed(3)}s, Freq ${fhigh.toFixed(1)}-${flow.toFixed(1)}kHz`);
     });
   }
 
