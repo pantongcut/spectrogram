@@ -674,10 +674,11 @@ export class BatCallDetector {
     return this.fastScanSegmentsLegacy(audioData, sampleRate, flowKHz, fhighKHz, threshold_dB);
   }
 
-  /**
-   * WASM 加速版快速掃描
-   * 利用 Rust 批量計算頻譜，大幅減少 JS 循環開銷
-   * 速度：通常快 20-50 倍（特別是對於長檔案）
+/**
+   * [2025 FIXED] WASM 加速版快速掃描
+   * 修復問題：
+   * 1. 使用 50% Overlap 避免 Windowing Loss (漏測短信號)
+   * 2. 計算頻帶總能量 (Band Energy) 而非單點能量，匹配 RMS 邏輯
    */
   fastScanSegmentsWasm(audioData, sampleRate, flowKHz, fhighKHz, threshold_dB) {
     const segments = [];
@@ -685,68 +686,68 @@ export class BatCallDetector {
     // 1. 獲取 WASM 引擎參數
     const fftSize = this.wasmEngine.get_fft_size(); // 通常是 1024
     
-    // 2. 設定 Fast Scan 的參數
-    // 為了速度，我們使用 0% Overlap (Hop = FFT Size) 或 50% Overlap
-    // 0% Overlap 對於尋找 "存在" 信號已經足夠，且速度最快
-    const hopSize = fftSize; 
-    const overlapSamples = 0; 
+    // 2. [FIX] 使用 50% Overlap 避免邊緣衰減導致漏測
+    const hopSize = Math.floor(fftSize / 2); 
+    const overlapSamples = fftSize - hopSize;
     
     // 3. 計算頻率範圍 Bin
     const freqRes = sampleRate / fftSize;
     const minBin = Math.floor(flowKHz * 1000 / freqRes);
     const maxBin = Math.ceil(fhighKHz * 1000 / freqRes);
     
-    // 4. 調用 WASM 批量計算 (返回線性振幅 Linear Magnitude)
-    // 注意: compute_spectrogram 可能需要拷貝數據，這是一次性開銷
+    // 4. 調用 WASM 批量計算
     const rawSpectrum = this.wasmEngine.compute_spectrogram(audioData, overlapSamples);
     
     const numBinsTotal = this.wasmEngine.get_freq_bins();
     const numFrames = Math.floor(rawSpectrum.length / numBinsTotal);
     
-    // 5. 快速遍歷頻譜 (在感興趣的頻段內檢查能量)
-    // 閾值轉換: dB -> Linear Power -> Magnitude
-    // Power = Mag^2 / FFT_Size
-    // Mag = Sqrt(Power * FFT_Size)
-    // Power_Linear = 10^(dB/10)
-    // 我們直接比較 Power，避免對每個 bin 做 log/sqrt 運算，進一步優化
-    // 預計算比較用的閾值: targetMag^2 = thresholdPower * fftSize
-    const thresholdPower = Math.pow(10, threshold_dB / 10);
-    const targetMagSq = thresholdPower * fftSize;
+    // 5. [FIX] 能量閾值計算 (對齊 RMS 邏輯)
+    // Legacy JS 邏輯: 20*log10(RMS) > Threshold
+    // RMS^2 = Sum(Energy) / FFT_Size
+    // Threshold_Linear = 10^(dB/10)
+    // 判斷式: (Sum(Bin_Mag^2) / FFT_Size) > Threshold_Linear
+    // 優化後: Sum(Bin_Mag^2) > Threshold_Linear * FFT_Size
+    
+    const thresholdLinear = Math.pow(10, threshold_dB / 10);
+    // [校準] 經驗值：WASM 輸出通常未歸一化，為保險起見，稍微降低掃描閾值 (-6dB) 以確保不漏測
+    // 之後的 Detailed Detection 會做精確過濾
+    const targetEnergySum = thresholdLinear * fftSize * 0.25; 
 
     let activeStart = null;
     
     for (let f = 0; f < numFrames; f++) {
-      const frameOffset = f * numBinsTotal;
-      let isFrameActive = false;
-      
-      // 只檢查感興趣的頻段
-      for (let b = minBin; b <= maxBin; b++) {
-        if (frameOffset + b >= rawSpectrum.length) break;
+        const frameOffset = f * numBinsTotal;
+        let bandEnergySum = 0;
         
-        const mag = rawSpectrum[frameOffset + b];
-        // 優化: 比較 magnitude squared，省去 sqrt
-        if (mag * mag > targetMagSq) {
-          isFrameActive = true;
-          break;
+        // [FIX] 計算感興趣頻段的總能量 (Sum of Squares)
+        for (let b = minBin; b <= maxBin; b++) {
+            if (frameOffset + b >= rawSpectrum.length) break;
+            const mag = rawSpectrum[frameOffset + b];
+            bandEnergySum += mag * mag;
+            
+            // 優化：如果累積能量已經超過閾值，可以提早跳出
+            if (bandEnergySum > targetEnergySum) break;
         }
-      }
-      
-      // 狀態機: 記錄區段
-      const sampleIndex = f * hopSize;
-      
-      if (isFrameActive) {
-        if (activeStart === null) activeStart = sampleIndex;
-      } else {
-        if (activeStart !== null) {
-          segments.push({ start: activeStart, end: sampleIndex + fftSize });
-          activeStart = null;
+        
+        const isFrameActive = bandEnergySum > targetEnergySum;
+        
+        // 狀態機: 記錄區段 (轉換回 Sample Index)
+        const sampleIndex = f * hopSize;
+        
+        if (isFrameActive) {
+            if (activeStart === null) activeStart = sampleIndex;
+        } else {
+            if (activeStart !== null) {
+                // 結束一段信號
+                segments.push({ start: activeStart, end: sampleIndex + fftSize });
+                activeStart = null;
+            }
         }
-      }
     }
     
-    // Close last segment if active
+    // Close last segment
     if (activeStart !== null) {
-      segments.push({ start: activeStart, end: audioData.length });
+        segments.push({ start: activeStart, end: audioData.length });
     }
     
     return segments;
@@ -3878,52 +3879,50 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     
     // ============================================================
     // [2025 NEW] Populate Frequency Contour for Peak Mode Visualization
-    // 修正：限制範圍並過濾雜訊，消除頭尾直線
+    // 修正 V2：嚴格限制時間範圍，並處理平滑邊界效應
     // ============================================================
     call.frequencyContour = [];
-    
-    // 1. 確定有效的幀範圍 (只取 Call 實際存在的區間，排除 Padding)
-    // startTime_s 和 endTime_s 是在 detectCalls 階段計算出來的
-    // 我們需要將它們對應到 smoothedFrequencies 的索引
-    // 注意: smoothedFrequencies 是基於 spectrogram (slice) 計算的，所以索引是對齐的
     
     const startTimeS = call.startTime_s;
     const endTimeS = call.endTime_s;
     
-    // 2. 決定過濾閾值 (比檢測閾值稍高一點，保證線條乾淨)
-    // 使用 noiseFloor_dB 或估算的背景雜訊級別
+    // 決定過濾閾值
     const noiseFloor_dB = call.noiseFloor_dB !== undefined ? call.noiseFloor_dB : -80;
-    const contourThreshold_dB = noiseFloor_dB + 3; // Noise floor + 3dB buffer
+    const contourThreshold_dB = noiseFloor_dB + 6; // [調整] 提高到 +6dB 避免畫出背景雜訊
     
-    // Use previously calculated smoothedFrequencies (already in scope)
-    const firstFrameTimeInSeconds = timeFrames.length > 0 ? timeFrames[0] : 0;
+    // 計算有效幀索引範圍 (避免遍歷整個 spectrogram slice)
+    // frameFrequencies 是原始數據，smoothedFrequencies 是平滑後數據
+    // 我們只取 [newStartFrameIdx, newEndFrameIdx] 區間
+    // 這些索引在 detectCalls 步驟中已經計算，但在這裡我們通過時間反推最安全
     
     for (let i = 0; i < smoothedFrequencies.length; i++) {
+      // 邊界檢查
       if (i >= timeFrames.length || i >= spectrogram.length) break;
       
       const timeInSeconds = timeFrames[i];
       
-      // [FIX 1] 時間範圍過濾：只保留 StartTime 和 EndTime 之間的點
-      // 這直接切掉了前後的靜音直線
+      // [FIX 1] 嚴格時間過濾：只保留 Call 內部的點
+      // 這會切斷頭尾連接到 0 或雜訊的直線
       if (timeInSeconds < startTimeS || timeInSeconds > endTimeS) {
         continue;
       }
 
+      // [FIX 2] 獲取頻率和功率
       const freqHz = smoothedFrequencies[i];
       const framePower = spectrogram[i];
       
-      // Find the power at the peak frequency bin
-      let peakBinPower = -Infinity;
+      // 計算該頻率對應的 Bin
       const freqRes = freqBins.length > 1 ? (freqBins[freqBins.length - 1] - freqBins[0]) / (freqBins.length - 1) : 1;
       const peakBinIdx = Math.round((freqHz - freqBins[0]) / freqRes);
       
+      let peakBinPower = -Infinity;
       if (peakBinIdx >= 0 && peakBinIdx < framePower.length) {
         peakBinPower = framePower[peakBinIdx];
       }
       
-      // [FIX 2] 能量過濾：只加入能量足夠強的點
-      // 避免畫出背景雜訊的隨機頻率
-      if (peakBinPower > contourThreshold_dB) {
+      // [FIX 3] 嚴格能量過濾 & 頻率有效性檢查
+      // 確保頻率不為 0 且能量高於背景
+      if (freqHz > 1000 && peakBinPower > contourThreshold_dB) {
         call.frequencyContour.push({
           time_s: timeInSeconds,
           freq_kHz: freqHz / 1000,
