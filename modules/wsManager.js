@@ -13,6 +13,8 @@ let currentPeakMode = false;
 let currentPeakThreshold = 0.4;
 let currentSmoothMode = true;
 let analysisWasmEngine = null;
+// [FIX] 全局鎖，防止快速操作導致的競爭條件
+let isReplacing = false;
 
 export function initWavesurfer({
   container,
@@ -53,6 +55,7 @@ export function createSpectrogramPlugin({
     colorMap,
     peakMode,
     peakThreshold,
+    container: document.getElementById("spectrogram-only")
   };
 
   if (noverlap !== null) {
@@ -62,7 +65,8 @@ export function createSpectrogramPlugin({
   return Spectrogram.create(baseOptions);
 }
 
-export function replacePlugin(
+// [FIX] 改為 Async 函數以支持等待 GC
+export async function replacePlugin(
   colorMap,
   height = 800,
   frequencyMin = 10,
@@ -76,124 +80,171 @@ export function replacePlugin(
   onColorMapChanged = null
 ) {
   if (!ws) throw new Error('Wavesurfer not initialized.');
-  const container = document.getElementById("spectrogram-only");
+  
+  // [FIX 1] 排隊機制：如果上一個替換還在進行，我們等待它完成
+  // 這將「並行」的快速點擊轉換為「序列」執行，確保每一次都有機會執行銷毀和 GC
+  while (isReplacing) {
+      // 每 50ms 檢查一次，直到上一個任務完成
+      await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  
+  isReplacing = true;
 
-  // 計算目標 overlap 點數
-  const targetNoverlap = (overlapPercent !== null && overlapPercent !== undefined)
-      ? Math.floor(fftSamples * (overlapPercent / 100))
-      : null;
+  try {
+      const container = document.getElementById("spectrogram-only");
 
-  // [FIX] 從 Rebuild 條件中移除 targetNoverlap
-  // 只有當 FFT Size, Window, ColorMap 或 頻率範圍改變時才 Rebuild
-  const needsRebuild = 
-    !plugin ||
-    colorMap !== currentColorMap ||
-    fftSamples !== currentFftSize ||
-    windowFunc !== currentWindowType ||
-    Math.abs(frequencyMin * 1000 - (plugin.options.frequencyMin || 0)) > 1 || 
-    Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
+      // 計算目標 overlap 點數
+      const targetNoverlap = (overlapPercent !== null && overlapPercent !== undefined)
+          ? Math.floor(fftSamples * (overlapPercent / 100))
+          : null;
 
-  if (needsRebuild) {
-    // 銷毀舊插件
-    const oldCanvas = container.querySelector("canvas");
-    if (oldCanvas) {
-      oldCanvas.remove();
-    }
+      // 判斷是否需要完全重建 Plugin
+      const needsRebuild = 
+        !plugin ||
+        colorMap !== currentColorMap ||
+        fftSamples !== currentFftSize ||
+        windowFunc !== currentWindowType ||
+        Math.abs(frequencyMin * 1000 - (plugin.options.frequencyMin || 0)) > 1 || 
+        Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
 
-    if (plugin) {
-      if (typeof plugin.destroy === 'function') {
-        plugin.destroy();
-      }
-      plugin = null;
-      
-      if (analysisWasmEngine) {
-        try {
-          if (typeof analysisWasmEngine.free === 'function') {
-            analysisWasmEngine.free();
+      if (needsRebuild) {
+        // [FIX 2] 強制清理舊 Canvas 以釋放 GPU 記憶體 (顯存)
+        // 在快速切換時，瀏覽器往往來不及回收 Canvas 佔用的顯存，這步很關鍵
+        const oldCanvases = container.querySelectorAll("canvas");
+        oldCanvases.forEach(canvas => {
+            canvas.width = 0;  // 歸零寬高是釋放顯存的最快方法
+            canvas.height = 0;
+            canvas.remove();
+        });
+
+        // 銷毀舊插件
+        if (plugin) {
+          if (typeof plugin.destroy === 'function') {
+            plugin.destroy();
           }
+          plugin = null;
+          
+          // 清理 WASM 引擎
+          if (analysisWasmEngine) {
+            try {
+              if (typeof analysisWasmEngine.free === 'function') {
+                analysisWasmEngine.free();
+              }
+            } catch (err) {
+              console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
+            }
+            analysisWasmEngine = null;
+          }
+          
+          // [FIX 3] 關鍵：暫停 100ms 讓瀏覽器執行垃圾回收 (GC)
+          // 當你快速連續 load 時，這個「空檔」能讓 JS 引擎有機會回收上一個 5MB 的 wav buffer
+          // 如果設得太短 (如 10ms)，GC 可能還沒來得及啟動
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        currentColorMap = colorMap;
+        currentFftSize = fftSamples;
+        currentWindowType = windowFunc;
+
+        plugin = createSpectrogramPlugin({
+          colorMap,
+          height,
+          frequencyMin,
+          frequencyMax,
+          fftSamples,
+          noverlap: targetNoverlap, 
+          windowFunc,
+          peakMode,
+          peakThreshold,
+        });
+
+        if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
+          plugin.on('colorMapChanged', onColorMapChanged);
+        }
+
+        ws.registerPlugin(plugin);
+
+        if (plugin && plugin.setSmoothMode) {
+          plugin.setSmoothMode(currentSmoothMode);
+        }
+
+        try {
+          // 使用 RAF 避免阻塞 UI
+          requestAnimationFrame(() => {
+              // 再次檢查 plugin 是否存在
+              if (plugin) {
+                  
+                  // [FIX] 改用事件驅動：監聽插件的 'ready' 事件
+                  // 這是最準確的時間點，代表 drawImage 已經執行完畢
+                  plugin.once('ready', () => {
+                      console.log('📸 [Snapshot] Spectrogram is ready. Starting fade-out sequence.');
+                      
+                      // Double RAF: 強制瀏覽器先將新畫好的 Canvas 渲染上屏 (Paint)
+                      // 這是消除「微閃爍」的最後一哩路，確保新圖已經在螢幕上了，才把舊圖拿掉
+                      requestAnimationFrame(() => {
+                          requestAnimationFrame(() => {
+                              const snapshot = document.getElementById("spectrogram-transition-snapshot");
+                              if (snapshot) {
+                                  // 開始淡出動畫
+                                  snapshot.style.transition = 'opacity 0.1s ease-out';
+                                  snapshot.style.opacity = '0';
+                                  
+                                  // 等待動畫結束後移除 DOM
+                                  setTimeout(() => {
+                                      snapshot.remove();
+                                      console.log('📸 [Snapshot] Removed from DOM.');
+                                  }, 150); // 比 0.1s 稍長一點確保安全
+                              }
+                          });
+                      });
+                  });
+
+                  // 觸發渲染 (這會啟動異步繪圖，完成後會觸發上面的 ready)
+                  plugin.render();
+              }
+              
+              if (typeof onRendered === 'function') onRendered();
+          });
         } catch (err) {
-          console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
+          console.warn('⚠️ Spectrogram render failed:', err);
         }
-        analysisWasmEngine = null;
-      }
-    }
-
-    currentColorMap = colorMap;
-    currentFftSize = fftSamples;
-    currentWindowType = windowFunc;
-
-    plugin = createSpectrogramPlugin({
-      colorMap,
-      height,
-      frequencyMin,
-      frequencyMax,
-      fftSamples,
-      noverlap: targetNoverlap, 
-      windowFunc,
-      peakMode,
-      peakThreshold,
-    });
-
-    if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
-      plugin.on('colorMapChanged', onColorMapChanged);
-    }
-
-    ws.registerPlugin(plugin);
-
-    if (plugin && plugin.setSmoothMode) {
-      plugin.setSmoothMode(currentSmoothMode);
-    }
-
-    try {
-      plugin.render();
-      requestAnimationFrame(() => {
-        if (typeof onRendered === 'function') onRendered();
-      });
-    } catch (err) {
-      console.warn('⚠️ Spectrogram render failed:', err);
-    }
-  } else {
-    // [FIX] 軟更新邏輯 (Soft Update Logic)
-    let shouldRender = false;
-
-    // 1. 檢查 Peak 參數
-    if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
-        currentPeakMode = peakMode;
-        currentPeakThreshold = peakThreshold;
-        if (plugin && plugin.options) {
-            plugin.options.peakMode = peakMode;
-            plugin.options.peakThreshold = peakThreshold;
-        }
-        // 如果只有 Peak 改變，稍後調用 updatePeakOverlay 即可，但若 Overlap 也變了，就需要 full render
-    }
-
-    // 2. 檢查 Overlap 是否改變 (這是之前導致 Crash 的原因，現在改為軟更新)
-    if (plugin && targetNoverlap !== plugin.noverlap) {
-        // 直接更新插件內部的參數
-        plugin.noverlap = targetNoverlap;
-        if (plugin.options) plugin.options.noverlap = targetNoverlap;
-        shouldRender = true;
-    }
-
-    try {
-        if (shouldRender) {
-            // 如果 Overlap 變了，必須重算頻譜
-            plugin.render();
-        } else {
-            // 如果只有 Peak 變了，只重畫 Overlay
-            if (plugin && typeof plugin.updatePeakOverlay === 'function') {
-                plugin.updatePeakOverlay();
-            } else {
-                plugin.render();
+      } else {
+        // [軟更新邏輯保持不變...]
+        let shouldRender = false;
+        if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
+            currentPeakMode = peakMode;
+            currentPeakThreshold = peakThreshold;
+            if (plugin && plugin.options) {
+                plugin.options.peakMode = peakMode;
+                plugin.options.peakThreshold = peakThreshold;
             }
         }
-        
-        requestAnimationFrame(() => {
-            if (typeof onRendered === 'function') onRendered();
-        });
-    } catch (err) {
-        console.warn('⚠️ Plugin update failed:', err);
-    }
+        if (plugin && targetNoverlap !== plugin.noverlap) {
+            plugin.noverlap = targetNoverlap;
+            if (plugin.options) plugin.options.noverlap = targetNoverlap;
+            shouldRender = true;
+        }
+
+        try {
+            if (shouldRender) {
+                plugin.render();
+            } else {
+                if (plugin && typeof plugin.updatePeakOverlay === 'function') {
+                    plugin.updatePeakOverlay();
+                } else {
+                    plugin.render();
+                }
+            }
+            requestAnimationFrame(() => {
+                if (typeof onRendered === 'function') onRendered();
+            });
+        } catch (err) {
+            console.warn('⚠️ Plugin update failed:', err);
+        }
+      }
+  } finally {
+      // 釋放鎖，讓隊列中的下一個請求執行
+      isReplacing = false;
   }
 }
 
@@ -302,3 +353,29 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
     return null;
   }
 }
+
+document.addEventListener('file-list-cleared', () => {
+    console.log('🧹 [Cleanup] Received file-list-cleared event.');
+    
+    if (plugin) {
+        if (typeof plugin.destroy === 'function') {
+            plugin.destroy();
+        }
+        plugin = null;
+    }
+
+    const container = document.getElementById("spectrogram-only");
+    if (container) {
+        // 清理 container 內的所有 canvas
+        const canvases = container.querySelectorAll("canvas");
+        
+        if (canvases.length > 0) {
+            console.log(`🧹 [Cleanup] Removing ${canvases.length} canvases from container.`);
+            canvases.forEach(canvas => {
+                canvas.width = 0;
+                canvas.height = 0;
+                canvas.remove();
+            });
+        }
+    }
+});
