@@ -503,30 +503,11 @@ class h extends e {
     }
     destroy() {
         var t, e;
-        this.subscriptions.forEach((t => t()));
-        
-        // [FIX 1] 強制釋放所有 Canvas 的 GPU 顯存
-        // 僅僅 remove() 是不夠的，瀏覽器可能會保留 Backing Store 直到 JS 對象被完全 GC
-        if (this.container) {
-            const canvases = this.container.querySelectorAll('canvas');
-            canvases.forEach(canvas => {
-                canvas.width = 0;
-                canvas.height = 0;
-            });
-            this.container.remove();
-        }
-
+        this.subscriptions.forEach((t => t())),
+        this.container.remove(),
         null === (t = this.resizeObserver) || void 0 === t || t.disconnect(),
         null === (e = this.unsubscribeOnScroll) || void 0 === e || e.forEach((t => t())),
-        this.unsubscribeOnScroll = [],
-        
-        // [FIX 2] 關鍵：釋放對巨大 AudioBuffer 的引用
-        // 之前這裡沒有清空，導致即使 WaveSurfer 釋放了，Renderer 仍抓著幾百 MB 的數據不放
-        this.audioData = null;
-        this.wrapper = null;
-        this.canvasWrapper = null;
-        this.progressWrapper = null;
-        this.scrollContainer = null;
+        this.unsubscribeOnScroll = []
     }
     createDelay(t=10) {
         let e, i;
@@ -1371,141 +1352,97 @@ class u extends a {
     getActivePlugins() {
         return this.plugins
     }
-    // [FIX] 新增一個屬性來追蹤當前的載入任務
-_loadingAbortController = null;
-
-loadAudio(e, s, n, r) {
+    loadAudio(e, s, n, r) {
         return t(this, void 0, void 0, (function*() {
-            // 1. 中斷上一次載入
-            if (this._loadingAbortController) {
-                this._loadingAbortController.abort();
-                this._loadingAbortController = null;
+            var t;
+            // Clear old buffer reference immediately to help GC
+            if (this.decodedData) {
+                this.decodedData = null;
             }
-            this._loadingAbortController = new AbortController();
-            const signal = this._loadingAbortController.signal;
+            if (this.emit("load", e),
+            !this.options.media && this.isPlaying() && this.pause(),
+            this.decodedData = null,
+            this.stopAtPosition = null,
+            !s && !n) {
+                const i = this.options.fetchParams || {};
+                window.AbortController && !i.signal && (this.abortController = new AbortController,
+                i.signal = null === (t = this.abortController) || void 0 === t ? void 0 : t.signal);
+                const n = t => this.emit("loading", t);
+                s = yield o.fetchBlob(e, n, i);
+                const r = this.options.blobMimeType;
+                r && (s = new Blob([s],{
+                    type: r
+                }))
+            }
+            this.setSrc(e, s);
+            const a = yield new Promise((t => {
+                const e = r || this.getDuration();
+                e ? t(e) : this.mediaSubscriptions.push(this.onMediaEvent("loadedmetadata", ( () => t(this.getDuration())), {
+                    once: !0
+                }))
+            }
+            ));
+            if (!e && !s) {
+                const t = this.getMediaElement();
+                t instanceof d && (t.duration = a)
+            }
+            if (n)
+                this.decodedData = i.createBuffer(n, a || 0);
+            else if (s) {
+                const t = yield s.arrayBuffer();
+                this.decodedData = yield i.decode(t, this.options.sampleRate)
+            }
             
-            // 定義 t 在 try 外面，確保 finally 可以訪問
-            let t = null;
-
-            try {
-                // [FIX] 步驟 A: 極致的清理
-                if (this.decodedData) this.decodedData = null;
-                if (this.media && this.media.buffer) this.media.buffer = null;
-                if (this._wasmWaveformEngine && typeof this._wasmWaveformEngine.clear === 'function') {
-                    this._wasmWaveformEngine.clear();
-                }
-
-                // [FIX] 步驟 B: 給 GC 的「喘息時間」
-                yield new Promise(resolve => setTimeout(resolve, 50));
-
-                if (signal.aborted) return;
-
-                if (this.emit("load", e),
-                !this.options.media && this.isPlaying() && this.pause(),
-                this.decodedData = null, 
-                this.stopAtPosition = null,
-                !s && !n) {
-                    const i = this.options.fetchParams || {};
-                    i.signal = signal;
-                    const n = t => this.emit("loading", t);
-                    try {
-                        s = yield o.fetchBlob(e, n, i);
-                    } catch (err) {
-                        if (err.name === 'AbortError') return;
-                        throw err;
+            // 加載音頻數據到 WASM（如果可用）
+            if (this.decodedData) {
+                try {
+                    // 如果 _wasmWaveformEngine 還沒初始化，嘗試重新初始化
+                    if (!this._wasmWaveformEngine && typeof globalThis !== 'undefined' && globalThis._spectrogramWasm) {
+                        try {
+                            if (globalThis._spectrogramWasm.WaveformEngine) {
+                                this._wasmWaveformEngine = new globalThis._spectrogramWasm.WaveformEngine();
+                                // WaveformEngine 延遲初始化成功
+                            }
+                        } catch (e) {
+                            // WaveformEngine 延遲初始化失敗，will use JS fallback
+                        }
                     }
-                    const r = this.options.blobMimeType;
-                    r && (s = new Blob([s],{ type: r }))
-                }
-                
-                if (signal.aborted) return;
-                this.setSrc(e, s);
-                
-                const a = yield new Promise((t => {
-                    const e = r || this.getDuration();
-                    e ? t(e) : this.mediaSubscriptions.push(this.onMediaEvent("loadedmetadata", ( () => t(this.getDuration())), { once: !0 }))
-                }));
-                
-                if (!e && !s) {
-                    const t = this.getMediaElement();
-                    t instanceof d && (t.duration = a)
-                }
-                
-                if (n) {
-                    this.decodedData = i.createBuffer(n, a || 0);
-                } else if (s) {
-                    try {
-                        // [FIX] 使用外部定義的 let t
-                        t = yield s.arrayBuffer();
-                        if (signal.aborted) return;
+                    
+                    // 現在加載音頻數據到 WASM
+                    if (this._wasmWaveformEngine) {
+                        const numChannels = this.decodedData.numberOfChannels;
+                        // 清除舊數據以防止內存泄漏
+                        if (typeof this._wasmWaveformEngine.clear === 'function') {
+                            this._wasmWaveformEngine.clear();
+                        }
+                        // 調整 WaveformEngine 的通道數
+                        this._wasmWaveformEngine.resize(numChannels);
                         
-                        yield new Promise(r => setTimeout(r, 10));
-                        
-                        const decoded = yield i.decode(t, this.options.sampleRate);
-                        
-                        // [FIX] 解碼成功後立即釋放 (這裡釋放是為了優化成功路徑)
-                        t = null;
-
-                        if (signal.aborted) return;
-                        this.decodedData = decoded;
-                    } catch (err) {
-                        if (signal.aborted) return;
-                        throw err;
-                    }
-                }
-                
-                // ... (WASM 初始化與加載代碼保持不變) ...
-                if (this.decodedData && !signal.aborted) {
-                    try {
-                        if (!this._wasmWaveformEngine && typeof globalThis !== 'undefined' && globalThis._spectrogramWasm) {
-                            try {
-                                if (globalThis._spectrogramWasm.WaveformEngine) {
-                                    this._wasmWaveformEngine = new globalThis._spectrogramWasm.WaveformEngine();
-                                }
-                            } catch (e) { }
+                        // 加載每個通道的數據到 WASM
+                        for (let ch = 0; ch < numChannels; ch++) {
+                            const channelData = this.decodedData.getChannelData(ch);
+                            // Create a copy to avoid Rust aliasing issues
+                            // WASM requires exclusive ownership of the data
+                            let channelDataCopy = new Float32Array(channelData);
+                            this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
+                            // [FIX] Release the temporary buffer immediately for faster GC
+                            channelDataCopy = null;
                         }
                         
-                        if (this._wasmWaveformEngine) {
-                            const numChannels = this.decodedData.numberOfChannels;
-                            if (signal.aborted) return;
-                            if (typeof this._wasmWaveformEngine.clear === 'function') {
-                                this._wasmWaveformEngine.clear();
-                            }
-                            this._wasmWaveformEngine.resize(numChannels);
-                            for (let ch = 0; ch < numChannels; ch++) {
-                                if (signal.aborted) return;
-                                const channelData = this.decodedData.getChannelData(ch);
-                                // 注意：這裡如果建立 Float32Array 副本，WASM 讀取完應立即釋放
-                                // 但因為這裡是同步操作循環，JS 引擎通常能處理
-                                let channelDataCopy = new Float32Array(channelData);
-                                this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
-                                channelDataCopy = null; 
-                            }
-                        }
-                    } catch (e) { }
+                        // Audio data loaded to WaveformEngine
+                    } else {
+                        // WaveformEngine 未可用，使用 JS fallback
+                    }
+                } catch (e) {
+                    // Loading audio to WASM failed, will use JS fallback
                 }
-                
-                if (signal.aborted) return;
-
-                this.decodedData && (this.emit("decode", this.getDuration()),
-                this.renderer.render(this.decodedData)),
-                this.emit("ready", this.getDuration())
-
-            } finally {
-                // [CRITICAL FIX] 終極清理區塊
-                // 無論是 return (Abort), throw (Error), 還是正常結束，這裡都會執行
-                
-                // 1. 釋放原始 ArrayBuffer (如果還沒被釋放)
-                t = null;
-                
-                // 2. 釋放 Blob (這是解決 334MB 累積的關鍵)
-                // s 是閉包變數，如果不手動 null，Generator 暫停時它會一直活著
-                s = null;
-                
-                // 3. 釋放 URL 字符串
-                e = null;
             }
-        }))
+            
+            this.decodedData && (this.emit("decode", this.getDuration()),
+            this.renderer.render(this.decodedData)),
+            this.emit("ready", this.getDuration())
+        }
+        ))
     }
     load(e, i, s) {
         return t(this, void 0, void 0, (function*() {
@@ -1689,41 +1626,12 @@ loadAudio(e, s, n, r) {
     destroy() {
         var t;
         this.emit("destroy"),
-        null === (t = this.abortController) || void 0 === t || t.abort();
-        
-        // [FIX] 中斷任何正在進行的音頻載入任務
-        if (this._loadingAbortController) {
-            this._loadingAbortController.abort();
-            this._loadingAbortController = null;
-        }
-        
+        null === (t = this.abortController) || void 0 === t || t.abort(),
         this.plugins.forEach((t => t.destroy())),
         this.subscriptions.forEach((t => t())),
         this.unsubscribePlayerEvents(),
         this.timer.destroy(),
-        this.renderer.destroy();
-
-        // [FIX] 顯式釋放 WaveformEngine WASM 資源
-        if (this._wasmWaveformEngine) {
-            try {
-                if (typeof this._wasmWaveformEngine.free === 'function') {
-                    this._wasmWaveformEngine.free();
-                }
-            } catch (e) {
-                console.warn('[WaveSurfer] WASM cleanup warning:', e);
-            }
-            this._wasmWaveformEngine = null;
-        }
-
-        // [FIX] 關鍵修正：釋放 WaveSurfer 實例持有的原始 AudioBuffer
-        this.decodedData = null;
-
-        // [FIX] 關鍵修正：釋放 WebAudio Backend 持有的播放緩衝區
-        // 因為 super.destroy() 認為這是外部媒體而不進行清理，我們必須手動干預
-        if (this.media && typeof this.media.buffer !== 'undefined') {
-             this.media.buffer = null;
-        }
-
+        this.renderer.destroy(),
         super.destroy()
     }
 }

@@ -13,8 +13,6 @@ let currentPeakMode = false;
 let currentPeakThreshold = 0.4;
 let currentSmoothMode = true;
 let analysisWasmEngine = null;
-// [FIX] 全局鎖，防止快速操作導致的競爭條件
-let isReplacing = false;
 
 export function initWavesurfer({
   container,
@@ -64,8 +62,7 @@ export function createSpectrogramPlugin({
   return Spectrogram.create(baseOptions);
 }
 
-// [FIX] 改為 Async 函數以支持等待 GC
-export async function replacePlugin(
+export function replacePlugin(
   colorMap,
   height = 800,
   frequencyMin = 10,
@@ -79,144 +76,124 @@ export async function replacePlugin(
   onColorMapChanged = null
 ) {
   if (!ws) throw new Error('Wavesurfer not initialized.');
-  
-  // [FIX] 如果正在替換中，忽略本次請求，防止堆疊
-  if (isReplacing) {
-      console.warn('⚠️ [wsManager] Previous replacement still in progress, queuing...');
-      return; 
-  }
-  
-  isReplacing = true;
+  const container = document.getElementById("spectrogram-only");
 
-  try {
-      const container = document.getElementById("spectrogram-only");
+  // 計算目標 overlap 點數
+  const targetNoverlap = (overlapPercent !== null && overlapPercent !== undefined)
+      ? Math.floor(fftSamples * (overlapPercent / 100))
+      : null;
 
-      // 計算目標 overlap 點數
-      const targetNoverlap = (overlapPercent !== null && overlapPercent !== undefined)
-          ? Math.floor(fftSamples * (overlapPercent / 100))
-          : null;
+  // [FIX] 從 Rebuild 條件中移除 targetNoverlap
+  // 只有當 FFT Size, Window, ColorMap 或 頻率範圍改變時才 Rebuild
+  const needsRebuild = 
+    !plugin ||
+    colorMap !== currentColorMap ||
+    fftSamples !== currentFftSize ||
+    windowFunc !== currentWindowType ||
+    Math.abs(frequencyMin * 1000 - (plugin.options.frequencyMin || 0)) > 1 || 
+    Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
 
-      // 只有當 FFT Size, Window, ColorMap 或 頻率範圍改變時才 Rebuild
-      const needsRebuild = 
-        !plugin ||
-        colorMap !== currentColorMap ||
-        fftSamples !== currentFftSize ||
-        windowFunc !== currentWindowType ||
-        Math.abs(frequencyMin * 1000 - (plugin.options.frequencyMin || 0)) > 1 || 
-        Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
+  if (needsRebuild) {
+    // 銷毀舊插件
+    const oldCanvas = container.querySelector("canvas");
+    if (oldCanvas) {
+      oldCanvas.remove();
+    }
 
-      if (needsRebuild) {
-        // [FIX] 強制清理舊 Canvas 以釋放 GPU 記憶體
-        const oldCanvas = container.querySelector("canvas");
-        if (oldCanvas) {
-            oldCanvas.width = 0;
-            oldCanvas.height = 0;
-            oldCanvas.remove();
-        }
-
-        // 銷毀舊插件
-        if (plugin) {
-          if (typeof plugin.destroy === 'function') {
-            plugin.destroy();
-          }
-          plugin = null;
-          
-          if (analysisWasmEngine) {
-            try {
-              if (typeof analysisWasmEngine.free === 'function') {
-                analysisWasmEngine.free();
-              }
-            } catch (err) {
-              console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
-            }
-            analysisWasmEngine = null;
-          }
-          
-          // [FIX] 關鍵：暫停 50ms 讓瀏覽器執行垃圾回收 (GC)
-          // 這能有效防止連續加載時的記憶體暴衝
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-
-        currentColorMap = colorMap;
-        currentFftSize = fftSamples;
-        currentWindowType = windowFunc;
-
-        plugin = createSpectrogramPlugin({
-          colorMap,
-          height,
-          frequencyMin,
-          frequencyMax,
-          fftSamples,
-          noverlap: targetNoverlap, 
-          windowFunc,
-          peakMode,
-          peakThreshold,
-        });
-
-        if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
-          plugin.on('colorMapChanged', onColorMapChanged);
-        }
-
-        ws.registerPlugin(plugin);
-
-        if (plugin && plugin.setSmoothMode) {
-          plugin.setSmoothMode(currentSmoothMode);
-        }
-
-        try {
-          // 使用 RAF 避免阻塞 UI
-          requestAnimationFrame(() => {
-              if (plugin) plugin.render();
-              if (typeof onRendered === 'function') onRendered();
-          });
-        } catch (err) {
-          console.warn('⚠️ Spectrogram render failed:', err);
-        }
-      } else {
-        // [FIX] 軟更新邏輯 (Soft Update Logic)
-        let shouldRender = false;
-
-        // 1. 檢查 Peak 參數
-        if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
-            currentPeakMode = peakMode;
-            currentPeakThreshold = peakThreshold;
-            if (plugin && plugin.options) {
-                plugin.options.peakMode = peakMode;
-                plugin.options.peakThreshold = peakThreshold;
-            }
-        }
-
-        // 2. 檢查 Overlap 是否改變
-        if (plugin && targetNoverlap !== plugin.noverlap) {
-            // 直接更新插件內部的參數
-            plugin.noverlap = targetNoverlap;
-            if (plugin.options) plugin.options.noverlap = targetNoverlap;
-            shouldRender = true;
-        }
-
-        try {
-            if (shouldRender) {
-                // 如果 Overlap 變了，必須重算頻譜
-                plugin.render();
-            } else {
-                // 如果只有 Peak 變了，只重畫 Overlay
-                if (plugin && typeof plugin.updatePeakOverlay === 'function') {
-                    plugin.updatePeakOverlay();
-                } else {
-                    plugin.render();
-                }
-            }
-            
-            requestAnimationFrame(() => {
-                if (typeof onRendered === 'function') onRendered();
-            });
-        } catch (err) {
-            console.warn('⚠️ Plugin update failed:', err);
-        }
+    if (plugin) {
+      if (typeof plugin.destroy === 'function') {
+        plugin.destroy();
       }
-  } finally {
-      // 釋放鎖
-      isReplacing = false;
+      plugin = null;
+      
+      if (analysisWasmEngine) {
+        try {
+          if (typeof analysisWasmEngine.free === 'function') {
+            analysisWasmEngine.free();
+          }
+        } catch (err) {
+          console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
+        }
+        analysisWasmEngine = null;
+      }
+    }
+
+    currentColorMap = colorMap;
+    currentFftSize = fftSamples;
+    currentWindowType = windowFunc;
+
+    plugin = createSpectrogramPlugin({
+      colorMap,
+      height,
+      frequencyMin,
+      frequencyMax,
+      fftSamples,
+      noverlap: targetNoverlap, 
+      windowFunc,
+      peakMode,
+      peakThreshold,
+    });
+
+    if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
+      plugin.on('colorMapChanged', onColorMapChanged);
+    }
+
+    ws.registerPlugin(plugin);
+
+    if (plugin && plugin.setSmoothMode) {
+      plugin.setSmoothMode(currentSmoothMode);
+    }
+
+    try {
+      plugin.render();
+      requestAnimationFrame(() => {
+        if (typeof onRendered === 'function') onRendered();
+      });
+    } catch (err) {
+      console.warn('⚠️ Spectrogram render failed:', err);
+    }
+  } else {
+    // [FIX] 軟更新邏輯 (Soft Update Logic)
+    let shouldRender = false;
+
+    // 1. 檢查 Peak 參數
+    if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
+        currentPeakMode = peakMode;
+        currentPeakThreshold = peakThreshold;
+        if (plugin && plugin.options) {
+            plugin.options.peakMode = peakMode;
+            plugin.options.peakThreshold = peakThreshold;
+        }
+        // 如果只有 Peak 改變，稍後調用 updatePeakOverlay 即可，但若 Overlap 也變了，就需要 full render
+    }
+
+    // 2. 檢查 Overlap 是否改變 (這是之前導致 Crash 的原因，現在改為軟更新)
+    if (plugin && targetNoverlap !== plugin.noverlap) {
+        // 直接更新插件內部的參數
+        plugin.noverlap = targetNoverlap;
+        if (plugin.options) plugin.options.noverlap = targetNoverlap;
+        shouldRender = true;
+    }
+
+    try {
+        if (shouldRender) {
+            // 如果 Overlap 變了，必須重算頻譜
+            plugin.render();
+        } else {
+            // 如果只有 Peak 變了，只重畫 Overlay
+            if (plugin && typeof plugin.updatePeakOverlay === 'function') {
+                plugin.updatePeakOverlay();
+            } else {
+                plugin.render();
+            }
+        }
+        
+        requestAnimationFrame(() => {
+            if (typeof onRendered === 'function') onRendered();
+        });
+    } catch (err) {
+        console.warn('⚠️ Plugin update failed:', err);
+    }
   }
 }
 
