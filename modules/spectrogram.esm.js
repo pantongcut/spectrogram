@@ -544,7 +544,7 @@ class h extends s {
         this._createColorMapDropdown(),
         this.drawColorMapBar()
     }
-    destroy() {
+destroy() {
         // Clear all filter bank caches BEFORE clearing engine reference
         this._filterBankCache = {};
         this._filterBankCacheByKey = {};
@@ -565,58 +565,28 @@ class h extends s {
         this.fftData = null;
         this.powerSpectrum = null;
         
-        // [FIX] 關鍵修正：釋放 Spectrogram 持有的原始 AudioBuffer 引用
-        // 這解決了 300MB+ 記憶體無法釋放的問題
-        this.buffer = null;
-        this.peakBandArrayPerChannel = null;
-
-        // [FIX] 強制釋放 WASM 記憶體 (Hard Release)
+        // [FIX] 安全釋放 WASM 記憶體 (Safe Release)
+        // 即使 release_memory 崩潰，也要確保 _wasmEngine 被設為 null，
+        // 這樣 JavaScript 端的垃圾回收器 (GC) 才能回收這個大對象。
         if (this._wasmEngine) {
             try {
-                if (typeof this._wasmEngine.free === 'function') {
-                    this._wasmEngine.free();
-                } else if (typeof this._wasmEngine.release_memory === 'function') {
+                if (typeof this._wasmEngine.release_memory === 'function') {
+                    // console.log('🗑️ [Spectrogram] Soft-releasing WASM memory');
                     this._wasmEngine.release_memory();
+                } else if (typeof this._wasmEngine.free === 'function') {
+                    this._wasmEngine.free();
                 }
             } catch (e) {
-                const msg = (e.message || String(e)).toLowerCase();                
-                // 如果是以下任何一種情況，直接 return (靜音)，不要 console.warn
-                if (
-                    msg.includes('out of bounds') || 
-                    msg.includes('null') || 
-                    msg.includes('unreachable') ||
-                    msg.includes('memory access')
-                ) {
-                    // 良性錯誤：忽略
-                    return;
-                }
-                // 只有真的未知的錯誤才印出來
-                console.warn('⚠️ [Spectrogram] WASM cleanup warning:', e.message);
+                // 忽略 "memory access out of bounds" 等錯誤
+                // 這種錯誤通常發生在 WASM 記憶體已經被外部重置或 detach 時
+                // 這時候我們不需要做任何事，直接讓 JS 引用斷開即可
+                console.warn('⚠️ [Spectrogram] WASM cleanup warning (safe to ignore):', e.message);
             } finally {
-                // CRITICAL: 無論釋放成功還是報錯，必須切斷 JS 引用
+                // CRITICAL: 無論如何都要切斷引用
                 this._wasmEngine = null;
             }
         }
         
-        // [FIX] 強制釋放 Spectrogram Canvas 顯存
-        if (this.canvas) {
-            this.canvas.width = 0;
-            this.canvas.height = 0;
-            this.canvas.remove();
-            this.canvas = null;
-        }
-        
-        // 清除 Context 引用
-        this.spectrCc = null;
-
-        // 如果有 Labels Canvas，也一併清理
-        if (this.labelsEl) {
-            this.labelsEl.width = 0;
-            this.labelsEl.height = 0;
-            this.labelsEl.remove();
-            this.labelsEl = null;
-        }
-
         // Clean up event listeners
         if (this._colorBarClickHandler) {
             const colorBarCanvas = document.getElementById("color-bar");
@@ -996,14 +966,10 @@ class h extends s {
         }, this.wrapper),
         this.spectrCc = this.canvas.getContext("2d")
     }
-async render() {
+    async render() {
         var t;
         
-        // [FIX] 1. 銷毀檢查：如果插件已被銷毀（DOM 不存在），直接終止
-        // 這是防止快速切換時 RAM 累積的第一道防線
-        if (!this.wrapper || !this.canvas) return;
-
-        // [FIX] 2. 渲染鎖：如果正在渲染，標記為待處理並返回，防止並行執行
+        // [FIX] Queue renders instead of skipping - set flag to indicate pending render
         if (this._isRendering) {
             this._pendingRender = true;
             return;
@@ -1013,44 +979,25 @@ async render() {
         this._pendingRender = false;
         
         try {
-            if (this.frequenciesDataUrl) {
+            if (this.frequenciesDataUrl)
                 this.loadFrequenciesData(this.frequenciesDataUrl);
-            } else {
+            else {
                 const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
-                
-                // 確保有解碼數據
                 if (e) {
-                    // 計算頻譜數據 (這是最耗時的步驟，包含 await)
                     const frequencies = await this.getFrequencies(e);
-                    
-                    // [FIX] 3. 二次銷毀檢查：關鍵步驟！
-                    // 在 await 結束後，必須再次檢查 wrapper 是否還存在。
-                    // 因為在計算頻譜的幾百毫秒內，使用者可能已經切換了檔案 (觸發了 destroy)。
-                    // 如果這時繼續執行 drawSpectrogram，就會導致記憶體洩漏或錯誤。
-                    if (!this.wrapper || !this.canvas) return;
-
-                    // [FIX] 4. 數據有效性檢查
+                    // [FIX] Only draw if frequencies is valid (not null/undefined/empty)
                     if (frequencies && Array.isArray(frequencies) && frequencies.length > 0) {
                         this.drawSpectrogram(frequencies);
                     }
                 }
             }
-        } catch (err) {
-            console.warn('[Spectrogram] Render error:', err);
         } finally {
             this._isRendering = false;
-            
-            // [FIX] 5. 處理待處理的渲染請求
-            // 如果在忙碌時有新的渲染請求進來，現在執行它
+            // [FIX] If a render was requested while we were busy, do it now
             if (this._pendingRender) {
                 this._pendingRender = false;
-                // 使用 setTimeout 避免堆疊溢出，並讓 UI 執行緒有機會喘息
-                setTimeout(() => {
-                    // 再次檢查是否存在才執行
-                    if (this.wrapper && this.canvas) {
-                        this.render();
-                    }
-                }, 0);
+                // Use setTimeout to avoid stack overflow
+                setTimeout(() => this.render(), 0);
             }
         }
     }
@@ -1103,19 +1050,11 @@ async render() {
             const channelData = t[channelIdx];
             
             const canvasWidth = this.getWidth();
-
-            if (canvasWidth <= 0) return;
             let renderPixels = isSmooth ? channelData : this.resample(channelData);
-            if (!renderPixels || renderPixels.length === 0) return;
             
             const imgWidth = renderPixels.length; // Smooth: numFrames, Default: screenWidth
             const imgHeight = Array.isArray(renderPixels) && renderPixels[0] ? renderPixels[0].length : 1;
-
-            if (imgWidth <= 0 || imgHeight <= 0) {
-                return;
-            }
-
-            let imgData = new ImageData(imgWidth, imgHeight);
+            const imgData = new ImageData(imgWidth, imgHeight);
             
             // --- Image Data Filling (簡化代碼以聚焦 Peak 繪製) ---
             // (保持原本的 Color Map 填充邏輯，這裡省略以節省篇幅，請保留原文件該區塊代碼)
@@ -1161,26 +1100,9 @@ async render() {
             const sourceHeight = Math.round(imgHeight * (p - u));
             
             createImageBitmap(imgData, 0, sourceY, imgWidth, sourceHeight).then((bitmap => {
-                // [FIX 3] 終極防護：如果 Context 已經被銷毀 (代表 destroy 被呼叫了)，
-                // 絕對不要執行 drawImage，並立刻關閉 bitmap
-                if (!this.spectrCc || !this.canvas) {
-                     if (bitmap && typeof bitmap.close === 'function') bitmap.close();
-                     return;
-                }
-                
                 const drawY = this.height * (channelIdx + 1 - p / f);
                 const drawH = this.height * p / f;
                 canvasCtx.drawImage(bitmap, 0, drawY, canvasWidth, drawH);
-
-                // [FIX 1] 畫完立刻釋放 GPU 記憶體 (這非常重要！)
-                if (bitmap && typeof bitmap.close === 'function') {
-                    bitmap.close();
-                }
-
-                // [FIX 2] 切斷閉包引用，讓 imgData 能立刻被 GC 回收
-                // 這些變數在閉包內會佔用大量 RAM，直到 Promise 結束很久後才釋放
-                imgData = null; 
-                renderPixels = null;
 
                 // [NEW] Peak Mode 渲染邏輯更新 (支援多點/局部閾值)
                 if (this.options && this.options.peakMode && this.peakBandArrayPerChannel && this.peakBandArrayPerChannel[channelIdx]) {
@@ -1396,8 +1318,8 @@ async render() {
     }
 
     async getFrequencies(t, isRetry = false) {
-        // [FIX] 1. 初始檢查：如果沒有 Wrapper (已被銷毀)，直接退出
-        if (!this.options || !t || !this.wrapper) {
+        // 檢查 this.options 是否為 null
+        if (!this.options || !t) {
             return;
         }
         
@@ -1426,10 +1348,7 @@ async render() {
         await this._wasmReady;
         
         const currentFilterBankKey = `${this.scale}:${n}:${this.frequencyMin}:${this.frequencyMax}`;
-
-        // [FIX] 2. 等待 WASM 就緒前的檢查
-        if (!this.wrapper) return;
-
+        
         if (this.scale !== "linear") {
             if (this._lastFilterBankScale !== currentFilterBankKey) {
                 let c;
@@ -1465,11 +1384,6 @@ async render() {
         const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
 
         for (let e = 0; e < i; e++) {
-            // [FIX] 3. 通道迴圈內的檢查：防止在計算途中切換檔案
-            if (!this.wrapper || !this.canvas) {
-                return null;
-            }
-
             const s = t.getChannelData(e)
               , channelFrames = []
               , channelPeakLists = [];
@@ -1479,12 +1393,6 @@ async render() {
             
             let fullU8Spectrum;
             try {
-                // [FIX] 終極防護：防止 ZoomControl 在引擎銷毀或切換時觸發重繪導致崩潰
-                if (!this._wasmEngine) {
-                    audioDataCopy.fill(0); // 清理內存
-                    return null; // 直接返回，不做任何事
-                }
-
                 // 嘗試調用 WASM 計算
                 fullU8Spectrum = this._wasmEngine.compute_spectrogram_u8(
                     audioDataCopy,
@@ -1523,9 +1431,6 @@ async render() {
             
             // 清理 WASM 輸入數據引用
             audioDataCopy.fill(0);
-
-            // [FIX] 4. 計算完一個通道後再次檢查
-            if (!this.wrapper) return null;
 
             // 以下為正常的數據處理邏輯 (保持不變)
             const globalMaxLinear = this._wasmEngine.get_global_max();
