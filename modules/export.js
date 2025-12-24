@@ -121,7 +121,9 @@ function generateXlsxBlob(rows) {
   const colWidths = rows[0].map(h => String(h).length);
   for (const row of rows) {
     row.forEach((v, i) => {
-      const len = String(v).length;
+      // 計算長度時，如果是 null/undefined 視為空字串
+      const valStr = (v === null || v === undefined) ? "" : String(v);
+      const len = valStr.length;
       if (len > colWidths[i]) colWidths[i] = len;
     });
   }
@@ -138,11 +140,23 @@ function generateXlsxBlob(rows) {
   };
 
   const colsXml = colWidths.map((w, i) => `<col min="${i+1}" max="${i+1}" width="${w+2}" customWidth="1"/>`).join('');
+  
   let sheetData = '';
   rows.forEach((row, rIdx) => {
     sheetData += `<row r="${rIdx+1}">`;
     row.forEach((v, cIdx) => {
-      sheetData += `<c r="${columnLetter(cIdx)}${rIdx+1}" t="inlineStr"><is><t>${escapeXml(String(v))}</t></is></c>`;
+      const cellRef = `${columnLetter(cIdx)}${rIdx+1}`;
+      
+      // [CRITICAL CHANGE] 類型判斷與標籤生成
+      if (typeof v === 'number') {
+        // 如果是數字：使用 t="n" (Number)，數值放在 <v> 標籤內
+        sheetData += `<c r="${cellRef}" t="n"><v>${v}</v></c>`;
+      } else {
+        // 如果是字串或其他：使用 t="inlineStr"，內容放在 <is><t> 標籤內
+        // 處理 null/undefined 為空字串
+        const valStr = (v === null || v === undefined) ? "" : String(v);
+        sheetData += `<c r="${cellRef}" t="inlineStr"><is><t>${escapeXml(valStr)}</t></is></c>`;
+      }
     });
     sheetData += '</row>';
   });
@@ -190,6 +204,7 @@ function generateXlsxBlob(rows) {
     `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`+
     `</Types>`;
 
+  // 3. 打包 ZIP
   const zipBytes = createZip([
     { name: '[Content_Types].xml', data: contentTypes },
     { name: '_rels/.rels', data: rootRels },
@@ -336,7 +351,16 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
     return;
   }
 
-  // 1. 定義 Headers (加入 Time 欄位)
+  // [NEW] 數值格式化輔助函數
+  // val: 數值
+  // p: 小數位數 (precision)
+  // return: 真正的 Number 類型 (或空字串)
+  const fmt = (val, p = 2) => {
+    if (val === null || val === undefined || isNaN(val)) return "";
+    return Number(val.toFixed(p)); // 轉為固定小數位的數字
+  };
+
+  // 1. 定義 Headers
   const headers = [
     "ID", 
     "Start Time (s)", 
@@ -364,39 +388,41 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
   const rows = [headers];
 
   calls.forEach((call, index) => {
+    // 2. 填充數據 (使用 fmt 函數轉為數字)
     rows.push([
-      index + 1,
-      call.startTime_s?.toFixed(4) || "",
-      call.endTime_s?.toFixed(4) || "",
-      call.duration_ms?.toFixed(2) || "",
+      index + 1, // ID (Number)
+      fmt(call.startTime_s, 4),
+      fmt(call.endTime_s, 4),
+      fmt(call.duration_ms, 2),
       
       // Low Freq Pair
-      call.lowFreq_kHz?.toFixed(2) || "",
-      call.lowFreq_ms?.toFixed(2) || "",
+      fmt(call.lowFreq_kHz, 2),
+      fmt(call.lowFreq_ms, 2),
       
       // High Freq Pair
-      call.highFreq_kHz?.toFixed(2) || "",
-      call.highFreqTime_ms?.toFixed(2) || "",
+      fmt(call.highFreq_kHz, 2),
+      fmt(call.highFreqTime_ms, 2),
       
       // Peak Freq Pair
-      call.peakFreq_kHz?.toFixed(2) || "",
-      call.peakFreqTime_ms?.toFixed(2) || "",
+      fmt(call.peakFreq_kHz, 2),
+      fmt(call.peakFreqTime_ms, 2),
       
       // Knee Freq Pair
-      call.kneeFreq_kHz?.toFixed(2) || "",
-      call.kneeFreq_ms?.toFixed(2) || "",
+      fmt(call.kneeFreq_kHz, 2),
+      fmt(call.kneeFreq_ms, 2),
       
       // Char Freq Pair
-      call.characteristicFreq_kHz?.toFixed(2) || "",
-      call.characteristicFreq_ms?.toFixed(2) || "",
+      fmt(call.characteristicFreq_kHz, 2),
+      fmt(call.characteristicFreq_ms, 2),
       
-      call.startFreq_kHz?.toFixed(2) || "",
-      call.endFreq_kHz?.toFixed(2) || "",
+      fmt(call.startFreq_kHz, 2),
+      fmt(call.endFreq_kHz, 2),
       
-      call.bandwidth_kHz?.toFixed(2) || "",
-      call.peakPower_dB?.toFixed(1) || "",
-      call.snr_dB?.toFixed(1) || "",
-      call.quality || ""
+      fmt(call.bandwidth_kHz, 2),
+      fmt(call.peakPower_dB, 1),
+      fmt(call.snr_dB, 1),
+      
+      call.quality || "" // Quality 是文字，保持原樣
     ]);
   });
 
