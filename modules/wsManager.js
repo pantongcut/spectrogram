@@ -78,13 +78,14 @@ export function replacePlugin(
   if (!ws) throw new Error('Wavesurfer not initialized.');
   const container = document.getElementById("spectrogram-only");
 
-  // 計算目標 overlap 點數
+  // 1. 總是同步全局狀態 (以防萬一 main.js 沒有調用 setPeakMode)
+  currentPeakMode = peakMode;
+  currentPeakThreshold = peakThreshold;
+
   const targetNoverlap = (overlapPercent !== null && overlapPercent !== undefined)
       ? Math.floor(fftSamples * (overlapPercent / 100))
       : null;
 
-  // [FIX] 從 Rebuild 條件中移除 targetNoverlap
-  // 只有當 FFT Size, Window, ColorMap 或 頻率範圍改變時才 Rebuild
   const needsRebuild = 
     !plugin ||
     colorMap !== currentColorMap ||
@@ -94,26 +95,16 @@ export function replacePlugin(
     Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
 
   if (needsRebuild) {
-    // 銷毀舊插件
-const oldCanvas = container.querySelector("canvas");
-    if (oldCanvas) {
-      oldCanvas.remove();
-    }
+    // === 硬重啟 (Rebuild) ===
+    const oldCanvas = container.querySelector("canvas");
+    if (oldCanvas) oldCanvas.remove();
 
     if (plugin) {
-      if (typeof plugin.destroy === 'function') {
-        plugin.destroy();
-      }
+      if (typeof plugin.destroy === 'function') plugin.destroy();
       plugin = null;
-      
       if (analysisWasmEngine) {
-        try {
-          if (typeof analysisWasmEngine.free === 'function') {
-            analysisWasmEngine.free();
-          }
-        } catch (err) {
-          console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err);
-        }
+        try { if (typeof analysisWasmEngine.free === 'function') analysisWasmEngine.free(); } 
+        catch (err) { console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err); }
         analysisWasmEngine = null;
       }
     }
@@ -122,7 +113,6 @@ const oldCanvas = container.querySelector("canvas");
     currentFftSize = fftSamples;
     currentWindowType = windowFunc;
     
-    // [LOG] Debugging initialization
     console.log(`[wsManager] Rebuilding plugin. PeakMode: ${peakMode}, Threshold: ${peakThreshold}`);
 
     plugin = createSpectrogramPlugin({
@@ -140,76 +130,65 @@ const oldCanvas = container.querySelector("canvas");
     if (typeof onColorMapChanged === 'function' && plugin && plugin.on) {
       plugin.on('colorMapChanged', onColorMapChanged);
     }
-
     ws.registerPlugin(plugin);
-
-    if (plugin && plugin.setSmoothMode) {
-      plugin.setSmoothMode(currentSmoothMode);
-    }
+    if (plugin && plugin.setSmoothMode) plugin.setSmoothMode(currentSmoothMode);
 
     try {
       plugin.render();
-      requestAnimationFrame(() => {
-        if (typeof onRendered === 'function') onRendered();
-      });
-    } catch (err) {
-      console.warn('⚠️ Spectrogram render failed:', err);
-    }
+      requestAnimationFrame(() => { if (typeof onRendered === 'function') onRendered(); });
+    } catch (err) { console.warn('⚠️ Spectrogram render failed:', err); }
 
   } else {
-    // [FIX] 軟更新邏輯優化
+    // === 軟更新 (Soft Update) ===
     let shouldRender = false;
     let shouldUpdateOverlayOnly = false;
 
-    // 1. 檢查 Peak Mode 切換
-    if (currentPeakMode !== peakMode) {
-        console.log(`[wsManager] Peak Mode Toggled: ${currentPeakMode} -> ${peakMode}`);
-        currentPeakMode = peakMode;
-        if (plugin && plugin.options) {
-            plugin.options.peakMode = peakMode;
+    // [CRITICAL FIX] 比較「傳入參數」與「插件現有設定」，而不是比較全局變量
+    if (plugin && plugin.options) {
+        
+        // 1. 檢查 Peak Mode
+        if (plugin.options.peakMode !== peakMode) {
+            console.log(`[wsManager] Peak Mode Toggled: ${plugin.options.peakMode} -> ${peakMode}`);
+            plugin.options.peakMode = peakMode; // 更新插件內部設定
+            shouldRender = true; // 必須重算 FFT 才能生成/清除 Peak 數據
         }
-        // [CRITICAL FIX] 如果切換 Peak Mode，必須重算(render)才能生成/清除數據
-        // updatePeakOverlay 無法計算數據，只能畫圖。
-        shouldRender = true; 
+
+        // 2. 檢查 Peak Threshold
+        // 使用 epsilon 比較浮點數
+        if (Math.abs((plugin.options.peakThreshold || 0) - peakThreshold) > 0.001) {
+            console.log(`[wsManager] Threshold Changed: ${plugin.options.peakThreshold} -> ${peakThreshold}`);
+            plugin.options.peakThreshold = peakThreshold; // 更新插件內部設定
+            
+            // 如果 Peak Mode 開啟且不需要全渲染，則只更新 Overlay
+            if (peakMode && !shouldRender) {
+                shouldUpdateOverlayOnly = true;
+            }
+        }
+
+        // 3. 檢查 Overlap
+        if (targetNoverlap !== null && targetNoverlap !== plugin.noverlap) {
+            console.log(`[wsManager] Overlap Changed: ${plugin.noverlap} -> ${targetNoverlap}`);
+            plugin.noverlap = targetNoverlap;
+            plugin.options.noverlap = targetNoverlap;
+            shouldRender = true;
+        }
     }
 
-    // 2. 檢查 Peak Threshold 變化
-    if (Math.abs(currentPeakThreshold - peakThreshold) > 0.001) {
-        console.log(`[wsManager] Threshold Changed: ${currentPeakThreshold} -> ${peakThreshold}`);
-        currentPeakThreshold = peakThreshold;
-        if (plugin && plugin.options) {
-            plugin.options.peakThreshold = peakThreshold;
-        }
-        // 如果只是調整閾值，且當前已經是 Peak Mode，則不需要重算 FFT，只需要重畫 Overlay
-        if (currentPeakMode && !shouldRender) {
-            shouldUpdateOverlayOnly = true;
-        }
-    }
-
-    // 3. 檢查 Overlap 是否改變
-    if (plugin && targetNoverlap !== null && targetNoverlap !== plugin.noverlap) {
-        console.log(`[wsManager] Overlap Changed. Re-rendering.`);
-        plugin.noverlap = targetNoverlap;
-        if (plugin.options) plugin.options.noverlap = targetNoverlap;
-        shouldRender = true;
-    }
-
+    // 執行更新
     try {
         if (shouldRender) {
-            console.log('[wsManager] Triggering full render to calculate peaks/spectrogram...');
+            console.log('[wsManager] Triggering FULL render (calculating frequencies)...');
             plugin.render();
         } else if (shouldUpdateOverlayOnly) {
-            console.log('[wsManager] Triggering overlay update only...');
-            if (plugin && typeof plugin.updatePeakOverlay === 'function') {
+            console.log('[wsManager] Triggering OVERLAY update only...');
+            if (typeof plugin.updatePeakOverlay === 'function') {
                 plugin.updatePeakOverlay();
             } else {
                 plugin.render();
             }
         }
         
-        requestAnimationFrame(() => {
-            if (typeof onRendered === 'function') onRendered();
-        });
+        requestAnimationFrame(() => { if (typeof onRendered === 'function') onRendered(); });
     } catch (err) {
         console.warn('⚠️ Plugin update failed:', err);
     }
