@@ -1323,6 +1323,8 @@ destroy() {
             return;
         }
         
+        console.log(`[Spectrogram] calculating frequencies. PeakMode: ${this.options.peakMode}`);
+
         // 清除舊緩存以防止內存泄漏
         this.peakBandArrayPerChannel = [];
         
@@ -1382,6 +1384,11 @@ destroy() {
         
         let sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
         const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
+
+        // [LOG] Threshold details
+        if (this.options.peakMode) {
+            console.log(`[Spectrogram] Calculating Peaks. Slider: ${sliderValue}, Effective Threshold: ${effectiveThreshold}`);
+        }
 
         for (let e = 0; e < i; e++) {
             const s = t.getChannelData(e)
@@ -1479,6 +1486,7 @@ destroy() {
             }
             
             if (this.options && this.options.peakMode) {
+                console.log(`[Spectrogram] Channel ${e} peaks calculated. Frames: ${channelPeakLists.length}`);
                 this.peakBandArrayPerChannel.push(channelPeakLists);
             }
             h.push(channelFrames)
@@ -1541,67 +1549,23 @@ destroy() {
 
     /// 只更新Peak overlay，不重新計算頻譜 (用於快速更新Peak Threshold)
     updatePeakOverlay() {
+        // 1. 檢查是否有數據
         if (!this.lastRenderData || !this.options || !this.options.peakMode) {
             return;
         }
         
-        // 只有在有Peak數據時才重繪
+        // 2. 檢查 Peak 數據是否存在
         if (!this.peakBandArrayPerChannel || this.peakBandArrayPerChannel.length === 0) {
+            console.warn('[Spectrogram] updatePeakOverlay: No peak data found.');
             return;
         }
 
-        const canvasCtx = this.spectrCc;
-        if (!canvasCtx) return;
+        console.log('[Spectrogram] Redrawing for Peak Overlay update...');
 
-        const canvasWidth = this.getWidth();
-        const t = this.lastRenderData;
-        const numChannels = Array.isArray(t[0]) ? t.length : 1;
-        
-        // Get updated effective threshold with new peakThreshold
-        const sliderValue = this.options.peakThreshold !== undefined ? this.options.peakThreshold : 0.4;
-        const effectiveThreshold = 0.60 + (Math.pow(sliderValue, 1.5) * 0.39);
-
-        // Redraw Peak overlay lines only
-        canvasCtx.strokeStyle = "rgb(255, 192, 0)";
-        canvasCtx.lineWidth = 1.5;
-
-        for (let channelIdx = 0; channelIdx < numChannels; channelIdx++) {
-            const startY = channelIdx * this.height;
-            
-            if (this.peakBandArrayPerChannel[channelIdx]) {
-                const peaks = this.peakBandArrayPerChannel[channelIdx];
-                const xStep = canvasWidth / peaks.length;
-
-                canvasCtx.beginPath();
-                let isFirstPoint = true;
-                
-                for (let i = 0; i < peaks.length; i++) {
-                    const framePeaks = peaks[i];
-                    if (!framePeaks || framePeaks.length === 0) continue;
-
-                    for (let peakIdx = 0; peakIdx < framePeaks.length; peakIdx++) {
-                        const freq = framePeaks[peakIdx];
-                        if (freq < effectiveThreshold) continue;
-
-                        const freqHz = freq * 1000;
-                        const viewMinHz = this.frequencyMin || 0;
-                        const viewMaxHz = this.frequencyMax || 64000;
-                        const freqNormalized = (freqHz - viewMinHz) / (viewMaxHz - viewMinHz);
-                        
-                        const y = startY + this.height * (1 - freqNormalized);
-                        const x = i * xStep + xStep / 2;
-                        
-                        if (isFirstPoint) {
-                            canvasCtx.moveTo(x, y);
-                            isFirstPoint = false;
-                        } else {
-                            canvasCtx.lineTo(x, y);
-                        }
-                    }
-                }
-                canvasCtx.stroke();
-            }
-        }
+        // 3. 直接調用 drawSpectrogram
+        // 這會重繪背景圖 (清除舊線) 並根據新的 options.peakThreshold 畫出新線
+        // 因為使用的是 this.lastRenderData，所以不會觸發耗時的 WASM/FFT 計算
+        this.drawSpectrogram(this.lastRenderData);
     }
 
     resample(t) {

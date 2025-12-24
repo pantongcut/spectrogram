@@ -95,7 +95,7 @@ export function replacePlugin(
 
   if (needsRebuild) {
     // 銷毀舊插件
-    const oldCanvas = container.querySelector("canvas");
+const oldCanvas = container.querySelector("canvas");
     if (oldCanvas) {
       oldCanvas.remove();
     }
@@ -121,6 +121,9 @@ export function replacePlugin(
     currentColorMap = colorMap;
     currentFftSize = fftSamples;
     currentWindowType = windowFunc;
+    
+    // [LOG] Debugging initialization
+    console.log(`[wsManager] Rebuilding plugin. PeakMode: ${peakMode}, Threshold: ${peakThreshold}`);
 
     plugin = createSpectrogramPlugin({
       colorMap,
@@ -152,24 +155,40 @@ export function replacePlugin(
     } catch (err) {
       console.warn('⚠️ Spectrogram render failed:', err);
     }
-  } else {
-    // [FIX] 軟更新邏輯 (Soft Update Logic)
-    let shouldRender = false;
 
-    // 1. 檢查 Peak 參數
-    if (currentPeakMode !== peakMode || currentPeakThreshold !== peakThreshold) {
+  } else {
+    // [FIX] 軟更新邏輯優化
+    let shouldRender = false;
+    let shouldUpdateOverlayOnly = false;
+
+    // 1. 檢查 Peak Mode 切換
+    if (currentPeakMode !== peakMode) {
+        console.log(`[wsManager] Peak Mode Toggled: ${currentPeakMode} -> ${peakMode}`);
         currentPeakMode = peakMode;
-        currentPeakThreshold = peakThreshold;
         if (plugin && plugin.options) {
             plugin.options.peakMode = peakMode;
-            plugin.options.peakThreshold = peakThreshold;
         }
-        // 如果只有 Peak 改變，稍後調用 updatePeakOverlay 即可，但若 Overlap 也變了，就需要 full render
+        // [CRITICAL FIX] 如果切換 Peak Mode，必須重算(render)才能生成/清除數據
+        // updatePeakOverlay 無法計算數據，只能畫圖。
+        shouldRender = true; 
     }
 
-    // 2. 檢查 Overlap 是否改變 (這是之前導致 Crash 的原因，現在改為軟更新)
-    if (plugin && targetNoverlap !== plugin.noverlap) {
-        // 直接更新插件內部的參數
+    // 2. 檢查 Peak Threshold 變化
+    if (Math.abs(currentPeakThreshold - peakThreshold) > 0.001) {
+        console.log(`[wsManager] Threshold Changed: ${currentPeakThreshold} -> ${peakThreshold}`);
+        currentPeakThreshold = peakThreshold;
+        if (plugin && plugin.options) {
+            plugin.options.peakThreshold = peakThreshold;
+        }
+        // 如果只是調整閾值，且當前已經是 Peak Mode，則不需要重算 FFT，只需要重畫 Overlay
+        if (currentPeakMode && !shouldRender) {
+            shouldUpdateOverlayOnly = true;
+        }
+    }
+
+    // 3. 檢查 Overlap 是否改變
+    if (plugin && targetNoverlap !== null && targetNoverlap !== plugin.noverlap) {
+        console.log(`[wsManager] Overlap Changed. Re-rendering.`);
         plugin.noverlap = targetNoverlap;
         if (plugin.options) plugin.options.noverlap = targetNoverlap;
         shouldRender = true;
@@ -177,10 +196,10 @@ export function replacePlugin(
 
     try {
         if (shouldRender) {
-            // 如果 Overlap 變了，必須重算頻譜
+            console.log('[wsManager] Triggering full render to calculate peaks/spectrogram...');
             plugin.render();
-        } else {
-            // 如果只有 Peak 變了，只重畫 Overlay
+        } else if (shouldUpdateOverlayOnly) {
+            console.log('[wsManager] Triggering overlay update only...');
             if (plugin && typeof plugin.updatePeakOverlay === 'function') {
                 plugin.updatePeakOverlay();
             } else {
