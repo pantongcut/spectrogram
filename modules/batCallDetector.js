@@ -157,6 +157,10 @@ export class BatCall {
     this.spectrogram = null;        // 2D array: [timeFrames][frequencyBins]
     this.timeFrames = null;         // Time points for each frame
     this.freqBins = null;           // Frequency bins in Hz
+    
+    // NEW (2025): Frequency contour for Peak Mode visualization
+    // Format: Array of { time_s: number, freq_kHz: number, power_dB: number }
+    this.frequencyContour = [];
   }
   
   /**
@@ -275,6 +279,14 @@ export class BatCall {
     }
     if (this.endFreqTime_s !== null) {
       this.endFreqTime_s /= factor;
+    }
+    
+    // NEW (2025): Apply time expansion to frequency contour
+    if (this.frequencyContour && this.frequencyContour.length > 0) {
+      for (const point of this.frequencyContour) {
+        if (point.time_s !== null) point.time_s /= factor;
+        if (point.freq_kHz !== null) point.freq_kHz *= factor;
+      }
     }
   }
   
@@ -546,7 +558,206 @@ export class BatCallDetector {
     
     return result;
   }
-  
+
+  // ============================================================
+  // 2025 NEW: Two-Pass Detection (Two-Stage Detection) for Full Files
+  // Industry-standard optimization for long recordings
+  // ============================================================
+
+  /**
+   * Process entire audio file using Two-Pass Detection
+   * PASS 1: Fast scan to find ROI (Regions of Interest)
+   * PASS 2: Detailed detection on ROI segments only
+   * 
+   * This dramatically reduces computation time for long files
+   * while maintaining detection accuracy
+   * 
+   * @param {Float32Array} fullAudioData - Complete audio data
+   * @param {number} sampleRate - Sample rate in Hz
+   * @param {number} flowKHz - Low frequency bound in kHz
+   * @param {number} fhighKHz - High frequency bound in kHz
+   * @param {Object} options - Configuration options
+   * @param {number} options.threshold_dB - Fast scan threshold (default: -60dB)
+   * @param {number} options.padding_ms - Padding before/after segments (default: 5ms)
+   * @param {Function} options.progressCallback - Progress callback function
+   * @returns {Promise<Array>} Array of BatCall objects from entire file
+   */
+  async processFullFile(fullAudioData, sampleRate, flowKHz, fhighKHz, options = {}) {
+    const threshold_dB = options.threshold_dB || -60; // Default scan threshold (wider than detailed detection)
+    const padding_ms = options.padding_ms || 5;
+    const progressCallback = options.progressCallback || (() => {});
+
+    console.log(`[BatCallDetector] Starting full file scan. Threshold: ${threshold_dB}dB, Padding: ${padding_ms}ms`);
+
+    // STEP 1: Fast Scan - Find all segments exceeding threshold
+    const rawSegments = this.fastScanSegments(fullAudioData, sampleRate, flowKHz, fhighKHz, threshold_dB);
+    
+    if (rawSegments.length === 0) {
+      console.log('[BatCallDetector] No signals found in fast scan.');
+      return [];
+    }
+
+    // STEP 2: Merge & Pad - Combine overlapping segments and add padding
+    const mergedSegments = this.mergeAndPadSegments(rawSegments, fullAudioData.length, sampleRate, padding_ms);
+    console.log(`[BatCallDetector] Found ${mergedSegments.length} ROI segments to analyze.`);
+
+    // STEP 3: Detailed Detection - Run detectCalls on each ROI segment
+    const allCalls = [];
+    
+    for (let i = 0; i < mergedSegments.length; i++) {
+      const seg = mergedSegments[i];
+      
+      // Extract segment audio
+      const segmentAudio = fullAudioData.slice(seg.startSample, seg.endSample);
+      
+      // Calculate absolute time offset in seconds
+      const timeOffset_s = seg.startSample / sampleRate;
+
+      // Run detailed detection
+      const segmentCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: false });
+
+      // Correct call time markers (relative -> absolute time)
+      segmentCalls.forEach(call => {
+        call.startTime_s += timeOffset_s;
+        call.endTime_s += timeOffset_s;
+        if (call.startFreqTime_s !== null) call.startFreqTime_s += timeOffset_s;
+        if (call.endFreqTime_s !== null) call.endFreqTime_s += timeOffset_s;
+        if (call.peakFreqTime_ms !== null) call.peakFreqTime_ms += (timeOffset_s * 1000);
+        
+        // Correct frequency contour times (if present)
+        if (call.frequencyContour && call.frequencyContour.length > 0) {
+          call.frequencyContour.forEach(point => {
+            point.time_s += timeOffset_s;
+          });
+        }
+        
+        allCalls.push(call);
+      });
+
+      // Report progress
+      if (i % 5 === 0 || i === mergedSegments.length - 1) {
+        progressCallback((i + 1) / mergedSegments.length);
+      }
+    }
+
+    console.log(`[BatCallDetector] Full scan complete. Detected ${allCalls.length} calls.`);
+    return allCalls;
+  }
+
+  /**
+   * Fast scan of audio to find energy levels exceeding threshold
+   * Uses larger hop size (low overlap) for speed
+   * Returns sample ranges of potential signal areas
+   * 
+   * @param {Float32Array} audioData - Audio samples
+   * @param {number} sampleRate - Sample rate
+   * @param {number} flowKHz - Low freq bound
+   * @param {number} fhighKHz - High freq bound
+   * @param {number} threshold_dB - Energy threshold
+   * @returns {Array} Array of {start, end} sample ranges
+   */
+  fastScanSegments(audioData, sampleRate, flowKHz, fhighKHz, threshold_dB) {
+    const fftSize = 512;  // Smaller FFT for speed
+    const hopSize = 256;  // 50% overlap (sufficient for scanning)
+    const segments = [];
+    
+    const freqRes = sampleRate / fftSize;
+    const minBin = Math.floor(flowKHz * 1000 / freqRes);
+    const maxBin = Math.ceil(fhighKHz * 1000 / freqRes);
+    
+    // Pre-compute Hann window
+    const window = new Float32Array(fftSize);
+    for (let i = 0; i < fftSize; i++) {
+      window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (fftSize - 1)));
+    }
+
+    let activeStart = null;
+    const numFrames = Math.floor((audioData.length - fftSize) / hopSize);
+    
+    // Time-domain RMS pre-check and energy assessment
+    const tempReal = new Float32Array(fftSize);
+    const tempImag = new Float32Array(fftSize);
+    
+    for (let f = 0; f < numFrames; f++) {
+      const startSample = f * hopSize;
+      
+      // Safety check: ensure we don't read past audio data
+      if (startSample + fftSize > audioData.length) break;
+      
+      // 1. Copy & Window
+      for (let i = 0; i < fftSize; i++) {
+        tempReal[i] = audioData[startSample + i] * window[i];
+        tempImag[i] = 0;
+      }
+      
+      // 2. Time Domain Pre-check using RMS
+      let rms = 0;
+      for (let i = 0; i < fftSize; i++) {
+        rms += tempReal[i] * tempReal[i];
+      }
+      rms = Math.sqrt(rms / fftSize);
+      const approxDb = 20 * Math.log10(rms + 1e-9);
+      
+      // If total energy is too low, skip (Parseval's theorem)
+      if (approxDb < threshold_dB - 10) {
+        if (activeStart !== null) {
+          segments.push({ start: activeStart, end: (f - 1) * hopSize + fftSize });
+          activeStart = null;
+        }
+        continue;
+      }
+
+      // 3. Potential candidate found
+      if (activeStart === null) activeStart = startSample;
+    }
+
+    // Close last segment if active
+    if (activeStart !== null) {
+      segments.push({ start: activeStart, end: audioData.length });
+    }
+    
+    return segments;
+  }
+
+  /**
+   * Merge overlapping segments and add padding
+   * 
+   * @param {Array} segments - Array of {start, end} sample ranges
+   * @param {number} totalSamples - Total audio samples
+   * @param {number} sampleRate - Sample rate
+   * @param {number} padding_ms - Padding duration in milliseconds
+   * @returns {Array} Array of merged segments {startSample, endSample}
+   */
+  mergeAndPadSegments(segments, totalSamples, sampleRate, padding_ms) {
+    if (segments.length === 0) return [];
+
+    const paddingSamples = Math.round((padding_ms / 1000) * sampleRate);
+    const sorted = segments.sort((a, b) => a.start - b.start);
+    const merged = [];
+    
+    let currentStart = Math.max(0, sorted[0].start - paddingSamples);
+    let currentEnd = Math.min(totalSamples, sorted[0].end + paddingSamples);
+
+    for (let i = 1; i < sorted.length; i++) {
+      const nextStart = Math.max(0, sorted[i].start - paddingSamples);
+      const nextEnd = Math.min(totalSamples, sorted[i].end + paddingSamples);
+
+      if (nextStart <= currentEnd) {
+        // Overlapping or adjacent, merge
+        currentEnd = Math.max(currentEnd, nextEnd);
+      } else {
+        // Separated, save current and start new
+        merged.push({ startSample: currentStart, endSample: currentEnd });
+        currentStart = nextStart;
+        currentEnd = nextEnd;
+      }
+    }
+    // Add last segment
+    merged.push({ startSample: currentStart, endSample: currentEnd });
+
+    return merged;
+  }
+
 /**
    * Detect all bat calls in audio selection
    * Returns: array of BatCall objects
@@ -3562,6 +3773,39 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       // Pure FM call: restore the anti-rebounce setting from original config
       // Re-read from parent config to get user's intended setting
       this.config.enableBackwardEndFreqScan = this.config.enableBackwardEndFreqScan !== false;
+    }
+    
+    // ============================================================
+    // [2025 NEW] Populate Frequency Contour for Peak Mode Visualization
+    // Extract smoothed peak frequency trajectory with time and power values
+    // ============================================================
+    call.frequencyContour = [];
+    
+    // Use previously calculated smoothedFrequencies (already in scope)
+    const firstFrameTimeInSeconds = timeFrames.length > 0 ? timeFrames[0] : 0;
+    
+    for (let i = 0; i < smoothedFrequencies.length; i++) {
+      if (i >= timeFrames.length || i >= spectrogram.length) break;
+      
+      const timeInSeconds = timeFrames[i];
+      const freqHz = smoothedFrequencies[i];
+      const framePower = spectrogram[i];
+      
+      // Find the power at the peak frequency bin
+      let peakBinPower = -Infinity;
+      const freqRes = freqBins.length > 1 ? (freqBins[freqBins.length - 1] - freqBins[0]) / (freqBins.length - 1) : 1;
+      const peakBinIdx = Math.round((freqHz - freqBins[0]) / freqRes);
+      
+      if (peakBinIdx >= 0 && peakBinIdx < framePower.length) {
+        peakBinPower = framePower[peakBinIdx];
+      }
+      
+      // Add contour point
+      call.frequencyContour.push({
+        time_s: timeInSeconds,
+        freq_kHz: freqHz / 1000,
+        power_dB: peakBinPower
+      });
     }
     
     // ============================================================

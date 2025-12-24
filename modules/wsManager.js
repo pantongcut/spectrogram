@@ -3,6 +3,7 @@
 import WaveSurfer from './wavesurfer.esm.js';
 import Spectrogram from './spectrogram.esm.js';
 import { SpectrogramEngine } from './spectrogram_wasm.js';
+import { defaultDetector } from './batCallDetector.js';
 
 let ws = null;
 let plugin = null;
@@ -13,6 +14,7 @@ let currentPeakMode = false;
 let currentPeakThreshold = 0.4;
 let currentSmoothMode = true;
 let analysisWasmEngine = null;
+let isDetecting = false;  // NEW: Flag to prevent concurrent detection
 
 export function initWavesurfer({
   container,
@@ -228,6 +230,58 @@ export function getCurrentWindowType() {
 
 export function setPeakMode(peakMode) {
   currentPeakMode = peakMode;
+  
+  // NEW (2025): If turning on Peak Mode, trigger full file detection
+  if (peakMode && ws) {
+    const buffer = ws.getDecodedData();
+    
+    // Prevent concurrent detection
+    if (buffer && !isDetecting) {
+      isDetecting = true;
+      
+      // Show loading indicator (optional)
+      const loadingEl = document.getElementById('loading-overlay');
+      if (loadingEl) loadingEl.style.display = 'flex';
+
+      // Get frequency parameters from plugin or defaults
+      let freqMin = 10;    // kHz
+      let freqMax = 128;   // kHz
+      
+      if (plugin && plugin.options) {
+        freqMin = (plugin.options.frequencyMin || 10000) / 1000;
+        freqMax = (plugin.options.frequencyMax || 128000) / 1000;
+      }
+
+      (async () => {
+        try {
+          // Call processFullFile for two-pass detection
+          const calls = await defaultDetector.processFullFile(
+            buffer.getChannelData(0), 
+            buffer.sampleRate, 
+            freqMin, 
+            freqMax,
+            { 
+              threshold_dB: -60,  // Fast scan threshold
+              padding_ms: 10      // Padding before/after segments (ms)
+            }
+          );
+          
+          // Pass detected calls to plugin for visualization
+          if (plugin && typeof plugin.setBatCalls === 'function') {
+            plugin.setBatCalls(calls);
+          }
+          
+          console.log(`[wsManager] Two-Pass Detection complete: ${calls.length} calls detected`);
+          
+        } catch (e) {
+          console.error('[wsManager] Full file detection failed:', e);
+        } finally {
+          isDetecting = false;
+          if (loadingEl) loadingEl.style.display = 'none';
+        }
+      })();
+    }
+  }
 }
 
 export function setPeakThreshold(peakThreshold) {
