@@ -3877,56 +3877,64 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       this.config.enableBackwardEndFreqScan = this.config.enableBackwardEndFreqScan !== false;
     }
     
-// ============================================================
+    // ============================================================
     // [2025 NEW] Populate Frequency Contour for Peak Mode Visualization
-    // 修正 V4: Guided Ridge Tracking (引導式脊線追蹤)
-    // 解決方案：不使用原始的 frameFrequencies (會抓到雜訊)，
-    // 而是從 Peak 點開始，向前/向後鎖定頻率軌跡。
+    // 修正 V5: 強制脊線追蹤 (Robust Ridge Tracking)
+    // 解決直線問題：移除內部的能量過濾，信任 Start/End 時間邊界，
+    // 強制在 StartIndex 和 EndIndex 之間畫出每一幀的頻率變化。
     // ============================================================
     call.frequencyContour = [];
     
-    // 1. 準備追蹤參數
-    // 將時間轉換為 Frame Index
-    const timePerFrame = timeFrames[1] - timeFrames[0];
+    // 1. 計算精確的 Frame 範圍
+    // 基於已計算出的 startTime_s 和 endTime_s (這些已經過防 Rebounce 處理)
+    const timePerFrame = (timeFrames.length > 1) ? (timeFrames[1] - timeFrames[0]) : 0.001;
+    
+    // 計算相對於此 Call Spectrogram 切片的索引
+    // 注意: timeFrames[0] 是此切片的起始時間
     const startIdxRel = Math.floor((call.startTime_s - timeFrames[0]) / timePerFrame);
     const endIdxRel = Math.ceil((call.endTime_s - timeFrames[0]) / timePerFrame);
     
-    // 限制範圍在 spectrogram 內
+    // 限制在 Spectrogram 陣列範圍內
     const trackStartIdx = Math.max(0, startIdxRel);
     const trackEndIdx = Math.min(spectrogram.length - 1, endIdxRel);
     
-    // 確保 Peak 在範圍內 (防呆)
+    // 確保 Peak 在追蹤範圍內
     let validPeakIdx = peakFrameIdx;
     if (validPeakIdx < trackStartIdx) validPeakIdx = trackStartIdx;
     if (validPeakIdx > trackEndIdx) validPeakIdx = trackEndIdx;
 
-    // 頻率搜尋窗口 (Hz) - 防止跳到遠處的雜訊
-    // 蝙蝠叫聲變化極快，但幀與幀之間通常不會超過 15-20kHz 的跳變
-    const SEARCH_WINDOW_HZ = 15000; 
+    // 2. 頻率追蹤參數
+    // 搜尋窗口：在上一幀頻率的 +/- 範圍內找最大值
+    // 對於陡峭的 FM Call，幀間變化可能很大，設為 20kHz 以防脫軌
+    const SEARCH_WINDOW_HZ = 20000; 
     
-    // 臨時陣列儲存追蹤結果 [frameIdx] -> freq_Hz
-    const trackedFreqs = new Float32Array(spectrogram.length).fill(0);
-    
-    // 2. 初始化錨點 (Peak Frame)
-    // 使用精確計算過的 peakFreq_Hz (來自 STEP 0)
-    const initialPeakFreq = call.peakFreq_kHz * 1000;
-    trackedFreqs[validPeakIdx] = initialPeakFreq;
+    // 用於儲存追蹤結果的臨時陣列
+    // 我們將分別向後和向前追蹤，然後合併
+    const traceResults = []; // Array of {frameIdx, freqHz, powerDb}
 
     // 3. 向後追蹤 (Backward Trace): Peak -> Start
-    let currentRefFreq = initialPeakFreq;
+    let currentRefFreq = call.peakFreq_kHz * 1000;
     
+    // 先加入 Peak 點
+    const peakBinPower = spectrogram[validPeakIdx][Math.round(currentRefFreq / freqResolution)] || call.peakPower_dB;
+    traceResults.push({
+        frameIdx: validPeakIdx,
+        freqHz: currentRefFreq,
+        powerDb: peakBinPower
+    });
+
     for (let i = validPeakIdx - 1; i >= trackStartIdx; i--) {
         const framePower = spectrogram[i];
         let bestBin = -1;
         let maxVal = -Infinity;
         
-        // 只搜尋 currentRefFreq 附近的 Bin
         const minSearchFreq = currentRefFreq - SEARCH_WINDOW_HZ;
         const maxSearchFreq = currentRefFreq + SEARCH_WINDOW_HZ;
         
         const minBin = Math.max(0, Math.floor(minSearchFreq / freqResolution));
         const maxBin = Math.min(freqBins.length - 1, Math.ceil(maxSearchFreq / freqResolution));
         
+        // 尋找局部最大值
         for (let b = minBin; b <= maxBin; b++) {
             if (framePower[b] > maxVal) {
                 maxVal = framePower[b];
@@ -3936,14 +3944,17 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         
         if (bestBin !== -1) {
             currentRefFreq = freqBins[bestBin];
-            trackedFreqs[i] = currentRefFreq;
+            // 這裡可以加入簡單的拋物線插值優化精度 (可選)
+            traceResults.unshift({ frameIdx: i, freqHz: currentRefFreq, powerDb: maxVal });
         } else {
-            trackedFreqs[i] = currentRefFreq; // 沒找到就維持上一幀 (Hold)
+            // 如果真的找不到 (極罕見)，沿用上一幀
+            traceResults.unshift({ frameIdx: i, freqHz: currentRefFreq, powerDb: -100 });
         }
     }
 
     // 4. 向前追蹤 (Forward Trace): Peak -> End
-    currentRefFreq = initialPeakFreq;
+    // 重置參考頻率為 Peak
+    currentRefFreq = call.peakFreq_kHz * 1000;
     
     for (let i = validPeakIdx + 1; i <= trackEndIdx; i++) {
         const framePower = spectrogram[i];
@@ -3965,80 +3976,46 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         
         if (bestBin !== -1) {
             currentRefFreq = freqBins[bestBin];
-            trackedFreqs[i] = currentRefFreq;
+            traceResults.push({ frameIdx: i, freqHz: currentRefFreq, powerDb: maxVal });
         } else {
-            trackedFreqs[i] = currentRefFreq;
+            traceResults.push({ frameIdx: i, freqHz: currentRefFreq, powerDb: -100 });
         }
     }
 
     // 5. 平滑化與輸出
-    // 提取有效片段進行平滑
-    const rawSegment = [];
-    const timeSegment = [];
-    const powerSegment = [];
+    // 提取頻率陣列進行 Savitzky-Golay 平滑
+    const rawFreqs = traceResults.map(p => p.freqHz);
     
-    for (let i = trackStartIdx; i <= trackEndIdx; i++) {
-        if (trackedFreqs[i] > 0) { // 只有被追蹤到的幀
-            rawSegment.push(trackedFreqs[i]);
-            timeSegment.push(timeFrames[i]);
-            
-            // 獲取該頻率的 Power
-            const binIdx = Math.round(trackedFreqs[i] / freqResolution);
-            const power = (binIdx >= 0 && binIdx < spectrogram[i].length) ? spectrogram[i][binIdx] : -100;
-            powerSegment.push(power);
-        }
-    }
+    // 只有當點數足夠時才平滑，否則用原始值
+    const smoothedFreqs = (rawFreqs.length >= 5) 
+        ? this.savitzkyGolay(rawFreqs, 5, 2) 
+        : rawFreqs;
     
-    // 應用 Savitzky-Golay 平滑
-    const smoothedSegment = this.savitzkyGolay(rawSegment, 5, 2);
-    
-    // 6. 填充 frequencyContour
-    // 額外過濾: 確保頭尾連接到計算出的 Start/End Freq，避免平滑造成的邊緣發散
-    const noiseFloor_dB = call.noiseFloor_dB !== undefined ? call.noiseFloor_dB : -80;
-    const finalDisplayThreshold = noiseFloor_dB + 1; // 寬鬆顯示閾值
-
-    for (let k = 0; k < smoothedSegment.length; k++) {
-        // [Visulization Optimization]
-        // 強制對齊：如果是第一幀，傾向於使用計算出的 startFreq (如果差異不大)
-        // 如果是最後一幀，傾向於使用 endFreq
-        let displayFreq = smoothedSegment[k];
+    // 6. 構建最終 Contour
+    // 不再進行能量過濾，信任 Start/End 範圍
+    for (let k = 0; k < traceResults.length; k++) {
+        const point = traceResults[k];
+        const smoothFreq = smoothedFreqs[k];
         
-        // 簡單的能量過濾，防止畫出無聲區段
-        if (powerSegment[k] > finalDisplayThreshold) {
-             call.frequencyContour.push({
-                time_s: timeSegment[k],
-                freq_kHz: displayFreq / 1000,
-                power_dB: powerSegment[k]
+        // 確保頻率不為負
+        if (smoothFreq > 0) {
+            call.frequencyContour.push({
+                time_s: timeFrames[point.frameIdx],
+                freq_kHz: smoothFreq / 1000,
+                power_dB: point.powerDb
             });
         }
     }
     
-    // [Fallback] 如果點太少，手動加入 Start/Peak/End 三點以確保至少有一條線
-    if (call.frequencyContour.length < 2) {
-        call.frequencyContour = [
-            { time_s: call.startTime_s, freq_kHz: call.startFreq_kHz, power_dB: peakPower_dB },
-            { time_s: timeFrames[validPeakIdx], freq_kHz: call.peakFreq_kHz, power_dB: peakPower_dB },
-            { time_s: call.endTime_s, freq_kHz: call.endFreq_kHz, power_dB: peakPower_dB }
-        ].sort((a,b) => a.time_s - b.time_s);
+    // [Safety Check] 確保至少有頭尾兩點，防止畫圖出錯
+    if (call.frequencyContour.length === 0) {
+         call.frequencyContour.push(
+             { time_s: call.startTime_s, freq_kHz: call.startFreq_kHz, power_dB: call.peakPower_dB },
+             { time_s: call.endTime_s, freq_kHz: call.endFreq_kHz, power_dB: call.endPower_dB }
+         );
     }
-    
-    // [Validation] 如果過濾後點太少 (< 3)，則回退到不過濾 (顯示原始偵測結果)
-    // 這保證了即使是很弱的信號也能被畫出來，而不是消失
-    if (call.frequencyContour.length < 3) {
-        call.frequencyContour = []; // Clear
-        // Fallback loop: Add all points within time range regardless of power
-        for (let i = 0; i < smoothedFrequencies.length; i++) {
-            if (i >= timeFrames.length) break;
-            const t = timeFrames[i];
-            if (t >= startTimeS && t <= endTimeS) {
-                 call.frequencyContour.push({
-                    time_s: t,
-                    freq_kHz: smoothedFrequencies[i] / 1000,
-                    power_dB: -100 // Dummy power
-                 });
-            }
-        }
-    }
+
+    // ... (rest of the method: Time Expansion correction)
     
     // ============================================================
     // [2025] Apply Time Expansion Correction to Frequency Parameters
