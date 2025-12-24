@@ -1012,13 +1012,10 @@ destroy() {
     }
 
     // [NEW 2025] Set detected bat calls for Peak Mode visualization
-    setBatCalls(calls) {
-        this.detectedBatCalls = calls;
-        console.log(`[Spectrogram] Received ${calls ? calls.length : 0} bat calls for visualization.`);
-        if (this.options.peakMode && this.lastRenderData) {
-            this.drawSpectrogram(this.lastRenderData);
-        }
-    }
+    // [REMOVED 2025] setBatCalls method
+    // Previously received detected bat calls from batCallDetector
+    // Now replaced by event system: UI layer listens to 'bat-calls-detected' event
+    // and creates Selection Boxes directly through frequencyHover.js
 
     drawSpectrogram(t) {
         // [FIX] Validate input data before drawing
@@ -1152,10 +1149,10 @@ destroy() {
                     }
                 }
                 
-                // [NEW 2025] Draw Smart Peak Contour (Frequency Contour from Detection)
-                if (this.options && this.options.peakMode && this.detectedBatCalls && this.detectedBatCalls.length > 0 && channelIdx === 0) {
-                    this.drawSmartPeakOverlay(canvasCtx, canvasWidth, drawY, drawH, this.detectedBatCalls);
-                }
+                // [REMOVED 2025] Draw Smart Peak Contour
+                // Previously called this.drawSmartPeakOverlay(canvasCtx, ...)
+                // Now replaced by event system sending detected calls to UI layer
+                // UI creates Selection Boxes directly through frequencyHover.addAutoSelections()
             }));
         }
         
@@ -1165,58 +1162,15 @@ destroy() {
         this.emit("ready");
     }
 
-    // [NEW 2025] Draw smooth frequency contour lines from detected bat calls
-    drawSmartPeakOverlay(ctx, canvasWidth, drawY, drawH, calls) {
-        if (!calls || calls.length === 0) return;
-        
-        const viewDuration = this.wavesurfer ? this.wavesurfer.getDuration() : 1;
-        const viewMinHz = this.frequencyMin || 0;
-        const viewMaxHz = this.frequencyMax || 128000;
-        const pixelsPerSecond = canvasWidth / viewDuration;
+    // [REMOVED 2025] drawSmartPeakOverlay method
+    // This method previously drew frequency contours on the spectrogram canvas
+    // Now replaced by event system architecture:
+    // 1. batCallDetector.processFullFile() detects calls
+    // 2. wsManager.setPeakMode() dispatches 'bat-calls-detected' event
+    // 3. main.js listens and calls frequencyHover.addAutoSelections()
+    // 4. frequencyHover creates Selection Boxes for user interaction
+    // This separation enables better performance and UI responsiveness
 
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.lineWidth = 2.5; // Line width for contour
-
-        calls.forEach(call => {
-            // Color based on quality rating
-            let color = "rgba(0, 255, 0, 0.9)"; // Good/Excellent = Green
-            if (call.quality === 'Normal') color = "rgba(255, 255, 0, 0.9)"; // Yellow
-            else if (call.quality === 'Poor' || call.quality === 'Very Poor') color = "rgba(255, 100, 0, 0.9)"; // Orange/Red
-            
-            ctx.strokeStyle = color;
-            ctx.beginPath();
-
-            let hasPoints = false;
-
-            // Draw contour from frequency contour array
-            if (call.frequencyContour && call.frequencyContour.length > 0) {
-                for (let i = 0; i < call.frequencyContour.length; i++) {
-                    const point = call.frequencyContour[i];
-                    const freqHz = point.freq_kHz * 1000;
-
-                    // Only draw points within view range
-                    if (freqHz >= viewMinHz && freqHz <= viewMaxHz) {
-                        // Calculate coordinates
-                        const x = point.time_s * pixelsPerSecond;
-                        // Y axis: 0 at top, so normalize frequency
-                        const yPct = (freqHz - viewMinHz) / (viewMaxHz - viewMinHz);
-                        const y = drawY + drawH * (1 - yPct);
-
-                        if (!hasPoints) {
-                            ctx.moveTo(x, y);
-                            hasPoints = true;
-                        } else {
-                            ctx.lineTo(x, y);
-                        }
-                    }
-                }
-            }
-            
-            if (hasPoints) ctx.stroke();
-        });
-    }
-    
     createFilterBank(t, e, s, r) {
                 // cache by scale name + params to avoid rebuilding
                 // Include frequency range in cache key for optimization

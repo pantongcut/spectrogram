@@ -1199,6 +1199,75 @@ function updateTooltipValues(sel, left, top, width, height) {
     hoveredSelection = null;
   }
 
+  /**
+   * [NEW 2025] Auto-create Selection Boxes from detected BatCall objects
+   * Called by event system when bat calls are detected
+   * @param {Array} calls - Array of BatCall objects from batCallDetector
+   */
+  function addAutoSelections(calls) {
+    // 1. Clear existing selections (optional - clear previous detections)
+    clearSelections();
+
+    if (!calls || calls.length === 0) return;
+
+    const actualWidth = getDuration() * getZoomLevel();
+    const freqRange = maxFrequency - minFrequency;
+
+    calls.forEach(call => {
+      // 2. Calculate pixel coordinates from call parameters
+      // Time -> X coordinate
+      const startTime = call.startTime_s;
+      const endTime = call.endTime_s;
+      const left = (startTime / getDuration()) * actualWidth;
+      const width = ((endTime - startTime) / getDuration()) * actualWidth;
+
+      // Frequency -> Y coordinate (inverted, top = max freq)
+      // Use lowFreq_kHz and highFreq_kHz as frequency boundaries
+      const flow = call.lowFreq_kHz; // kHz
+      const fhigh = call.highFreq_kHz; // kHz
+      
+      // Y-axis is inverted: 0 at top = Max Frequency, bottom = Min Frequency
+      // top corresponds to fhigh, bottom corresponds to flow
+      const top = (1 - (fhigh - minFrequency) / freqRange) * spectrogramHeight;
+      const height = ((fhigh - flow) / freqRange) * spectrogramHeight;
+
+      // 3. Create DOM element for selection rectangle
+      const selectionRect = document.createElement('div');
+      selectionRect.className = 'selection-rect';
+      selectionRect.style.left = `${left}px`;
+      selectionRect.style.top = `${top}px`;
+      selectionRect.style.width = `${width}px`;
+      selectionRect.style.height = `${height}px`;
+      
+      // Add to viewer
+      viewer.appendChild(selectionRect);
+
+      // 4. Create selection object with call data embedded
+      const Bandwidth = fhigh - flow;
+      const Duration = endTime - startTime;
+
+      // Use existing createTooltip function to set up selection
+      const selObj = createTooltip(
+        left, top, width, height, 
+        fhigh, flow, Bandwidth, Duration, 
+        selectionRect, startTime, endTime
+      );
+
+      // [CRITICAL] Directly inject the detected BatCall object
+      // This enables Tooltip to display all detailed parameters without recalculation
+      selObj.data.batCall = call;
+      selObj.data.peakFreq = call.peakFreq_kHz; // Backup if needed
+
+      // Immediately update tooltip content with call data
+      if (selObj.tooltip) {
+        updateTooltipValues(selObj, 0, 0, 0, 0);
+      }
+      
+      console.log(`[FrequencyHover] Auto-created selection for call at ${startTime.toFixed(3)}s, freq: ${fhigh.toFixed(2)}-${flow.toFixed(2)} kHz`);
+    });
+  }
+
+
   function enableDrag(element) {
     let offsetX, offsetY, isDragging = false;
     element.addEventListener('mousedown', (e) => {
@@ -1374,6 +1443,7 @@ function updateTooltipValues(sel, left, top, width, height) {
   return {
     updateSelections,
     clearSelections,
+    addAutoSelections,  // [NEW 2025] Export for event system
     setFrequencyRange: (min, max) => {
       minFrequency = min;
       maxFrequency = max;

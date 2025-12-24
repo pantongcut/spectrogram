@@ -276,12 +276,18 @@ export function setPeakMode(peakMode) {
             }
           );
           
-          // Pass detected calls to plugin for visualization
-          if (plugin && typeof plugin.setBatCalls === 'function') {
-            plugin.setBatCalls(calls);
-          }
-          
           console.log(`[wsManager] Two-Pass Detection complete: ${calls.length} calls detected`);
+          
+          // [MODIFIED 2025] Event-based system: dispatch detected calls to UI layer
+          // Instead of calling plugin.setBatCalls(), emit a custom event
+          // This allows frequencyHover.js to create Selection Boxes directly
+          document.dispatchEvent(new CustomEvent('bat-calls-detected', { 
+            detail: calls,
+            bubbles: true,
+            cancelable: true
+          }));
+          
+          console.log(`[wsManager] ✅ Dispatched 'bat-calls-detected' event with ${calls.length} calls`);
           
         } catch (e) {
           console.error('[wsManager] Full file detection failed:', e);

@@ -794,6 +794,20 @@ const zoomControl = initZoomControls(
   }
 );
 
+// [NEW 2025] Event Listener: Auto-create Selection Boxes from detected bat calls
+// When wsManager.setPeakMode() dispatches 'bat-calls-detected' event,
+// this listener calls frequencyHover.addAutoSelections() to create interactive UI elements
+document.addEventListener('bat-calls-detected', (e) => {
+  const calls = e.detail;
+  if (freqHoverControl && typeof freqHoverControl.addAutoSelections === 'function') {
+    console.log(`[Main] Received 'bat-calls-detected' event with ${calls.length} calls`);
+    console.log(`[Main] Auto-creating Selection Boxes...`);
+    freqHoverControl.addAutoSelections(calls);
+  } else {
+    console.warn('[Main] freqHoverControl not initialized or addAutoSelections not available');
+  }
+});
+
 function updateProgressLine(time) {
   if (isDraggingProgress) return;
   const t = (manualSeekTime !== null && !getWavesurfer().isPlaying()) ? manualSeekTime : time;
