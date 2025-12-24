@@ -3879,48 +3879,47 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     
     // ============================================================
     // [2025 NEW] Populate Frequency Contour for Peak Mode Visualization
-    // 修正 V5: 強制脊線追蹤 (Robust Ridge Tracking)
-    // 解決直線問題：移除內部的能量過濾，信任 Start/End 時間邊界，
-    // 強制在 StartIndex 和 EndIndex 之間畫出每一幀的頻率變化。
+    // 修正 V6: Directional Ridge Tracking (定向脊線追蹤)
+    // 策略：利用 FM Call 的物理特性 (頻率隨時間下降) 來收窄搜索範圍。
+    // 1. Backward (Peak->Start): 只搜尋 [Current - 2k, Current + 15k]。防止掉入低頻雜訊。
+    // 2. Forward (Peak->End): 只搜尋 [Current - 15k, Current + 2k]。防止跳入高頻回音。
     // ============================================================
     call.frequencyContour = [];
     
-    // 1. 計算精確的 Frame 範圍
-    // 基於已計算出的 startTime_s 和 endTime_s (這些已經過防 Rebounce 處理)
+    // 1. 計算 Frame 範圍
     const timePerFrame = (timeFrames.length > 1) ? (timeFrames[1] - timeFrames[0]) : 0.001;
-    
-    // 計算相對於此 Call Spectrogram 切片的索引
-    // 注意: timeFrames[0] 是此切片的起始時間
     const startIdxRel = Math.floor((call.startTime_s - timeFrames[0]) / timePerFrame);
     const endIdxRel = Math.ceil((call.endTime_s - timeFrames[0]) / timePerFrame);
     
-    // 限制在 Spectrogram 陣列範圍內
     const trackStartIdx = Math.max(0, startIdxRel);
     const trackEndIdx = Math.min(spectrogram.length - 1, endIdxRel);
     
-    // 確保 Peak 在追蹤範圍內
     let validPeakIdx = peakFrameIdx;
     if (validPeakIdx < trackStartIdx) validPeakIdx = trackStartIdx;
     if (validPeakIdx > trackEndIdx) validPeakIdx = trackEndIdx;
 
-    // 2. 頻率追蹤參數
-    // 搜尋窗口：在上一幀頻率的 +/- 範圍內找最大值
-    // 對於陡峭的 FM Call，幀間變化可能很大，設為 20kHz 以防脫軌
-    const SEARCH_WINDOW_HZ = 20000; 
+    // 2. 定義定向搜尋參數 (Hz)
+    // MAJOR_JUMP: 允許 FM 掃頻的主要方向跳變幅度 (例如 15kHz)
+    // MINOR_JUMP: 允許反方向的微小抖動幅度 (例如 2kHz，適應 QCF 或測量誤差)
+    const MAJOR_JUMP_HZ = 15000; 
+    const MINOR_JUMP_HZ = 2000;  
     
-    // 用於儲存追蹤結果的臨時陣列
-    // 我們將分別向後和向前追蹤，然後合併
     const traceResults = []; // Array of {frameIdx, freqHz, powerDb}
 
     // 3. 向後追蹤 (Backward Trace): Peak -> Start
+    // 預期：頻率應該上升 (Time--, Freq++)
+    // 限制：嚴格限制向低頻搜索，防止抓到低頻雜訊
     let currentRefFreq = call.peakFreq_kHz * 1000;
     
-    // 先加入 Peak 點
-    const peakBinPower = spectrogram[validPeakIdx][Math.round(currentRefFreq / freqResolution)] || call.peakPower_dB;
+    // 加入 Peak 點
+    const peakBinIdx2 = Math.round(currentRefFreq / freqResolution);
+    const peakPower = (peakBinIdx2 >= 0 && peakBinIdx2 < spectrogram[validPeakIdx].length) ? 
+                      spectrogram[validPeakIdx][peakBinIdx2] : call.peakPower_dB;
+                      
     traceResults.push({
         frameIdx: validPeakIdx,
         freqHz: currentRefFreq,
-        powerDb: peakBinPower
+        powerDb: peakPower
     });
 
     for (let i = validPeakIdx - 1; i >= trackStartIdx; i--) {
@@ -3928,13 +3927,15 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         let bestBin = -1;
         let maxVal = -Infinity;
         
-        const minSearchFreq = currentRefFreq - SEARCH_WINDOW_HZ;
-        const maxSearchFreq = currentRefFreq + SEARCH_WINDOW_HZ;
+        // [Logic] Backward Search Window
+        // Min: 不允許低於當前太多 (防止掉入 Noise) -> Current - MINOR
+        // Max: 允許高於當前很多 (追蹤 FM Start) -> Current + MAJOR
+        const minSearchFreq = currentRefFreq - MINOR_JUMP_HZ;
+        const maxSearchFreq = currentRefFreq + MAJOR_JUMP_HZ;
         
         const minBin = Math.max(0, Math.floor(minSearchFreq / freqResolution));
         const maxBin = Math.min(freqBins.length - 1, Math.ceil(maxSearchFreq / freqResolution));
         
-        // 尋找局部最大值
         for (let b = minBin; b <= maxBin; b++) {
             if (framePower[b] > maxVal) {
                 maxVal = framePower[b];
@@ -3944,16 +3945,26 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         
         if (bestBin !== -1) {
             currentRefFreq = freqBins[bestBin];
-            // 這裡可以加入簡單的拋物線插值優化精度 (可選)
+            // 簡單插值優化 (Parabolic Interpolation)
+            if (bestBin > 0 && bestBin < framePower.length - 1) {
+                const y1 = framePower[bestBin-1];
+                const y2 = framePower[bestBin];
+                const y3 = framePower[bestBin+1];
+                const p = (y1 - y3) / (2 * (y1 - 2*y2 + y3));
+                if (Math.abs(p) <= 0.5) {
+                    currentRefFreq += p * freqResolution;
+                }
+            }
             traceResults.unshift({ frameIdx: i, freqHz: currentRefFreq, powerDb: maxVal });
         } else {
-            // 如果真的找不到 (極罕見)，沿用上一幀
+            // 沒找到信號 (極罕見)，保持上一幀頻率
             traceResults.unshift({ frameIdx: i, freqHz: currentRefFreq, powerDb: -100 });
         }
     }
 
     // 4. 向前追蹤 (Forward Trace): Peak -> End
-    // 重置參考頻率為 Peak
+    // 預期：頻率應該下降 (Time++, Freq--)
+    // 限制：嚴格限制向高頻搜索，防止抓到 Rebounce
     currentRefFreq = call.peakFreq_kHz * 1000;
     
     for (let i = validPeakIdx + 1; i <= trackEndIdx; i++) {
@@ -3961,8 +3972,11 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         let bestBin = -1;
         let maxVal = -Infinity;
         
-        const minSearchFreq = currentRefFreq - SEARCH_WINDOW_HZ;
-        const maxSearchFreq = currentRefFreq + SEARCH_WINDOW_HZ;
+        // [Logic] Forward Search Window
+        // Min: 允許低於當前很多 (追蹤 FM Sweep/Tail) -> Current - MAJOR
+        // Max: 不允許高於當前太多 (防止跳到 Rebounce) -> Current + MINOR
+        const minSearchFreq = currentRefFreq - MAJOR_JUMP_HZ;
+        const maxSearchFreq = currentRefFreq + MINOR_JUMP_HZ;
         
         const minBin = Math.max(0, Math.floor(minSearchFreq / freqResolution));
         const maxBin = Math.min(freqBins.length - 1, Math.ceil(maxSearchFreq / freqResolution));
@@ -3976,6 +3990,16 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         
         if (bestBin !== -1) {
             currentRefFreq = freqBins[bestBin];
+            // 簡單插值優化
+            if (bestBin > 0 && bestBin < framePower.length - 1) {
+                const y1 = framePower[bestBin-1];
+                const y2 = framePower[bestBin];
+                const y3 = framePower[bestBin+1];
+                const p = (y1 - y3) / (2 * (y1 - 2*y2 + y3));
+                if (Math.abs(p) <= 0.5) {
+                    currentRefFreq += p * freqResolution;
+                }
+            }
             traceResults.push({ frameIdx: i, freqHz: currentRefFreq, powerDb: maxVal });
         } else {
             traceResults.push({ frameIdx: i, freqHz: currentRefFreq, powerDb: -100 });
@@ -3983,21 +4007,21 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     }
 
     // 5. 平滑化與輸出
-    // 提取頻率陣列進行 Savitzky-Golay 平滑
+    // 提取頻率陣列
     const rawFreqs = traceResults.map(p => p.freqHz);
     
-    // 只有當點數足夠時才平滑，否則用原始值
+    // 應用 Savitzky-Golay 平滑
     const smoothedFreqs = (rawFreqs.length >= 5) 
         ? this.savitzkyGolay(rawFreqs, 5, 2) 
         : rawFreqs;
     
     // 6. 構建最終 Contour
-    // 不再進行能量過濾，信任 Start/End 範圍
+    // 我們信任 Directional Tracking 的結果，不再做能量過濾
+    // 因為 Directional Constraint 已經保證了不會抓到遠處的強雜訊
     for (let k = 0; k < traceResults.length; k++) {
         const point = traceResults[k];
         const smoothFreq = smoothedFreqs[k];
         
-        // 確保頻率不為負
         if (smoothFreq > 0) {
             call.frequencyContour.push({
                 time_s: timeFrames[point.frameIdx],
@@ -4007,15 +4031,13 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         }
     }
     
-    // [Safety Check] 確保至少有頭尾兩點，防止畫圖出錯
-    if (call.frequencyContour.length === 0) {
+    // [Safety] 至少兩點
+    if (call.frequencyContour.length < 2) {
          call.frequencyContour.push(
              { time_s: call.startTime_s, freq_kHz: call.startFreq_kHz, power_dB: call.peakPower_dB },
              { time_s: call.endTime_s, freq_kHz: call.endFreq_kHz, power_dB: call.endPower_dB }
          );
     }
-
-    // ... (rest of the method: Time Expansion correction)
     
     // ============================================================
     // [2025] Apply Time Expansion Correction to Frequency Parameters
