@@ -1446,10 +1446,34 @@ function updateTooltipValues(sel, left, top, width, height) {
     }
   }
 
+  /**
+   * [NEW 2025] 導出所有 Selection Box 對應的 Bat Call 數據
+   * 用於導出到 Excel 或其他格式
+   */
+  function getBatCalls() {
+    const sortedSelections = selections.sort((a, b) => a.data.startTime - b.data.startTime);
+    return sortedSelections.map(sel => {
+      if (sel.data.batCall) {
+        return sel.data.batCall;
+      }
+      // Fallback: 從 selection 數據構建基礎 call 對象
+      return {
+        startTime_s: sel.data.startTime,
+        endTime_s: sel.data.endTime,
+        lowFreq_kHz: sel.data.Flow,
+        highFreq_kHz: sel.data.Fhigh,
+        peakFreq_kHz: sel.data.peakFreq || null,
+        duration_ms: (sel.data.endTime - sel.data.startTime) * 1000,
+        bandwidth_kHz: sel.data.Fhigh - sel.data.Flow
+      };
+    });
+  }
+
   return {
     updateSelections,
     clearSelections,
     addAutoSelections,  // [NEW 2025] Export for event system
+    getBatCalls,        // [NEW 2025] Export for Excel generation
     setFrequencyRange: (min, max) => {
       minFrequency = min;
       maxFrequency = max;

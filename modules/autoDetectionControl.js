@@ -12,6 +12,7 @@ export function initAutoDetectionControl() {
     const slider = document.getElementById('autoDetectThresholdSlider');
     const valDisplay = document.getElementById('autoDetectThresholdVal');
     const runBtn = document.getElementById('runAutoDetectBtn');
+    const exportBtn = document.getElementById('exportCallsBtn');
     
     if (!autoDetectBtn || !toolBar) return;
     
@@ -71,7 +72,17 @@ export function initAutoDetectionControl() {
         // autoDetectBtn.classList.remove('toolbar-open');
       });
     }
+
+    // [NEW] 4. Export Calls Button
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        console.log('[AutoDetect] Requesting export of detected calls...');
+        // 發送自定義事件，通知主控制器導出偵測結果
+        document.dispatchEvent(new CustomEvent('request-export-calls'));
+      });
+    }
   }).catch(err => {
     console.error('[autoDetectionControl] Failed to import wsManager:', err);
   });
 }
+

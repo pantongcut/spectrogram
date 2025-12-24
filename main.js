@@ -28,7 +28,7 @@ import { initFrequencyHover } from './modules/frequencyHover.js';
 import { getColorMapDefaults } from './modules/spectrogram.esm.js';
 import { cropWavBlob } from './modules/cropAudio.js';
 import { drawTimeAxis, drawFrequencyGrid } from './modules/axisRenderer.js';
-import { initExportCsv } from './modules/exportCsv.js';
+import { initExport, exportBatCallsToXlsx } from './modules/export.js';
 import { initTrashProgram } from './modules/trashProgram.js';
 import { initDragDropLoader } from './modules/dragDropLoader.js';
 import { initMapPopup } from './modules/mapPopup.js';
@@ -1528,7 +1528,7 @@ const isOpen = toolBar.classList.toggle('open');
 document.body.classList.toggle('settings-open', isOpen);
 });
 
-initExportCsv();
+initExport({ buttonId: 'exportBtn' });
 initTrashProgram();
 initMapPopup();
 
@@ -1588,6 +1588,29 @@ initPeakControl({
 
 // [NEW 2025] 初始化 Auto Detection Control
 initAutoDetectionControl();
+
+// [NEW 2025] 監聽導出請求事件 (來自 Auto Detection Toolbar 的 Export 按鈕)
+document.addEventListener('request-export-calls', () => {
+  if (freqHoverControl && typeof freqHoverControl.getBatCalls === 'function') {
+    const calls = freqHoverControl.getBatCalls();
+    
+    if (calls.length === 0) {
+      alert("No detected calls to export.");
+      return;
+    }
+
+    console.log(`[Main] Exporting ${calls.length} calls to Excel...`);
+    
+    const baseName = window.__currentFileName ? window.__currentFileName.replace(/\.[^/.]+$/, "") : "bat_calls";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const filename = `${baseName}_analysis_${timestamp}.xlsx`;
+
+    exportBatCallsToXlsx(calls, filename);
+    
+  } else {
+    console.warn('[Main] Cannot export: freqHoverControl not ready or getBatCalls not available');
+  }
+});
 
 autoIdControl = initAutoIdPanel({
   spectrogramHeight,

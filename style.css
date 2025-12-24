@@ -832,6 +832,28 @@ input[type="range"]#peakThresholdSlider {
   font-size: 14px;
 }
 
+#auto-detect-tool-bar .secondary-btn {
+  padding: 6px 12px;
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.3s;
+}
+
+#auto-detect-tool-bar .secondary-btn:hover {
+  background-color: #0b7dda;
+}
+
+#auto-detect-tool-bar .secondary-btn i {
+  font-size: 14px;
+}
+
 /* 當 tool-bar 和 auto-detect-tool-bar 都開啟時 */
 #tool-bar.open ~ #auto-detect-tool-bar.open {
   top: calc(100% + 115px);
