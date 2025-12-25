@@ -2217,12 +2217,8 @@ export class BatCallDetector {
       }
       
       // The Mode represents the center of the noise floor distribution.
-      // We add a small margin (e.g., +2.0 dB) to capture the upper edge of the noise floor.
       // This makes it a "Robust" floor for comparison.
-      zoneFloors[key] = modeBin + 2.0;
-      
-      // Optional: Debug log
-      // console.log(`[NoiseZone ${key}-${parseInt(key)+10}kHz] Mode: ${modeBin} dB, Threshold: ${zoneFloors[key]} dB (Count: ${maxCount})`);
+      zoneFloors[key] = modeBin;
     });
     
     return zoneFloors;
