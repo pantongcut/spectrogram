@@ -1829,9 +1829,9 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       // 改為與 Manual Mode Step 2 完全相同的邏輯：
       // 掃描每一幀 -> 找該幀最高頻 -> 與全局最高頻比較
       // ============================================================
-      let highFreq_Hz = null; // Init to null to indicate not found yet
+      let highFreq_Hz = null;
       let highFreqBinIdx = 0;
-      let highFreqFrameIdx = 0; // Default
+      let highFreqFrameIdx = 0; 
       let foundBin = false;
       
       // 遍歷搜尋範圍內的每一幀
@@ -1841,18 +1841,19 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         // 在這一幀中，從高頻往低頻掃描 (Reverse order)
         for (let b = numBins - 1; b >= 0; b--) {
           if (framePower[b] > highFreqThreshold_dB) {
-            // 找到該幀的最高頻 Bin
-            let thisFrameFreq_Hz = freqBins[b];
             
-            // 執行線性插值 (使用當前幀的 power，保證與 Manual Mode 一致)
+            // [STEP 1] 先宣告並計算候選頻率 (必須在諧波檢查之前！)
+            let candidateFreq_Hz = freqBins[b];
+            
+            // 執行線性插值預算
             if (b < numBins - 1) {
               const thisPower = framePower[b];
-              const nextPower = framePower[b + 1];
+              const nextPower = framePower[b + 1]; // next is higher freq bin
               
               if (nextPower < highFreqThreshold_dB && thisPower > highFreqThreshold_dB) {
                 const powerRatio = (thisPower - highFreqThreshold_dB) / (thisPower - nextPower);
                 const freqDiff = freqBins[b + 1] - freqBins[b];
-                thisFrameFreq_Hz = freqBins[b] + powerRatio * freqDiff;
+                candidateFreq_Hz = freqBins[b] + powerRatio * freqDiff;
               }
             }
 
@@ -1871,10 +1872,11 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                 }
             }
 
-            // --- 如果通過諧波檢查，則視為有效訊號 ---
-            // 比較：這是目前為止找到的最高頻率嗎？
-            if (highFreq_Hz === null || thisFrameFreq_Hz > highFreq_Hz) {
-              highFreq_Hz = thisFrameFreq_Hz;
+            // [STEP 3] 比較與更新
+            // 如果通過諧波檢查，則視為有效訊號，進行比較
+            // Logic: We want the ABSOLUTE HIGHEST frequency across all frames
+            if (highFreq_Hz === null || candidateFreq_Hz > highFreq_Hz) {
+              highFreq_Hz = candidateFreq_Hz;
               highFreqBinIdx = b;
               highFreqFrameIdx = f;
               foundBin = true;
