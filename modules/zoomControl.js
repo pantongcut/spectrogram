@@ -235,67 +235,82 @@ function applyZoom() {
     if (!e.ctrlKey) return; 
     e.preventDefault();
 
-    // 1. [錨點計算] ... (保持不變)
+    // 1. [錨點計算]
     const viewportWidth = wrapperElement.clientWidth;
     const currentScrollLeft = wrapperElement.scrollLeft;
     const centerPx = currentScrollLeft + (viewportWidth / 2);
     const centerTime = centerPx / zoomLevel;
 
-    // 2. 計算新的 Zoom Level ... (保持不變)
+    // 2. 計算新的 Zoom Level
     computeMinZoomLevel();
     const maxZoom = computeMaxZoomLevel();
+    
     const delta = -e.deltaY;
     const scaleFactor = 1 + (delta * 0.001); 
+    
     let newZoomLevel = zoomLevel * scaleFactor;
     newZoomLevel = Math.min(Math.max(newZoomLevel, minZoomLevel), maxZoom);
 
+    // 避免無意義的計算
     if (Math.abs(newZoomLevel - zoomLevel) < 0.01) return;
 
+    // 更新全域變數
     zoomLevel = newZoomLevel;
     
+    // ============================================================
     // 3. 設定新的寬度 (鋪路)
-    const newTotalWidth = duration() * zoomLevel;
-    const newTotalWidthPx = `${newTotalWidth}px`;
+    // [修改重點] 判斷是否為 Min Zoom，如果是則強制 100% 以消除 Scrollbar
+    // ============================================================
+    const isAtMin = Math.abs(zoomLevel - minZoomLevel) < 0.1; // 寬鬆判定
     
     _injectShadowDomStyles();
 
+    // 暫時關閉平滑滾動
     const originalScrollBehavior = wrapperElement.style.scrollBehavior;
     wrapperElement.style.scrollBehavior = 'auto';
 
-    // 設定 DOM 寬度 (這是視覺拉伸的關鍵)
-    container.style.width = newTotalWidthPx;
-    const freqGrid = document.getElementById('freq-grid');
-    if (freqGrid) freqGrid.style.width = newTotalWidthPx;
+    if (isAtMin) {
+        // [修正] 到達最小縮放時，強制使用 100%
+        container.style.width = '100%';
+        const freqGrid = document.getElementById('freq-grid');
+        if (freqGrid) freqGrid.style.width = '100%';
+    } else {
+        // [原本邏輯] 正常縮放使用像素
+        const newTotalWidth = duration() * zoomLevel;
+        const newTotalWidthPx = `${newTotalWidth}px`;
 
-    // [NEW] ★★★ 這裡加入即時軸線更新 ★★★
-    // 使用 requestAnimationFrame 確保在下一幀渲染前執行，保持流暢度
+        container.style.width = newTotalWidthPx;
+        const freqGrid = document.getElementById('freq-grid');
+        if (freqGrid) freqGrid.style.width = newTotalWidthPx;
+    }
+
+    // [上一題建議的優化] 即時更新軸線
     requestAnimationFrame(() => {
-        // applyZoomCallback 對應 main.js 的 renderAxes()
-        // 因為 zoomLevel 已經更新，container.style.width 也變了
-        // renderAxes 會抓到新的寬度與 ZoomLevel，畫出正確的刻度
         applyZoomCallback();
-        
-        // 如果有 onAfterZoom (例如更新 Settings 文字)，也可以視需求在這裡呼叫
-        // 但通常 Settings 文字不用那麼即時，保留在下面 timeout 即可
     });
 
+    // ============================================================
     // 4. [智能捲動] ... (保持不變)
+    // ============================================================
     const targetCenterPx = centerTime * newZoomLevel;
     let targetScrollLeft = targetCenterPx - (viewportWidth / 2);
     targetScrollLeft = Math.max(0, targetScrollLeft);
 
     let attempts = 0;
+    const finalWidthForReadyCheck = duration() * zoomLevel; // 用於判斷 scrollWidth 的參考值
+
     function applyScrollWhenReady() {
         const currentScrollWidth = wrapperElement.scrollWidth;
-        // 這裡的容錯判定可能需要因為即時拉伸而稍微放寬
-        const isReady = currentScrollWidth >= newTotalWidth - 100 || currentScrollWidth > targetScrollLeft + viewportWidth;
+        
+        // 判斷是否準備好 (容許誤差)
+        const isReady = currentScrollWidth >= finalWidthForReadyCheck - 100 || currentScrollWidth > targetScrollLeft + viewportWidth;
 
         if (isReady) {
             wrapperElement.scrollLeft = targetScrollLeft;
             wrapperElement.style.scrollBehavior = originalScrollBehavior || '';
         } else {
             attempts++;
-            if (attempts < 10) {
+            if (attempts < 10) { 
                 requestAnimationFrame(applyScrollWhenReady);
             } else {
                 wrapperElement.scrollLeft = targetScrollLeft;
@@ -303,27 +318,36 @@ function applyZoom() {
             }
         }
     }
+
     applyScrollWhenReady();
 
+    // ============================================================
     // 5. Debounce Redraw (延遲高畫質重繪)
+    // ============================================================
     if (wheelTimeout) clearTimeout(wheelTimeout);
 
     wheelTimeout = setTimeout(() => {
       if (ws) {
-        // 這裡是真正耗效能的 Spectrogram 重繪
         ws.zoom(zoomLevel);
         
-        // 重繪後做最後一次精確校正
         const finalCenterPx = centerTime * zoomLevel;
         wrapperElement.scrollLeft = finalCenterPx - (viewportWidth / 2);
       }
       
-      // 最後再一次確保軸線精確 (通常 requestAnimationFrame 已經準了，但保險起見)
       applyZoomCallback();
       
-      const finalPx = `${duration() * zoomLevel}px`;
-      container.style.width = finalPx;
-      if (freqGrid) freqGrid.style.width = finalPx;
+      // [修改重點] 重繪後再次確認，如果是 Min Zoom 確保是 100%
+      const isStillAtMin = Math.abs(zoomLevel - minZoomLevel) < 0.1;
+      const freqGrid = document.getElementById('freq-grid');
+
+      if (isStillAtMin) {
+          container.style.width = '100%';
+          if (freqGrid) freqGrid.style.width = '100%';
+      } else {
+          const finalPx = `${duration() * zoomLevel}px`;
+          container.style.width = finalPx;
+          if (freqGrid) freqGrid.style.width = finalPx;
+      }
 
       if (typeof onAfterZoom === 'function') onAfterZoom();
       updateZoomButtons();
