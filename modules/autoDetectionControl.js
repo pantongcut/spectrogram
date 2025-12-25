@@ -13,6 +13,7 @@ export function initAutoDetectionControl() {
     const valDisplay = document.getElementById('autoDetectThresholdVal');
     const runBtn = document.getElementById('runAutoDetectBtn');
     const exportBtn = document.getElementById('exportCallsBtn');
+    const resetBtn = document.getElementById('resetDetectBtn'); 
     
     if (!autoDetectBtn || !toolBar) return;
     
@@ -58,6 +59,15 @@ export function initAutoDetectionControl() {
       });
     }
 
+    // [NEW] Reset Button Interaction
+    if (resetBtn && slider && valDisplay) {
+      resetBtn.addEventListener('click', () => {
+        const defaultValue = -60;
+        slider.value = defaultValue;
+        valDisplay.textContent = `${defaultValue} dB`;
+      });
+    }
+
     // 3. Run Detection Button
     if (runBtn) {
       runBtn.addEventListener('click', () => {
@@ -73,7 +83,7 @@ export function initAutoDetectionControl() {
       });
     }
 
-    // [NEW] 4. Export Calls Button
+    // 4. Export Calls Button
     if (exportBtn) {
       exportBtn.addEventListener('click', () => {
         console.log('[AutoDetect] Requesting export of detected calls...');
@@ -85,4 +95,3 @@ export function initAutoDetectionControl() {
     console.error('[autoDetectionControl] Failed to import wsManager:', err);
   });
 }
-

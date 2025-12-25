@@ -159,7 +159,12 @@
       <div id="auto-detect-tool-bar" class="tool-bar-submenu">
         <div class="tool-item">
           <label>Threshold:</label>
-          <input type="range" id="autoDetectThresholdSlider" min="-80" max="0" step="1" value="-60">
+          <input type="range" id="autoDetectThresholdSlider" min="-80" max="-40" step="1" value="-60">
+          <span id="autoDetectThresholdVal">-60 dB</span>
+        </div>
+        <div class="slider-container">
+          <i id="resetDetectBtn" class="fas fa-rotate-left" style="cursor: pointer; margin-right: 10px;" title="Reset to -60dB"></i>
+          <input type="range" id="autoDetectThresholdSlider" min="-80" max="-40" step="1" value="-60">
           <span id="autoDetectThresholdVal">-60 dB</span>
         </div>
         <div class="tool-item">
