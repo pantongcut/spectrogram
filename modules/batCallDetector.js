@@ -609,6 +609,43 @@ export class BatCallDetector {
       
       // Extract segment audio
       const segmentAudio = fullAudioData.slice(seg.startSample, seg.endSample);
+
+      // ============================================================
+      // [NEW] Auto-HPF Pre-pass
+      // 1. 先做一次快速檢測，取得 Peak Frequency
+      // 2. 決定是否需要濾波
+      // 3. 如果需要，對 segmentAudio 進行濾波
+      // ============================================================
+      
+      // 1. 快速檢測 (不需 SNR，快速取得參數)
+      // 這裡我們假設 segmentAudio 足夠短，直接跑一次 detectCalls 開銷可接受
+      const prePassCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: true });
+      
+      if (prePassCalls.length > 0) {
+          // 取出最強的 Call 的 Peak Freq
+          // (或者取平均，視您的需求而定，通常取最強的代表這個 ROI 的特徵)
+          const dominantCall = prePassCalls.reduce((prev, current) => (prev.peakPower_dB > current.peakPower_dB) ? prev : current);
+          const peakFreq_kHz = dominantCall.peakFreq_kHz;
+
+          // 2. 計算所需的 HPF Cutoff
+          const autoCutoff = this.calculateAutoHighpassFilterFreq(peakFreq_kHz);
+          
+          if (autoCutoff > 0) {
+              console.log(`[Auto HPF] ROI ${i}: Peak ${peakFreq_kHz.toFixed(1)}kHz -> Applying Butterworth HPF @ ${autoCutoff}kHz`);
+              
+              // 3. 對原始音訊應用 Butterworth Filter
+              // 這會改變 segmentAudio 的內容，移除低頻能量
+              segmentAudio = this.applyHighpassFilter(segmentAudio, autoCutoff * 1000, sampleRate);
+              
+              // 更新 Config 以便記錄 (雖然 detectCalls 內部主要看 Spectrogram，但這樣保持一致)
+              // 注意：這會影響全域 Config，如果是單執行緒這沒問題
+              this.config.enableHighpassFilter = true;
+              this.config.highpassFilterFreq_kHz = autoCutoff;
+          } else {
+             // 如果不需要濾波，確保 Config 是關閉的 (避免殘留上一段的設定)
+             this.config.enableHighpassFilter = false;
+          }
+      }
       
       // Calculate absolute time offset in seconds
       const timeOffset_s = seg.startSample / sampleRate;
