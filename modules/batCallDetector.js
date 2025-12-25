@@ -1720,7 +1720,7 @@ export class BatCallDetector {
    */
 findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
-      threshold: -24,
+      threshold: -22,
       highFreq_Hz: null,
       highFreq_kHz: null,
       highFreqFrameIdx: 0,
@@ -1799,12 +1799,12 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     // Initialize Hard Stop Flag and Optimal Variables
     // ============================================================
     let hitNoiseFloor = false;
-    let optimalThreshold = -24;
+    let optimalThreshold = -22;
     let optimalMeasurement = null;
     
-    // 測試閾值範圍：-24 到 -70 dB，間距 0.5 dB
+    // 測試閾值範圍：-22 到 -70 dB，間距 0.5 dB
     const thresholdRange = [];
-    for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
+    for (let threshold = -22; threshold >= -70; threshold -= 0.5) {
       thresholdRange.push(threshold);
     }
     
@@ -2119,7 +2119,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       console.log(`[findOptimalHighFrequencyThreshold] Hard stop at noise floor. Using threshold: ${optimalThreshold}dB`);
     }
     
-    const finalThreshold = Math.max(Math.min(optimalThreshold, -24), -70);
+    const finalThreshold = Math.max(Math.min(optimalThreshold, -22), -70);
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
     const hasWarning = finalThreshold <= -70;
     
