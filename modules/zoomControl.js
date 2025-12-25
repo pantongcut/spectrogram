@@ -15,6 +15,7 @@ export function initZoomControls(ws, container, duration, applyZoomCallback,
 
   // [CSS Fix] 強制瀏覽器允許容器小於 Canvas 的原始寬度
   // 修正重點：加入 #freq-grid 讓網格層也能跟隨容器進行視覺上的拉伸縮放
+  // [重要修改] 排除 selection-rect, draggable-tooltip, selection-btn-group 以避免被強制拉伸
 function _injectCssForSmoothing() {
     const styleId = 'spectrogram-smooth-zoom-style';
     if (!document.getElementById(styleId)) {
@@ -28,8 +29,8 @@ function _injectCssForSmoothing() {
           display: block;
         }
 
-        #spectrogram-only *, 
-        #spectrogram-only > div, 
+        /* 排除 selection-rect, draggable-tooltip, selection-btn-group 以避免被強制拉伸 */
+        #spectrogram-only > :not(.selection-rect):not(.draggable-tooltip):not(.selection-btn-group), 
         #spectrogram-only > wave { 
           width: 100% !important;
           min-width: 0 !important;

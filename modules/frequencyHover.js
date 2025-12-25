@@ -236,7 +236,9 @@ export function initFrequencyHover({
     hideAll();
     selectionRect = document.createElement('div');
     selectionRect.className = 'selection-rect';
-    viewer.appendChild(selectionRect);
+    // [修改 2] 將 selectionRect 加入 container (spectrogram-only) 而不是 viewer
+    // 這樣 container 被拉寬時，它也會跟著動
+    container.appendChild(selectionRect);
 
     const moveEv = type === 'touch' ? 'touchmove' : 'mousemove';
     const upEv = type === 'touch' ? 'touchend' : 'mouseup';
@@ -277,7 +279,8 @@ export function initFrequencyHover({
       const cy = type === 'touch' ? ev.touches[0].clientY : ev.clientY;
       let currentX = cx - viewerRect.left + viewer.scrollLeft;
       let currentY = cy - viewerRect.top;
-      currentX = clamp(currentX, 0, viewer.scrollWidth);
+      // 限制範圍，使用 container 寬度
+      currentX = clamp(currentX, 0, container.scrollWidth);
       currentY = clamp(currentY, 0, viewer.clientHeight - getScrollbarThickness());
       const x = Math.min(currentX, startX);
       const width = Math.abs(currentX - startX);
@@ -312,15 +315,17 @@ export function initFrequencyHover({
       window.removeEventListener('keyup', keyUpHandler);
       hideSelectionTimeInfo();
 
-      const rect = selectionRect.getBoundingClientRect();
-      const viewerRect = viewer.getBoundingClientRect();
-      const left = rect.left - viewerRect.left + viewer.scrollLeft;
-      const top = rect.top - viewerRect.top;
-      const width = rect.width;
-      const height = rect.height;
+      // 取得最終的 left/width (px) 相對於 container
+      // 注意：此時 selectionRect 已經在 container 內，offsetLeft 即為相對於 content 的 X
+      const left = selectionRect.offsetLeft; 
+      const top = selectionRect.offsetTop;
+      const width = selectionRect.offsetWidth;
+      const height = selectionRect.offsetHeight;
+      
       const minThreshold = 3;
       if (width <= minThreshold || height <= minThreshold) {
-        viewer.removeChild(selectionRect);
+        // [修改] 從 container 移除
+        container.removeChild(selectionRect);
         window.removeEventListener('keydown', keyDownHandler);
         window.removeEventListener('keyup', keyUpHandler);
         selectionRect = null;
@@ -337,10 +342,14 @@ export function initFrequencyHover({
       const Flow = (1 - (top + height) / spectrogramHeight) * (maxFrequency - minFrequency) + minFrequency;
       const Fhigh = (1 - top / spectrogramHeight) * (maxFrequency - minFrequency) + minFrequency;
       const Bandwidth = Fhigh - Flow;
+      
+      // 這裡計算出準確的時間 (秒)
       const actualWidth = getDuration() * getZoomLevel();
       const startTime = (left / actualWidth) * getDuration();
       const endTime = ((left + width) / actualWidth) * getDuration();
       const Duration = endTime - startTime;
+
+      // 創建正式 Selection
       const newSel = createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duration, selectionRect, startTime, endTime);
       selectionRect = null;
       suppressHover = false;
@@ -642,6 +651,10 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
         });
     }
 
+    // [重要] 呼叫一次 updateSelections 來設定正確的 % 位置
+    // 這會覆蓋掉初始狀態，確保它變成響應式
+    updateSelections();
+
     return selObj;
   }
 
@@ -670,8 +683,10 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
 
     const index = selections.indexOf(sel);
     if (index !== -1) {
-      viewer.removeChild(selections[index].rect);
-      if (selections[index].tooltip) viewer.removeChild(selections[index].tooltip);
+      // [修改 6] 從 container 移除
+      if (sel.rect.parentNode) sel.rect.parentNode.removeChild(sel.rect);
+      if (sel.tooltip && sel.tooltip.parentNode) sel.tooltip.parentNode.removeChild(sel.tooltip);
+      
       selections.splice(index, 1);
       if (hoveredSelection === sel) hoveredSelection = null;
     }
@@ -684,8 +699,9 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
 
     const tooltip = document.createElement('div');
     tooltip.className = 'draggable-tooltip freq-tooltip';
-    tooltip.style.left = `${left + width + 10}px`;
-    tooltip.style.top = `${top}px`;
+    
+    // [修改 8] 加入 container，初始位置會由 updateSelections 設定為百分比
+    container.appendChild(tooltip);
     
     // Initial State: Show dashes
     const dispFhigh = '-';
@@ -734,7 +750,6 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
       isOverTooltip = false;          // 重置滑鼠狀態
       suppressHover = false;          // 恢復 Hover 線條顯示
     });
-    viewer.appendChild(tooltip);
     enableDrag(tooltip);
     requestAnimationFrame(() => repositionTooltip(sel, left, top, width));
     return tooltip;
@@ -892,18 +907,9 @@ function createBtnGroup(sel, isShortSelection = false) {
 
   function repositionTooltip(sel, left, top, width) {
     if (!sel.tooltip) return;
-    const tooltip = sel.tooltip;
-    const tooltipWidth = tooltip.offsetWidth;
-    const viewerLeft = viewer.scrollLeft || 0;
-    const viewerRight = viewerLeft + viewer.clientWidth;
-
-    let tooltipLeft = left + width + 10;
-    if (tooltipLeft + tooltipWidth > viewerRight) {
-      tooltipLeft = left - tooltipWidth - 10;
-    }
-
-    tooltip.style.left = `${tooltipLeft}px`;
-    tooltip.style.top = `${top}px`;
+    // [修改] 因为 Tooltip 现在使用百分比定位，由 updateSelections 处理
+    // 这个函数现在主要用于初始化时的位置设置
+    // Tooltip 会自动跟随 Selection 的百分比位置，不需要额外计算
   }
 
   function enableResize(sel) {
@@ -1118,20 +1124,43 @@ function updateTooltipValues(sel, left, top, width, height) {
   }
 
   function updateSelections() {
-    const actualWidth = getDuration() * getZoomLevel();
+    // [核心修改 9] 改用百分比 (%)
+    // 不再依賴像素寬度計算，而是依賴 "時間比例"
+    // 因為 container.style.width 會被 zoomControl 動態改變
+    // 只要 left/width 是百分比，它就會自動對齐
+    
+    const totalDur = getDuration();
+    if (totalDur <= 0) return;
+
     const freqRange = maxFrequency - minFrequency;
 
     selections.forEach(sel => {
       const { startTime, endTime, Flow, Fhigh } = sel.data;
-      const left = (startTime / getDuration()) * actualWidth;
-      const width = ((endTime - startTime) / getDuration()) * actualWidth;
+      
+      // 計算百分比 (0 ~ 100)
+      const leftPct = (startTime / totalDur) * 100;
+      const widthPct = ((endTime - startTime) / totalDur) * 100;
+      
+      // 垂直方向維持像素 (因為高度不隨 Zoom 改變)
       const top = (1 - (Fhigh - minFrequency) / freqRange) * spectrogramHeight;
       const height = ((Fhigh - Flow) / freqRange) * spectrogramHeight;
 
-      sel.rect.style.left = `${left}px`;
+      // 應用樣式
+      sel.rect.style.left = `${leftPct}%`;
+      sel.rect.style.width = `${widthPct}%`; // 使用百分比寬度！
       sel.rect.style.top = `${top}px`;
-      sel.rect.style.width = `${width}px`;
       sel.rect.style.height = `${height}px`;
+
+      // 處理 Tooltip 位置
+      if (sel.tooltip) {
+        // Tooltip 我們希望它跟著 Selection 右邊走
+        // 我們可以使用 CSS left: %，加上一個固定的 margin-left (px)
+        const tooltipLeftPct = (endTime / totalDur) * 100;
+        sel.tooltip.style.left = `${tooltipLeftPct}%`;
+        sel.tooltip.style.top = `${top}px`;
+        // 利用 transform 或 margin 讓它稍微往右移一點，避免蓋住線
+        sel.tooltip.style.marginLeft = '10px'; 
+      }
 
       const durationMs = (endTime - startTime) * 1000;
       const timeExp = getTimeExpansionMode();
@@ -1152,11 +1181,11 @@ function updateTooltipValues(sel, left, top, width, height) {
         }
         
         if (!sel.tooltip) {
-          sel.tooltip = buildTooltip(sel, left, top, width);
+          sel.tooltip = buildTooltip(sel, 0, top, 0);
         }
       } else {
-        if (sel.tooltip) {
-          viewer.removeChild(sel.tooltip);
+        if (sel.tooltip && sel.tooltip.parentNode) {
+          sel.tooltip.parentNode.removeChild(sel.tooltip);
           sel.tooltip = null;
         }
 
@@ -1173,9 +1202,7 @@ function updateTooltipValues(sel, left, top, width, height) {
 
       sel._isShortSelection = isShortSelection;
 
-      repositionTooltip(sel, left, top, width);
-
-      updateTooltipValues(sel, left, top, width, height);
+      updateTooltipValues(sel, 0, 0, 0, 0);
       repositionBtnGroup(sel);
     });
   }
@@ -1202,8 +1229,9 @@ function updateTooltipValues(sel, left, top, width, height) {
         unregisterCallAnalysisPopup(popupElement);
         sel.powerSpectrumPopup = null;
       }
-      viewer.removeChild(sel.rect);
-      if (sel.tooltip) viewer.removeChild(sel.tooltip);
+      // [修改] 從 container 移除而不是 viewer
+      if (sel.rect.parentNode) sel.rect.parentNode.removeChild(sel.rect);
+      if (sel.tooltip && sel.tooltip.parentNode) sel.tooltip.parentNode.removeChild(sel.tooltip);
     });
     selections.length = 0;
     hoveredSelection = null;
@@ -1219,7 +1247,6 @@ function updateTooltipValues(sel, left, top, width, height) {
 
     if (!calls || calls.length === 0) return;
 
-    const actualWidth = getDuration() * getZoomLevel();
     const freqRange = maxFrequency - minFrequency;
 
     // 定義 Padding 參數
@@ -1233,28 +1260,23 @@ function updateTooltipValues(sel, left, top, width, height) {
       const flow = Math.max(minFrequency, call.lowFreq_kHz - PAD_FREQ_KHZ);
       const fhigh = Math.min(maxFrequency, call.highFreq_kHz + PAD_FREQ_KHZ);
 
-      // 2. 計算像素座標
-      const left = (startTime / getDuration()) * actualWidth;
-      const width = ((endTime - startTime) / getDuration()) * actualWidth;
+      // 2. 計算垂直座標 (像素，因為高度不隨 Zoom 改變)
       const top = (1 - (fhigh - minFrequency) / freqRange) * spectrogramHeight;
       const height = ((fhigh - flow) / freqRange) * spectrogramHeight;
 
       // 3. 創建 DOM 元素
       const selectionRect = document.createElement('div');
       selectionRect.className = 'selection-rect';
-      selectionRect.style.left = `${left}px`;
-      selectionRect.style.top = `${top}px`;
-      selectionRect.style.width = `${width}px`;
-      selectionRect.style.height = `${height}px`;
-      
-      viewer.appendChild(selectionRect);
+      // 初始位置會由 updateSelections 設定為百分比，這裡先加入容器
+      container.appendChild(selectionRect);
 
       // 4. 創建 Selection 對象
       const Bandwidth = fhigh - flow;
       const Duration = endTime - startTime;
 
+      // 這裡 left, width 傳 0 也行，因為 createTooltip 會呼叫 updateSelections 重算
       const selObj = createTooltip(
-        left, top, width, height, 
+        0, top, 0, height, 
         fhigh, flow, Bandwidth, Duration, 
         selectionRect, startTime, endTime,
         call // <--- [重要] 這裡必須傳入 call 作為 existingBatCall
@@ -1285,12 +1307,20 @@ function updateTooltipValues(sel, left, top, width, height) {
     });
     window.addEventListener('mousemove', (e) => {
       if (!isDragging) return;
-      const viewerRect = viewer.getBoundingClientRect();
-      const newX = e.clientX - viewerRect.left + viewer.scrollLeft - offsetX;
-      const newY = e.clientY - viewerRect.top - offsetY;
-      element.style.left = `${newX}px`;
-      element.style.top = `${newY}px`;
+      const containerRect = container.getBoundingClientRect(); // 使用 container
+      
+      // 計算相對於 container 的 px
+      let newLeftPx = e.clientX - containerRect.left - offsetX;
+      const newTopPx = e.clientY - containerRect.top - offsetY;
+
+      // 即時轉換為 % 以保持 Zoom 相容性
+      const leftPct = (newLeftPx / containerRect.width) * 100;
+
+      element.style.left = `${leftPct}%`;
+      element.style.top = `${newTopPx}px`;
+      element.style.marginLeft = '0'; // 拖曳時移除預設 margin
     }, { passive: true });
+    
     window.addEventListener('mouseup', () => { isDragging = false; });
   }
 
