@@ -686,9 +686,9 @@ export class BatCallDetector {
               // 有重疊。計算重疊比例 (相對於較短的那個)
               const overlapDur = end - start;
               const minDur = Math.min(candidate.duration_ms/1000, kept.duration_ms/1000);
-              
-              // 如果重疊超過 30%，視為同一叫聲的回音/殘影，予以丟棄
-              if (overlapDur > minDur * 0.3) {
+
+              // 如果重疊超過 10%，視為同一叫聲的回音/殘影，予以丟棄
+              if (overlapDur > minDur * 0.1) {
                 isEcho = true;
                 break;
               }
