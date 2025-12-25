@@ -1839,11 +1839,11 @@ export class BatCallDetector {
               }
             }
 
-            // Harmonic Rejection (> 15kHz jump from ref)
+            // Harmonic Rejection (> 10kHz jump from ref)
             if (referenceFreq_kHz !== null) {
                 const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
-                if (diff > 15.0) continue; 
+                if (diff > 10.0) continue; 
             }
 
             // Update Max Frequency found so far
