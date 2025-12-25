@@ -1726,33 +1726,15 @@ export class BatCallDetector {
     return result;
   }
 
-  /**
+/**
    * Find optimal High Threshold by testing range and detecting anomalies
-   * 
-   * 2025 ENHANCED ALGORITHM v2 (Narrowing Search Range):
+   * * 2025 ENHANCED ALGORITHM v3 (Zonal Noise Floor):
    * 1. Start with widest range (Frame 0 to Peak Frame)
-   * 2. Test threshold (-24 → -70 dB), detect highFreq position for each step
-   * 3. If no anomaly in this step:
-   *    - Record highFreqFrameIdx for this threshold
-   *    - Narrow next step's search range to Frame 0 to highFreqFrameIdx
-   * 4. Continue narrowing until anomaly detected or threshold exhausted
-   * 5. This follows the signal's energy trajectory and avoids rebounce detection
-   * 6. Return: both High Frequency (with optimal threshold) AND Start Frequency
-   * 
-   * Benefits:
-   * - Tracks signal energy forward in time (avoids rebounce)
-   * - Detects frequency transitions at their first occurrence
-   * - More stable multi-frequency detection
-   * 
-   * @param {Array} spectrogram - 2D array [timeFrame][freqBin] of power values (dB)
-   * @param {Array} freqBins - Frequency bin centers (Hz)
-   * @param {number} flowKHz - Lower frequency bound (kHz)
-   * @param {number} fhighKHz - Upper frequency bound (kHz)
-   * @param {number} callPeakPower_dB - Stable call peak power (not global spectrogram max)
-   * @param {number} peakFrameIdx - Peak frame index to limit initial scan
-   * @returns {Object} {threshold, highFreq_Hz, highFreq_kHz, highFreqFrameIdx, startFreq_Hz, startFreq_kHz, warning}
+   * 2. Calculate Zonal Noise Floors (10kHz bands) for this specific time range
+   * 3. Test threshold (-22 -> -70 dB), detect highFreq position
+   * 4. Apply Jump Protection using Zonal Noise Floors
    */
-findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
+  findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
       threshold: -22,
       highFreq_Hz: null,
@@ -1766,67 +1748,36 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     // ============================================================
     // INITIALIZATION
     // ============================================================
-    
     const firstFramePower = spectrogram[0];
     const numBins = firstFramePower.length;
-    
-    // ============================================================
-    // 2025 NEW: Calculate Robust Noise Floor (35th Percentile)
-    // ============================================================
-    // 1. Calculate Dynamic Range Noise Floor
-    let minDb = Infinity;
-    let maxDb = -Infinity;
-
-    // 1a. Find the Peak Bin Index within the Peak Frame
-    // This defines the lower bound for the frequency search
-    let peakBinIdx = 0;
-    const validPeakFrameIdx = Math.min(peakFrameIdx, spectrogram.length - 1);
-    
-    if (spectrogram.length > 0) {
-      const pFrame = spectrogram[validPeakFrameIdx];
-      let tempMax = -Infinity;
-      for (let b = 0; b < pFrame.length; b++) {
-        if (pFrame[b] > tempMax) {
-          tempMax = pFrame[b];
-          peakBinIdx = b;
-        }
-      }
-    }
-
-    // 1b. Iterate within the restricted scope to find Min/Max dB
-    for (let f = 0; f <= validPeakFrameIdx; f++) {
-      const frame = spectrogram[f];
-      // Scan only from Peak Bin upwards to the top frequency
-      for (let b = peakBinIdx; b < frame.length; b++) {
-        const val = frame[b];
-        if (val < minDb) minDb = val;
-        if (val > maxDb) maxDb = val;
-      }
-    }
-
-    // Safety fallback if scan failed (e.g. empty range)
-    if (minDb === Infinity) {
-       minDb = -100;
-       maxDb = callPeakPower_dB;
-    }
-
-    // Formula: Min + (Range * 0.6)
-    const dynamicRange = maxDb - minDb;
-    const robustNoiseFloor_dB = minDb + dynamicRange * 0.6;
-    
-    console.log('[findOptimalHighFrequencyThreshold] NOISE FLOOR CALCULATION (OPTIMIZED SCOPE):');
-    console.log(`  Scope: Time[0-${validPeakFrameIdx}], Freq[Bin ${peakBinIdx}-${numBins-1}]`);
-    console.log(`  Min dB: ${minDb.toFixed(2)}, Max dB: ${maxDb.toFixed(2)}, Range: ${dynamicRange.toFixed(2)}`);
-    console.log(`  Robust Noise Floor: ${minDb.toFixed(2)} + ${dynamicRange.toFixed(2)} * 0.6 = ${robustNoiseFloor_dB.toFixed(2)} dB`);
-    console.log(`  Peak Power (callPeakPower_dB): ${callPeakPower_dB.toFixed(2)} dB`);
-    console.log('');
     
     // Initial search limit: from 0 to peakFrameIdx
     let currentSearchLimitFrame = Math.min(peakFrameIdx, spectrogram.length - 1);
     
-    // Track the highFreqFrameIdx for each step to narrow future searches
-    let lastValidHighFreqFrameIdx = currentSearchLimitFrame;
-    
+    // ============================================================
+    // 1. [UPDATED] Calculate Zonal Robust Noise Floors
+    // Scope: Time[0 -> Peak Frame] (Focus on the attack phase)
+    // Method: Frequency Histogram Mode per 10kHz band
+    // ============================================================
+    // 呼叫先前定義的 calculateZonalNoiseFloors 方法
+    // 注意：這裡的時間範圍是 0 到 currentSearchLimitFrame
+    const zonalNoiseFloors = this.calculateZonalNoiseFloors(
+      spectrogram, 
+      freqBins, 
+      0, 
+      currentSearchLimitFrame
+    );
+
+    // Helper to get noise floor for a specific frequency
+    const getNoiseFloorForFreq = (freqKHz) => {
+      if (!freqKHz) return -80;
+      const zoneKey = Math.floor(freqKHz / 10) * 10;
+      if (zonalNoiseFloors[zoneKey] !== undefined) return zonalNoiseFloors[zoneKey];
+      return -80; // Fallback
+    };
+
+    console.log('[findOptimalHighFrequencyThreshold] Zonal Noise Analysis Completed (Scope: Start->Peak)');
+
     const stablePeakPower_dB = callPeakPower_dB;
     
     // ============================================================
@@ -1836,7 +1787,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     let optimalThreshold = -22;
     let optimalMeasurement = null;
     
-    // 測試閾值範圍：-22 到 -70 dB，間距 0.5 dB
+    // Test thresholds: -22 to -70 dB, step 0.5 dB
     const thresholdRange = [];
     for (let threshold = -22; threshold >= -70; threshold -= 0.5) {
       thresholdRange.push(threshold);
@@ -1844,12 +1795,13 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     
     const measurements = [];
     
+    // Track the highFreqFrameIdx for narrowing searches
+    let lastValidHighFreqFrameIdx = currentSearchLimitFrame;
+
     for (const testThreshold_dB of thresholdRange) {
       const highFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
 
-      // ============================================================
-      // [PRE-STEP] 取得上一次有效的測量值作為「諧波過濾」的基準
-      // ============================================================
+      // [PRE-STEP] Reference for Harmonic Rejection
       let referenceFreq_kHz = null;
       for (let i = measurements.length - 1; i >= 0; i--) {
         if (measurements[i].foundBin && measurements[i].highFreq_kHz !== null) {
@@ -1859,30 +1811,26 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
       
       // ============================================================
-      // 1. 計算 HIGH FREQUENCY (Frame-by-Frame Scanning)
-      // 改為與 Manual Mode Step 2 完全相同的邏輯：
-      // 掃描每一幀 -> 找該幀最高頻 -> 與全局最高頻比較
+      // 2. SCAN HIGH FREQUENCY (Frame-by-Frame)
       // ============================================================
       let highFreq_Hz = null;
       let highFreqBinIdx = 0;
       let highFreqFrameIdx = 0; 
       let foundBin = false;
       
-      // 遍歷搜尋範圍內的每一幀
       for (let f = 0; f <= currentSearchLimitFrame; f++) {
         const framePower = spectrogram[f];
         
-        // 在這一幀中，從高頻往低頻掃描 (Reverse order)
+        // Scan from High to Low Frequency (Reverse order)
         for (let b = numBins - 1; b >= 0; b--) {
           if (framePower[b] > highFreqThreshold_dB) {
             
-            // [STEP 1] 先宣告並計算候選頻率 (必須在諧波檢查之前！)
             let candidateFreq_Hz = freqBins[b];
             
-            // 執行線性插值預算
+            // Linear Interpolation
             if (b < numBins - 1) {
               const thisPower = framePower[b];
-              const nextPower = framePower[b + 1]; // next is higher freq bin
+              const nextPower = framePower[b + 1]; 
               
               if (nextPower < highFreqThreshold_dB && thisPower > highFreqThreshold_dB) {
                 const powerRatio = (thisPower - highFreqThreshold_dB) / (thisPower - nextPower);
@@ -1891,47 +1839,33 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
               }
             }
 
-            // ============================================================
-            // [NEW] HARMONIC REJECTION (諧波濾除)
-            // 如果此候選頻率比上一次有效測量高出 20kHz 以上，視為諧波
-            // 無視它，繼續往下掃 (continue loop)
-            // ============================================================
+            // Harmonic Rejection (> 20kHz jump from ref)
             if (referenceFreq_kHz !== null) {
                 const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
-                
-                if (diff > 20.0) {
-                    // console.log(`[Harmonic Skip] Frame ${f}: Skipped ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)} > 20)`);
-                    continue; // 跳過此 Bin，繼續檢查更低頻的 Bin (b--)
-                }
+                if (diff > 20.0) continue; 
             }
 
-            // [STEP 3] 比較與更新
-            // 如果通過諧波檢查，則視為有效訊號，進行比較
-            // Logic: We want the ABSOLUTE HIGHEST frequency across all frames
+            // Update Max Frequency found so far
             if (highFreq_Hz === null || candidateFreq_Hz > highFreq_Hz) {
               highFreq_Hz = candidateFreq_Hz;
               highFreqBinIdx = b;
               highFreqFrameIdx = f;
               foundBin = true;
             }
-            
-            // 這一幀已經找到最高點了(且不是諧波)，換下一幀
             break; 
           }
         }
       }
 
       // ============================================================
-      // 2. 計算 START FREQUENCY (Always Frame 0)
-      // 保持不變，因為 Start Freq 永遠只看 Frame 0
+      // 3. CALCULATE START FREQUENCY (Frame 0)
       // ============================================================
       let startFreq_Hz = null;
       if (foundBin) {
         for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
           if (firstFramePower[binIdx] > highFreqThreshold_dB) {
             startFreq_Hz = freqBins[binIdx];
-            // 線性插值
             if (binIdx > 0) {
               const thisPower = firstFramePower[binIdx];
               const prevPower = firstFramePower[binIdx - 1];
@@ -1946,7 +1880,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         }
       }
       
-      // Reset if not found
       if (!foundBin) {
         highFreq_Hz = null;
         startFreq_Hz = null;
@@ -1954,47 +1887,38 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
       
       // ============================================================
-      // 3. MAJOR JUMP PROTECTION (> 4.0 kHz) with Noise Floor Check
-      // 2025 ENHANCED: Check if the current signal is above noise floor
-      // before stopping due to frequency jump
+      // 4. JUMP PROTECTION (> 4.0 kHz) with ZONAL NOISE FLOOR CHECK
       // ============================================================
       if (foundBin && highFreq_Hz !== null) {
         const currentHighFreq_kHz = highFreq_Hz / 1000;
         const currentHighFreqPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
         
-        // 查找上一個有效的測量值
+        // Find last valid measurement
         let lastValidFreq_kHz = null;
-        let lastValidPower_dB = null;
         for (let i = measurements.length - 1; i >= 0; i--) {
           if (measurements[i].foundBin && measurements[i].highFreq_kHz !== null) {
             lastValidFreq_kHz = measurements[i].highFreq_kHz;
-            lastValidPower_dB = measurements[i].highFreqPower_dB;
             break;
           }
         }
         
-        // 如果存在上一個有效值，進行跳變檢查
         if (lastValidFreq_kHz !== null) {
           const jumpDiff = Math.abs(currentHighFreq_kHz - lastValidFreq_kHz);
+          
           if (jumpDiff > 4.0) {
-            // Major jump detected (> 4.0 kHz)
-            // NEW LOGIC: Check if current signal is above noise floor
-            console.log(`  [JUMP CHECK] Threshold: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} → ${currentHighFreq_kHz.toFixed(2)} kHz (Jump: ${jumpDiff.toFixed(2)} kHz > 4.0)`);
-            console.log(`    Current Power: ${currentHighFreqPower_dB.toFixed(2)} dB | Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB | Delta: ${(currentHighFreqPower_dB - robustNoiseFloor_dB).toFixed(2)} dB`);
+            // [UPDATED] Use Zonal Noise Floor Logic
+            const specificNoiseFloor_dB = getNoiseFloorForFreq(currentHighFreq_kHz);
             
-            if (currentHighFreqPower_dB > robustNoiseFloor_dB) {
-              // Signal is above noise floor - this is likely a valid signal transition
-              // Ignore the jump and continue
-              console.log(`    ✓ Signal ABOVE noise floor → Continue (valid signal transition)`);
+            console.log(`  [HIGH FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} → ${currentHighFreq_kHz.toFixed(2)} kHz`);
+            console.log(`    Zone Noise Floor (${Math.floor(currentHighFreq_kHz/10)*10}kHz band): ${specificNoiseFloor_dB.toFixed(2)} dB | Signal: ${currentHighFreqPower_dB.toFixed(2)} dB`);
+            
+            if (currentHighFreqPower_dB > specificNoiseFloor_dB) {
+              console.log(`    ✓ Signal ABOVE zonal noise floor → Continue (valid signal transition)`);
             } else {
-              // Signal is at or below noise floor - stop immediately (hit noise)
-              console.log(`    ✗ Signal AT/BELOW noise floor → BREAK (hit noise)`);
+              console.log(`    ✗ Signal AT/BELOW zonal noise floor → BREAK (hit noise)`);
               
-              // ============================================================
-              // [NEW] Set Hard Stop Flag and use last valid measurement
-              // ============================================================
               hitNoiseFloor = true;
-              // Find last valid measurement before the break
+              // Revert to last valid
               for (let j = measurements.length - 1; j >= 0; j--) {
                 if (measurements[j].foundBin && measurements[j].highFreq_kHz !== null) {
                   optimalMeasurement = measurements[j];
@@ -2002,7 +1926,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                   break;
                 }
               }
-              break;
+              break; // HARD STOP
             }
           }
         }
@@ -2021,21 +1945,19 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         foundBin: foundBin
       });
       
-      // ============================================================
-      // 4. NARROWING SEARCH RANGE
-      // ============================================================
+      // Narrowing Search Range
       if (foundBin && highFreqFrameIdx >= 0 && highFreqFrameIdx < currentSearchLimitFrame) {
         currentSearchLimitFrame = highFreqFrameIdx;
         lastValidHighFreqFrameIdx = highFreqFrameIdx;
       }
+      
+      if (hitNoiseFloor) break;
     }
     
     // ============================================================
-    // 保存最終的搜尋範圍
-    const finalSearchLimitFrame = currentSearchLimitFrame;
-    
+    // RESULT SELECTION
     // ============================================================
-    // 只收集成功找到 bin 的測量
+    const finalSearchLimitFrame = currentSearchLimitFrame;
     const validMeasurements = measurements.filter(m => m.foundBin);
     
     if (validMeasurements.length === 0) {
@@ -2050,20 +1972,14 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       };
     }
 
-    // ============================================================
-    // [NEW] Initialize Optimal Measurement for Standard Case
-    // ============================================================
-    // If we didn't hit noise floor, initialize with the first valid measurement
     if (!hitNoiseFloor && validMeasurements.length > 0) {
       optimalMeasurement = validMeasurements[0];
     }
     
     // ============================================================
-    // [NEW] Wrap Anomaly Analysis - Skip if Hard Stop Triggered
+    // ANOMALY CHECK (2.5 - 4.0 kHz) with Zonal Noise Floor
     // ============================================================
     if (!hitNoiseFloor) {
-      // [Standard Anomaly Logic - Preserved from previous version]
-      // 這部分邏輯負責處理 2.5kHz - 4.0kHz 的微小異常，保持不變
       let lastValidThreshold = validMeasurements[0].threshold;
       let lastValidMeasurement = validMeasurements[0];
       let recordedEarlyAnomaly = null;
@@ -2074,31 +1990,24 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         const currFreq_kHz = validMeasurements[i].highFreq_kHz;
         const freqDifference = Math.abs(currFreq_kHz - prevFreq_kHz);
         
-        // 雙重保險，雖然 Loop 內已經攔截
+        // Safety Break (redundant if Hard Stop works, but kept for safety)
         if (freqDifference > 4.0) {
           optimalThreshold = validMeasurements[i - 1].threshold;
           optimalMeasurement = validMeasurements[i - 1];
           break;
         }
         
-        // 2025 ENHANCED: Anomaly Logic with Noise Floor Check
-        // Only treat as anomaly if frequency jump is > 2.5 kHz AND signal is below noise floor
+        // Minor Anomaly Logic
         let isAnomaly = false;
         if (freqDifference > 2.5) {
-          // Additional check: is the current measurement's power above noise floor?
+          // [UPDATED] Check against Zonal Noise Floor
           const currentPower_dB = validMeasurements[i].highFreqPower_dB;
+          const specificNoiseFloor_dB = getNoiseFloorForFreq(currFreq_kHz);
           
-          console.log(`  [ANOMALY CHECK] Index ${i}: Freq ${prevFreq_kHz.toFixed(2)} → ${currFreq_kHz.toFixed(2)} kHz (Diff: ${freqDifference.toFixed(2)} kHz > 2.5)`);
-          console.log(`    Power: ${currentPower_dB !== null ? currentPower_dB.toFixed(2) : 'N/A'} dB | Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
-          
-          if (currentPower_dB !== null && currentPower_dB <= robustNoiseFloor_dB) {
-            // Signal is at or below noise floor - this is a legitimate anomaly
-            console.log(`    ✗ Power AT/BELOW noise floor → ANOMALY DETECTED`);
+          if (currentPower_dB !== null && currentPower_dB <= specificNoiseFloor_dB) {
+            console.log(`    [ANOMALY] ${currFreq_kHz.toFixed(1)}kHz Power ${currentPower_dB.toFixed(1)}dB <= ZoneFloor ${specificNoiseFloor_dB.toFixed(1)}dB`);
             isAnomaly = true;
           } else {
-            // Signal is above noise floor - treat as valid signal transition
-            // Ignore the frequency jump
-            console.log(`    ✓ Power ABOVE noise floor → VALID TRANSITION (ignore jump)`);
             isAnomaly = false;
           }
         }
@@ -2111,6 +2020,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
             lastValidMeasurement = validMeasurements[i - 1];
           }
         } else {
+          // Reset logic (same as before)
           if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
             const afterAnomalyStart = firstAnomalyIndex + 1;
             const afterAnomalyEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
@@ -2121,11 +2031,8 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                 hasThreeNormalAfterAnomaly = false;
                 break;
               }
-              const checkPrevFreq_kHz = validMeasurements[checkIdx - 1].highFreq_kHz;
-              const checkCurrFreq_kHz = validMeasurements[checkIdx].highFreq_kHz;
-              const checkFreqDiff = Math.abs(checkCurrFreq_kHz - checkPrevFreq_kHz);
-              
-              if (checkFreqDiff > 2.5) {
+              const checkDiff = Math.abs(validMeasurements[checkIdx].highFreq_kHz - validMeasurements[checkIdx - 1].highFreq_kHz);
+              if (checkDiff > 2.5) {
                 hasThreeNormalAfterAnomaly = false;
                 break;
               }
@@ -2149,10 +2056,10 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         optimalMeasurement = lastValidMeasurement;
       }
     } else {
-      // Hard stop was triggered at noise floor
       console.log(`[findOptimalHighFrequencyThreshold] Hard stop at noise floor. Using threshold: ${optimalThreshold}dB`);
     }
     
+    // ... (Final Safety Threshold Logic / Re-scan remains identical) ...
     const finalThreshold = Math.max(Math.min(optimalThreshold, -22), -70);
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
     const hasWarning = finalThreshold <= -70;
@@ -2164,11 +2071,9 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     let returnStartFreq_Hz = optimalMeasurement.startFreq_Hz;
     let returnStartFreq_kHz = optimalMeasurement.startFreq_kHz;
     
-    // Safety Mechanism Re-calculation logic (如果 safeThreshold !== finalThreshold)
-    // 這裡也必須改為 Frame-by-Frame Scanning 以保持一致性
+    // Safety Mechanism Re-calculation logic (當 threshold 被強制重置時)
     if (safeThreshold !== finalThreshold) {
       const highFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
-      
       let highFreq_Hz_safe = null;
       let highFreqBinIdx_safe = 0;
       let highFreqFrameIdx_safe = 0;
@@ -2203,7 +2108,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         }
       }
       
-      // Re-calc Start Freq for Safe Threshold
+      // Re-calc Start Freq
       if (foundBin_safe) {
         for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
           if (firstFramePower[binIdx] > highFreqThreshold_dB_safe) {
