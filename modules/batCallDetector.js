@@ -664,38 +664,41 @@ export class BatCallDetector {
       let segmentCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: false });
 
       // ============================================================
-      // [FIXED] ROI 智慧過濾：去除重疊的回音，但保留時間分開的叫聲
+      // [FIXED] ROI 智慧過濾 (Time Separation Logic)
+      // 規則：只保留最強訊號。若其他訊號與其間隔 < 30ms，視為回音丟棄。
       // ============================================================
       if (segmentCalls.length > 1) {
-        // 1. 先依能量排序
+        // 1. 先依能量排序 (保留最強的)
         segmentCalls.sort((a, b) => b.peakPower_dB - a.peakPower_dB);
         
         const keptCalls = [];
+        const minGap_s = 0.030; // 30ms 最小間隔閾值
         
         // 2. 遍歷每一個 Call
         for (const candidate of segmentCalls) {
-          let isEcho = false;
+          let isTooClose = false;
           
-          // 檢查是否與已經保留的強 Call 重疊
+          // 檢查此候選者與「已經保留的 Call」之間的距離
           for (const kept of keptCalls) {
-            // 計算時間重疊
-            const start = Math.max(candidate.startTime_s, kept.startTime_s);
-            const end = Math.min(candidate.endTime_s, kept.endTime_s);
+            // 計算兩個時間段的間隔 (Gap)
+            // 邏輯：取 (A起 - B迄) 與 (B起 - A迄) 的最大值
+            // 如果結果 > 0，代表有間隙 (Gap)
+            // 如果結果 <= 0，代表重疊 (Overlap)
+            const gap = Math.max(
+              candidate.startTime_s - kept.endTime_s, 
+              kept.startTime_s - candidate.endTime_s
+            );
             
-            if (end > start) {
-              // 有重疊。計算重疊比例 (相對於較短的那個)
-              const overlapDur = end - start;
-              const minDur = Math.min(candidate.duration_ms/1000, kept.duration_ms/1000);
-
-              // 如果重疊超過 10%，視為同一叫聲的回音/殘影，予以丟棄
-              if (overlapDur > minDur * 0.1) {
-                isEcho = true;
-                break;
-              }
+            // 條件：如果重疊 (gap < 0) 或 間隔太近 (gap < 30ms)
+            if (gap < minGap_s) {
+              isTooClose = true;
+              // (選用) Log 顯示被過濾的原因
+              // console.log(`[Filter] Dropped call at ${candidate.startTime_s.toFixed(4)}s (Gap to strong call: ${(gap*1000).toFixed(1)}ms < 30ms)`);
+              break;
             }
           }
           
-          if (!isEcho) {
+          if (!isTooClose) {
             keptCalls.push(candidate);
           }
         }
