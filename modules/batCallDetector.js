@@ -661,7 +661,16 @@ export class BatCallDetector {
       // [FIX] Run Detailed Detection ONCE (on potentially filtered audio)
       // 這是唯一一次呼叫 detectCalls，Log 只會出現一次
       // ============================================================
-      const segmentCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: false });
+      let segmentCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: false });
+
+      // ============================================================
+      // [NEW] ROI 唯一化處理：只保留 Peak Power 最大的一個 Call
+      // ============================================================
+      if (segmentCalls.length > 1) {
+        segmentCalls.sort((a, b) => b.peakPower_dB - a.peakPower_dB);
+        segmentCalls = [segmentCalls[0]];
+        console.log(`[ROI Filter] ROI ${i}: Kept strongest call (${segmentCalls[0].peakPower_dB.toFixed(1)} dB) out of ${segmentCalls.length + 1} candidates.`);
+      }
 
       // Correct call time markers (relative -> absolute time)
       segmentCalls.forEach(call => {
