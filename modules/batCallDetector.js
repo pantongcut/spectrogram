@@ -2175,20 +2175,18 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
   }
 
   /**
-   * 2025 IMPROVED ALGORITHM: Find Optimal Low Frequency Threshold
+   * 2025 IMPROVED ALGORITHM: Find Optimal Low Frequency Threshold (No Buffer Version)
    * * Improvements:
-   * 1. Downward Scan (High -> Low): Avoids low-frequency noise (e.g., wind, machines).
-   * 2. Drop-off Detection: Looks for signal dipping BELOW threshold.
-   * 3. Contour Tracking: Uses previous frame's result to guide the scan (Continuity Constraint).
-   * 4. Restricted Scope Noise Floor: Calculates noise only in the relevant quadrant.
+   * 1. Downward Scan (High -> Low): Avoids low-frequency noise.
+   * 2. Contour Tracking: Tracks signal from Peak -> End.
+   * 3. Strict Tracking: No safety buffer, scan starts exactly at previous frequency bin.
+   * 4. Separation of Low/End Freq: Correctly handles "Checkmark" calls.
    */
   findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null) {
     if (spectrogram.length === 0) return {
       threshold: -24,
-      lowFreq_Hz: null,
-      lowFreq_kHz: null,
-      endFreq_Hz: null,
-      endFreq_kHz: null,
+      lowFreq_Hz: null, lowFreq_kHz: null,
+      endFreq_Hz: null, endFreq_kHz: null,
       warning: false
     };
 
@@ -2202,14 +2200,11 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       ? limitFrameIdx 
       : spectrogram.length - 1;
 
-    // Start tracking from the Peak Frame (where signal is strongest/safest)
     const validPeakFrameIdx = Math.min(peakFrameIdx, spectrogram.length - 1);
 
-    // Find the Bin Index of the Call Peak Frequency (Global Anchor)
-    // We use this as the absolute ceiling for our Low Freq search to avoid harmonic hopping errors initially
+    // Find Global Peak Bin
     let globalPeakBinIdx = numBins - 1;
     let tempMax = -Infinity;
-    // Scan the peak frame to find the exact peak bin
     for (let b = 0; b < spectrogram[validPeakFrameIdx].length; b++) {
        if (spectrogram[validPeakFrameIdx][b] > tempMax) {
            tempMax = spectrogram[validPeakFrameIdx][b];
@@ -2218,29 +2213,23 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     }
 
     // ============================================================
-    // 1. Calculate Robust Noise Floor (Restricted Scope)
-    // Scope: Time[Peak -> End], Freq[0 -> Peak Bin]
+    // 1. Calculate Robust Noise Floor
     // ============================================================
     let minDb = Infinity;
     let maxDb = -Infinity;
-
     for (let f = validPeakFrameIdx; f <= searchEndFrame; f++) {
       const frame = spectrogram[f];
-      // Scan only from Bottom (0) up to Peak Bin (The relevant quadrant for Low Freq)
       for (let b = 0; b <= globalPeakBinIdx; b++) {
         const val = frame[b];
         if (val < minDb) minDb = val;
         if (val > maxDb) maxDb = val;
       }
     }
-
     if (minDb === Infinity) { minDb = -100; maxDb = callPeakPower_dB; }
     const dynamicRange = maxDb - minDb;
     const robustNoiseFloor_dB = minDb + dynamicRange * 0.6;
 
-    console.log('[findOptimalLowFrequencyThreshold] CONFIGURATION (Track Down Mode):');
-    console.log(`  Scope: Time[${validPeakFrameIdx}-${searchEndFrame}], Peak Bin: ${globalPeakBinIdx}`);
-    console.log(`  Robust Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
+    console.log(`[findOptimalLowFrequencyThreshold] PeakBin: ${globalPeakBinIdx}, NoiseFloor: ${robustNoiseFloor_dB.toFixed(2)} dB (No Buffer)`);
     
     // ============================================================
     // Initialize Variables
@@ -2248,157 +2237,116 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     let hitNoiseFloor = false;
     let optimalThreshold = -24;
     let optimalMeasurement = null;
-
-    // Ratcheting: We never look back before the current valid signal
     let currentTrackingStartFrame = validPeakFrameIdx;
 
-    // Threshold Loop: -24 dB to -70 dB
-    const thresholdRange = [];
-    for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
-      thresholdRange.push(threshold);
-    }
-    
     const measurements = [];
     
-    for (const testThreshold_dB of thresholdRange) {
-      const lowFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
+    // Threshold Loop
+    for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
+      const lowFreqThreshold_dB = stablePeakPower_dB + threshold;
       
       // ============================================================
-      // 2. CONTOUR TRACKING (Gap-Bridging + Frequency Measurement)
-      // Instead of random scanning, we trace the signal frame-by-frame.
+      // 2. CONTOUR TRACKING (NO BUFFER VERSION)
       // ============================================================
+      let lastValidBinForTracking = globalPeakBinIdx; 
+      let activeEndFrameIdx = -1; 
       
-      let lastValidBinForTracking = globalPeakBinIdx; // Initialize with Peak Bin
-      let activeEndFrameIdx = -1; // Track how far the signal extends
-      let currentLowFreq_Hz = null;
-      let currentLowFreqPower_dB = -Infinity;
+      let track_EndFreq_Hz = null;
+      let track_MinFreq_Hz = Infinity;
+      let track_EndFreqPower_dB = -Infinity;
       
-      // Scan frames from where we left off (Ratcheting)
-      // Note: We rescan from currentTrackingStartFrame for each threshold 
-      // to ensure we capture the specific frequency drift for *this* threshold.
       for (let f = currentTrackingStartFrame; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         
-        // A. Determine Scan Start Position (Anchor)
-        // Logic: Use previous valid bin + Safety Buffer
-        // This prevents getting lost if the frequency rises slightly (QCF jitter)
-        const SAFETY_BUFFER = 5; // bins (approx 1-2 kHz)
-        let scanStartBin = Math.min(lastValidBinForTracking + SAFETY_BUFFER, numBins - 1);
+        // [NO BUFFER] Strict tracking
+        let scanStartBin = lastValidBinForTracking;
+        if (scanStartBin >= numBins) scanStartBin = numBins - 1;
         
-        // B. Downward Scan (High -> Low)
-        // "Drop-off Detection": Find first bin BELOW threshold
         let foundBinInThisFrame = false;
         let detectedLowBin = -1;
+        let calculatedHz = null;
         
+        // Downward Scan
         for (let b = scanStartBin; b >= 0; b--) {
             if (frame[b] < lowFreqThreshold_dB) {
-                // Found the "Air" below the signal. 
-                // The signal boundary is the bin above this one (b + 1)
-                
-                // Edge case: If b is scanStartBin, it means even our anchor was in noise.
-                // We should assume signal lost or drop down further? 
-                // For safety, we treat (b+1) as the boundary.
-                
                 const boundaryBin = b + 1;
-                
-                // Check if the boundary bin actually has signal (it should, logically)
                 if (boundaryBin < numBins && frame[boundaryBin] >= lowFreqThreshold_dB) {
                     detectedLowBin = boundaryBin;
                     foundBinInThisFrame = true;
-                    
-                    // Update tracker for next frame
                     lastValidBinForTracking = detectedLowBin; 
                     
-                    // Update "Best Candidate" for this threshold
                     activeEndFrameIdx = f;
-                    currentLowFreqPower_dB = frame[detectedLowBin];
+                    track_EndFreqPower_dB = frame[detectedLowBin];
                     
-                    // Calculate Frequency (with Linear Interpolation)
-                    currentLowFreq_Hz = freqBins[detectedLowBin];
-                    
-                    // Interpolation: Refine between boundaryBin (High, >Thresh) and b (Low, <Thresh)
-                    // We are looking for the point where Power = Threshold
+                    // Linear Interpolation
+                    calculatedHz = freqBins[detectedLowBin];
                     const powerHigh = frame[boundaryBin];
-                    const powerLow = frame[b]; // This is < Threshold
-                    
-                    // Interpolation Logic:
-                    // Ratio of how far Threshold is into the drop
+                    const powerLow = frame[b];
                     if ((powerHigh - powerLow) > 1e-6) {
                         const ratio = (powerHigh - lowFreqThreshold_dB) / (powerHigh - powerLow);
                         const freqDiff = freqBins[boundaryBin] - freqBins[b];
-                        // Freq decreases as we go from boundaryBin to b
-                        currentLowFreq_Hz = freqBins[boundaryBin] - (ratio * freqDiff);
+                        calculatedHz = freqBins[boundaryBin] - (ratio * freqDiff);
                     }
-                    
-                    break; // Stop scanning this frame
+                    break; 
                 }
             }
         }
         
-        // C. Signal Break Detection
-        // If we scanned all the way to 0 and didn't find a drop (signal covers 0Hz - unlikely)
-        // OR if we started below threshold (signal lost).
-        if (!foundBinInThisFrame) {
-             // Check if the *entire* range scanned was below threshold (Signal Lost)
-             if (frame[scanStartBin] < lowFreqThreshold_dB) {
-                 // Signal ended in previous frame
-                 break; 
-             }
-             // Else: Signal goes all the way to 0Hz (Rare, but possible). 
-             // We count this as valid signal extending to 0Hz.
+        if (foundBinInThisFrame) {
+            track_EndFreq_Hz = calculatedHz;
+            if (calculatedHz < track_MinFreq_Hz) {
+                track_MinFreq_Hz = calculatedHz;
+            }
+        } else {
+             if (frame[scanStartBin] < lowFreqThreshold_dB) break; 
              lastValidBinForTracking = 0;
              activeEndFrameIdx = f;
-             currentLowFreq_Hz = freqBins[0];
+             track_EndFreq_Hz = freqBins[0];
+             track_MinFreq_Hz = freqBins[0];
         }
       }
       
-      // Update Ratchet: Next threshold starts scanning from the end of this signal
       if (activeEndFrameIdx > currentTrackingStartFrame) {
           currentTrackingStartFrame = activeEndFrameIdx;
       }
 
       // ============================================================
-      // 3. JUMP PROTECTION & NOISE FLOOR CHECK
+      // 3. JUMP PROTECTION
       // ============================================================
-      const foundBin = (currentLowFreq_Hz !== null && activeEndFrameIdx !== -1);
+      const foundBin = (track_EndFreq_Hz !== null && activeEndFrameIdx !== -1);
       let isValidMeasurement = foundBin;
       
       if (foundBin) {
-        const currentLowFreq_kHz = currentLowFreq_Hz / 1000;
+        const currentEndFreq_kHz = track_EndFreq_Hz / 1000;
         
-        // Retrieve last valid measurement from previous threshold loop
-        let lastValidFreq_kHz = null;
+        let lastValidEndFreq_kHz = null;
         for (let i = measurements.length - 1; i >= 0; i--) {
-            if (measurements[i].foundBin && measurements[i].lowFreq_kHz !== null) {
-                lastValidFreq_kHz = measurements[i].lowFreq_kHz;
+            if (measurements[i].foundBin && measurements[i].endFreq_kHz !== null) {
+                lastValidEndFreq_kHz = measurements[i].endFreq_kHz;
                 break;
             }
         }
 
-        if (lastValidFreq_kHz !== null) {
-            const jumpDiff = Math.abs(currentLowFreq_kHz - lastValidFreq_kHz);
+        if (lastValidEndFreq_kHz !== null) {
+            const jumpDiff = Math.abs(currentEndFreq_kHz - lastValidEndFreq_kHz);
             
-            // Jump Threshold: 2.0 kHz
             if (jumpDiff > 2.0) {
-                console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz (Diff: ${jumpDiff.toFixed(2)})`);
+                console.log(`  [END FREQ JUMP] Thr: ${threshold}dB | ${lastValidEndFreq_kHz.toFixed(2)} -> ${currentEndFreq_kHz.toFixed(2)} kHz (Diff: ${jumpDiff.toFixed(2)})`);
                 
-                // Check against Restricted Scope Noise Floor
-                if (currentLowFreqPower_dB > robustNoiseFloor_dB) {
-                    console.log(`    ✓ Signal ABOVE noise floor -> Continue (Valid extension)`);
+                if (track_EndFreqPower_dB > robustNoiseFloor_dB) {
+                    console.log(`    ✓ Signal ABOVE noise floor -> Continue`);
                 } else {
-                    console.log(`    ✗ Signal AT/BELOW noise floor -> BREAK (hit noise)`);
+                    console.log(`    ✗ Signal AT/BELOW noise floor -> BREAK`);
                     hitNoiseFloor = true;
                     isValidMeasurement = false;
                     
-                    // Recover optimal from last valid
                     for (let j = measurements.length - 1; j >= 0; j--) {
-                        if (measurements[j].foundBin && measurements[j].lowFreq_kHz !== null) {
+                        if (measurements[j].foundBin) {
                             optimalMeasurement = measurements[j];
                             optimalThreshold = measurements[j].threshold;
                             break;
                         }
                     }
-                    // HARD STOP
                 }
             }
         }
@@ -2407,37 +2355,37 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       if (hitNoiseFloor) break;
 
       measurements.push({
-        threshold: testThreshold_dB,
+        threshold: threshold,
         lowFreqThreshold_dB: lowFreqThreshold_dB,
-        lowFreq_Hz: currentLowFreq_Hz,
-        lowFreq_kHz: currentLowFreq_Hz !== null ? currentLowFreq_Hz / 1000 : null,
-        endFreq_Hz: currentLowFreq_Hz, // End Freq is same as Low Freq in this logic
-        endFreq_kHz: currentLowFreq_Hz !== null ? currentLowFreq_Hz / 1000 : null,
+        lowFreq_Hz: (track_MinFreq_Hz !== Infinity) ? track_MinFreq_Hz : null,
+        lowFreq_kHz: (track_MinFreq_Hz !== Infinity) ? track_MinFreq_Hz / 1000 : null,
+        endFreq_Hz: track_EndFreq_Hz,
+        endFreq_kHz: track_EndFreq_Hz !== null ? track_EndFreq_Hz / 1000 : null,
         foundBin: isValidMeasurement
       });
     }
     
     // ============================================================
-    // RESULT SELECTION (Same as before)
+    // 4. RESULT SELECTION (Stability Check Restored)
     // ============================================================
     const validMeasurements = measurements.filter(m => m.foundBin);
     
     if (validMeasurements.length === 0) {
-      return {
-        threshold: -24,
-        lowFreq_Hz: null, lowFreq_kHz: null,
-        endFreq_Hz: null, endFreq_kHz: null,
-        warning: false
-      };
+        return { threshold: -24, lowFreq_Hz: null, lowFreq_kHz: null, endFreq_Hz: null, endFreq_kHz: null, warning: false };
     }
-    
-    // If Hard Stop wasn't triggered, analyze stability
+
+    // Default to the last one (most sensitive) if no Hard Stop
+    if (!optimalMeasurement && validMeasurements.length > 0) {
+        optimalMeasurement = validMeasurements[validMeasurements.length - 1];
+        optimalThreshold = optimalMeasurement.threshold;
+    }
+
+    // [RESTORED] Standard stability check logic
     if (!hitNoiseFloor && validMeasurements.length > 0) {
-        // Standard stability check logic (preserved from original)
         let recordedEarlyAnomaly = null;
         let firstAnomalyIndex = -1;
-        let lastValidMeasurement = validMeasurements[0];
-        let lastValidThreshold = validMeasurements[0].threshold;
+        let lastValidM = validMeasurements[0];
+        let lastValidT = validMeasurements[0].threshold;
 
         for (let i = 1; i < validMeasurements.length; i++) {
             const prevFreq = validMeasurements[i - 1].lowFreq_kHz;
@@ -2449,7 +2397,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                 if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
                     firstAnomalyIndex = i;
                     recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
-                    lastValidMeasurement = validMeasurements[i - 1];
+                    lastValidM = validMeasurements[i - 1];
                 }
             } else {
                 // Reset if stability returns
@@ -2465,17 +2413,17 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                         firstAnomalyIndex = -1;
                     }
                 }
-                lastValidMeasurement = validMeasurements[i];
-                lastValidThreshold = validMeasurements[i].threshold;
+                lastValidM = validMeasurements[i];
+                lastValidT = validMeasurements[i].threshold;
             }
         }
 
         if (recordedEarlyAnomaly !== null) {
             optimalThreshold = recordedEarlyAnomaly;
-            optimalMeasurement = lastValidMeasurement;
+            optimalMeasurement = lastValidM;
         } else {
-            optimalThreshold = lastValidThreshold;
-            optimalMeasurement = lastValidMeasurement;
+            optimalThreshold = lastValidT;
+            optimalMeasurement = lastValidM;
         }
     }
     
@@ -2485,46 +2433,26 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     const hasWarning = finalThreshold <= -70;
     
     let returnLowFreq_Hz = optimalMeasurement.lowFreq_Hz;
+    let returnEndFreq_Hz = optimalMeasurement.endFreq_Hz;
     
-    // Safety Re-calculation logic (if threshold changed)
-    // Needs to use the new Downward Scan logic too!
+    // [OPTIMIZED] Safety Re-calculation
+    // Instead of re-running the loop, we just find the existing measurement for -30dB.
+    // This is faster and cleaner.
     if (safeThreshold !== finalThreshold) {
-         const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
-         let safeLowFreqVal = null;
-         
-         // Re-run the contour tracking for the safe threshold
-         let trackBin = globalPeakBinIdx;
-         for (let f = validPeakFrameIdx; f <= searchEndFrame; f++) {
-             const frame = spectrogram[f];
-             let scanStart = Math.min(trackBin + 5, numBins - 1);
-             let found = false;
-             for (let b = scanStart; b >= 0; b--) {
-                 if (frame[b] < lowFreqThreshold_dB_safe) {
-                     const boundary = b + 1;
-                     if (boundary < numBins && frame[boundary] >= lowFreqThreshold_dB_safe) {
-                         trackBin = boundary;
-                         safeLowFreqVal = freqBins[boundary]; // Simplified (no interp needed for fallback)
-                         found = true;
-                         break;
-                     }
-                 }
-             }
-             if (!found && frame[scanStart] < lowFreqThreshold_dB_safe) {
-                 break; // Signal ended
-             }
-         }
-         
-         if (safeLowFreqVal !== null) {
-             returnLowFreq_Hz = safeLowFreqVal;
-         }
+        // Look up the measurement where threshold was exactly safeThreshold (e.g., -30)
+        const safeMeas = measurements.find(m => Math.abs(m.threshold - safeThreshold) < 0.01);
+        if (safeMeas && safeMeas.foundBin) {
+            returnLowFreq_Hz = safeMeas.lowFreq_Hz;
+            returnEndFreq_Hz = safeMeas.endFreq_Hz;
+        }
     }
 
     return {
       threshold: safeThreshold,
       lowFreq_Hz: returnLowFreq_Hz,
       lowFreq_kHz: returnLowFreq_Hz !== null ? returnLowFreq_Hz / 1000 : null,
-      endFreq_Hz: returnLowFreq_Hz,
-      endFreq_kHz: returnLowFreq_Hz !== null ? returnLowFreq_Hz / 1000 : null,
+      endFreq_Hz: returnEndFreq_Hz,
+      endFreq_kHz: returnEndFreq_Hz !== null ? returnEndFreq_Hz / 1000 : null,
       warning: hasWarning
     };
   }
