@@ -1812,6 +1812,17 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     
     for (const testThreshold_dB of thresholdRange) {
       const highFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
+
+      // ============================================================
+      // [PRE-STEP] 取得上一次有效的測量值作為「諧波過濾」的基準
+      // ============================================================
+      let referenceFreq_kHz = null;
+      for (let i = measurements.length - 1; i >= 0; i--) {
+        if (measurements[i].foundBin && measurements[i].highFreq_kHz !== null) {
+          referenceFreq_kHz = measurements[i].highFreq_kHz;
+          break;
+        }
+      }
       
       // ============================================================
       // 1. 計算 HIGH FREQUENCY (Frame-by-Frame Scanning)
@@ -1844,9 +1855,24 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                 thisFrameFreq_Hz = freqBins[b] + powerRatio * freqDiff;
               }
             }
-            
+
+            // ============================================================
+            // [NEW] HARMONIC REJECTION (諧波濾除)
+            // 如果此候選頻率比上一次有效測量高出 20kHz 以上，視為諧波
+            // 無視它，繼續往下掃 (continue loop)
+            // ============================================================
+            if (referenceFreq_kHz !== null) {
+                const candidateFreq_kHz = candidateFreq_Hz / 1000;
+                const diff = candidateFreq_kHz - referenceFreq_kHz;
+                
+                if (diff > 20.0) {
+                    // console.log(`[Harmonic Skip] Frame ${f}: Skipped ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)} > 20)`);
+                    continue; // 跳過此 Bin，繼續檢查更低頻的 Bin (b--)
+                }
+            }
+
+            // --- 如果通過諧波檢查，則視為有效訊號 ---
             // 比較：這是目前為止找到的最高頻率嗎？
-            // Logic: We want the ABSOLUTE HIGHEST frequency across all frames
             if (highFreq_Hz === null || thisFrameFreq_Hz > highFreq_Hz) {
               highFreq_Hz = thisFrameFreq_Hz;
               highFreqBinIdx = b;
@@ -1854,7 +1880,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
               foundBin = true;
             }
             
-            // 這一幀已經找到最高點了，換下一幀
+            // 這一幀已經找到最高點了(且不是諧波)，換下一幀
             break; 
           }
         }
