@@ -2224,12 +2224,13 @@ export class BatCallDetector {
     return zoneFloors;
   }
 
-  /**
+/**
    * 2025 ENHANCEMENT: Find Optimal Low Frequency Threshold
    * Optimized with:
-   * 1. [UPDATED] Zonal Noise Floor (10kHz bands, Mode-based)
+   * 1. Zonal Noise Floor (10kHz bands, Mode-based)
    * 2. "Reverse Narrowing / Ratcheting" (Locking forward progress)
    * 3. "Hard Stop Logic" (Jump Protection)
+   4. [NEW] Harmonic Rejection (> 20kHz jump protection)
    */
   findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null) {
     if (spectrogram.length === 0) return {
@@ -2252,9 +2253,7 @@ export class BatCallDetector {
     const validPeakFrameIdx = Math.min(peakFrameIdx, spectrogram.length - 1);
 
     // ============================================================
-    // 1. [UPDATED] Calculate Zonal Robust Noise Floors
-    // Scope: Time[Peak -> End]
-    // Method: Frequency Histogram Mode per 10kHz band
+    // 1. Calculate Zonal Robust Noise Floors
     // ============================================================
     const zonalNoiseFloors = this.calculateZonalNoiseFloors(
       spectrogram, 
@@ -2263,19 +2262,17 @@ export class BatCallDetector {
       searchEndFrame
     );
     
-    // Helper to get noise floor for a specific frequency
     const getNoiseFloorForFreq = (freqKHz) => {
+      if (!freqKHz) return -80;
       const zoneKey = Math.floor(freqKHz / 10) * 10;
-      // Return specific zone floor, or fallback to nearest valid neighbor or global default
       if (zonalNoiseFloors[zoneKey] !== undefined) return zonalNoiseFloors[zoneKey];
-      // Fallback logic could be added here, currently defaulting to a safe low value
       return -80; 
     };
 
     console.log('[findOptimalLowFrequencyThreshold] Zonal Noise Analysis Completed');
     
     // ============================================================
-    // Initialize Variables for Reverse Narrowing
+    // Initialize Variables
     // ============================================================
     let hitNoiseFloor = false;
     let optimalThreshold = -24;
@@ -2344,9 +2341,9 @@ export class BatCallDetector {
         // Find lowest freq (Low -> High)
         for (let binIdx = 0; binIdx < targetFramePower.length; binIdx++) {
           if (targetFramePower[binIdx] > lowFreqThreshold_dB) {
-            lowFreq_Hz = freqBins[binIdx];
-            foundBin = true;
-            currentLowFreqPower_dB = targetFramePower[binIdx]; // Capture power
+            
+            // 暫存候選頻率
+            let candidateFreq_Hz = freqBins[binIdx];
             
             // Linear Interpolation
             if (binIdx > 0) {
@@ -2356,9 +2353,10 @@ export class BatCallDetector {
               if (prevPower < lowFreqThreshold_dB && thisPower > lowFreqThreshold_dB) {
                 const powerRatio = (thisPower - lowFreqThreshold_dB) / (thisPower - prevPower);
                 const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
-                lowFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
+                candidateFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
               }
             }
+
             // ============================================================
             // [NEW] Harmonic Rejection Logic
             // 如果當前找到的最低頻率比上一次有效測量高出 20kHz，
@@ -2381,7 +2379,7 @@ export class BatCallDetector {
             lowFreq_Hz = candidateFreq_Hz;
             foundBin = true;
             currentLowFreqPower_dB = targetFramePower[binIdx]; // Capture power
-            break; 
+            break; // 找到最低頻後立即跳出
           }
         }
       }
@@ -2399,7 +2397,7 @@ export class BatCallDetector {
       if (foundBin && lowFreq_Hz !== null) {
         const currentLowFreq_kHz = lowFreq_Hz / 1000;
         
-        // Find last valid measurement
+        // Find last valid measurement (Redundant lookup but explicit for clarity)
         let lastValidFreq_kHz = null;
         for (let i = measurements.length - 1; i >= 0; i--) {
             if (measurements[i].foundBin && measurements[i].lowFreq_kHz !== null) {
@@ -2411,9 +2409,9 @@ export class BatCallDetector {
         if (lastValidFreq_kHz !== null) {
             const jumpDiff = Math.abs(currentLowFreq_kHz - lastValidFreq_kHz);
             
-            // Low Freq Jump Threshold (2.0 kHz)
+            // Low Freq Jump Threshold (2.0 kHz) - Regular anomaly check
             if (jumpDiff > 2.0) {
-                // [UPDATED] Get Noise Floor specific to THIS frequency zone
+                // Get Noise Floor specific to THIS frequency zone
                 const specificNoiseFloor_dB = getNoiseFloorForFreq(currentLowFreq_kHz);
                 
                 console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
@@ -2453,7 +2451,6 @@ export class BatCallDetector {
       if (hitNoiseFloor) break;
     }
     
-    // ... (Result Selection logic remains largely the same)
     // ============================================================
     // RESULT SELECTION
     // ============================================================
@@ -2533,7 +2530,6 @@ export class BatCallDetector {
     
     // Safety Mechanism Re-calculation
     if (safeThreshold !== finalThreshold) {
-         // ... (Same safety logic as before) ...
          const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
          let activeEndFrameIdx_safe = validPeakFrameIdx; 
          
