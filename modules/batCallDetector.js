@@ -2246,9 +2246,87 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
   }
 
   /**
+   * [2025 NEW] Calculate Noise Floor per 10kHz Frequency Zone
+   * Uses Histogram Analysis to find the "Mode" (most frequent dB value) per zone.
+   * * @param {Array} spectrogram - Power matrix [time][freq]
+   * @param {Float32Array} freqBins - Frequency bin values in Hz
+   * @param {number} startFrame - Analysis start frame index
+   * @param {number} endFrame - Analysis end frame index
+   * @returns {Object} Map of zone start freq (kHz) -> noise floor (dB)
+   */
+  calculateZonalNoiseFloors(spectrogram, freqBins, startFrame, endFrame) {
+    const zoneFloors = {};
+    const zoneHistograms = {}; // Key: "10", "20" -> Array of dB values
+    
+    // 1. Initialize Histograms
+    // 10kHz zones: 0-10, 10-20, 20-30, etc.
+    const getZoneKey = (freqHz) => Math.floor(freqHz / 10000) * 10;
+    
+    // 2. Collect dB values into zones
+    // Only analyze the relevant time scope (Restricted Scope)
+    for (let f = startFrame; f <= endFrame; f++) {
+      if (f >= spectrogram.length) break;
+      const frame = spectrogram[f];
+      
+      for (let b = 0; b < frame.length; b++) {
+        const freqHz = freqBins[b];
+        const powerDb = frame[b];
+        
+        // Ignore extremely low values (silence/padding) to avoid skewing mode
+        if (powerDb < -100) continue;
+        
+        const zoneKey = getZoneKey(freqHz);
+        
+        if (!zoneHistograms[zoneKey]) {
+          zoneHistograms[zoneKey] = [];
+        }
+        zoneHistograms[zoneKey].push(powerDb);
+      }
+    }
+    
+    // 3. Calculate Mode (Most Frequent Value) for each zone
+    // Using a binning approach (0.5 dB resolution)
+    const BIN_SIZE = 0.5; 
+    
+    Object.keys(zoneHistograms).forEach(key => {
+      const values = zoneHistograms[key];
+      if (values.length === 0) {
+        zoneFloors[key] = -80; // Fallback default
+        return;
+      }
+      
+      // Create frequency map for histogram
+      const histogram = {};
+      let maxCount = 0;
+      let modeBin = -80;
+      
+      for (const val of values) {
+        // Bin the dB value (e.g., -60.3 -> -60.5 or -60.0)
+        const bin = Math.floor(val / BIN_SIZE) * BIN_SIZE;
+        histogram[bin] = (histogram[bin] || 0) + 1;
+        
+        if (histogram[bin] > maxCount) {
+          maxCount = histogram[bin];
+          modeBin = bin;
+        }
+      }
+      
+      // The Mode represents the center of the noise floor distribution.
+      // We add a small margin (e.g., +2.0 dB) to capture the upper edge of the noise floor.
+      // This makes it a "Robust" floor for comparison.
+      zoneFloors[key] = modeBin + 2.0;
+      
+      // Optional: Debug log
+      // console.log(`[NoiseZone ${key}-${parseInt(key)+10}kHz] Mode: ${modeBin} dB, Threshold: ${zoneFloors[key]} dB (Count: ${maxCount})`);
+    });
+    
+    return zoneFloors;
+  }
+
+  /**
    * 2025 ENHANCEMENT: Find Optimal Low Frequency Threshold
    * Optimized with:
-   * 1. "Restricted Scope Noise Floor" (Lower-Right Quadrant)
+   * 1. [UPDATED] Zonal Noise Floor (10kHz bands, Mode-based)
    * 2. "Reverse Narrowing / Ratcheting" (Locking forward progress)
    * 3. "Hard Stop Logic" (Jump Protection)
    */
@@ -2265,57 +2343,35 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     const stablePeakPower_dB = callPeakPower_dB;
     const numBins = spectrogram[0].length;
     
-    // ============================================================
-    // Use limitFrameIdx if provided to match Manual Mode's structural analysis
-    // ============================================================
+    // Use limitFrameIdx if provided
     const searchEndFrame = (limitFrameIdx !== null && limitFrameIdx < spectrogram.length) 
       ? limitFrameIdx 
       : spectrogram.length - 1;
 
-    // ============================================================
-    // 1. Calculate Robust Noise Floor (Restricted Scope)
-    // Scope: Time[Peak -> End], Freq[0 -> Peak Bin]
-    // ============================================================
-    let minDb = Infinity;
-    let maxDb = -Infinity;
-
-    // 1a. Find Peak Bin Index (Approximate based on Peak Frame)
-    let peakBinIdx = numBins - 1; 
     const validPeakFrameIdx = Math.min(peakFrameIdx, spectrogram.length - 1);
+
+    // ============================================================
+    // 1. [UPDATED] Calculate Zonal Robust Noise Floors
+    // Scope: Time[Peak -> End]
+    // Method: Frequency Histogram Mode per 10kHz band
+    // ============================================================
+    const zonalNoiseFloors = this.calculateZonalNoiseFloors(
+      spectrogram, 
+      freqBins, 
+      validPeakFrameIdx, 
+      searchEndFrame
+    );
     
-    if (spectrogram.length > 0) {
-      const pFrame = spectrogram[validPeakFrameIdx];
-      let tempMax = -Infinity;
-      for (let b = 0; b < pFrame.length; b++) {
-        if (pFrame[b] > tempMax) {
-          tempMax = pFrame[b];
-          peakBinIdx = b;
-        }
-      }
-    }
+    // Helper to get noise floor for a specific frequency
+    const getNoiseFloorForFreq = (freqKHz) => {
+      const zoneKey = Math.floor(freqKHz / 10) * 10;
+      // Return specific zone floor, or fallback to nearest valid neighbor or global default
+      if (zonalNoiseFloors[zoneKey] !== undefined) return zonalNoiseFloors[zoneKey];
+      // Fallback logic could be added here, currently defaulting to a safe low value
+      return -80; 
+    };
 
-    // 1b. Iterate restricted scope (Lower-Right Quadrant)
-    for (let f = validPeakFrameIdx; f <= searchEndFrame; f++) {
-      const frame = spectrogram[f];
-      // Scan only from Bottom (0) up to Peak Bin
-      for (let b = 0; b <= peakBinIdx; b++) {
-        const val = frame[b];
-        if (val < minDb) minDb = val;
-        if (val > maxDb) maxDb = val;
-      }
-    }
-
-    if (minDb === Infinity) {
-       minDb = -100;
-       maxDb = callPeakPower_dB;
-    }
-
-    const dynamicRange = maxDb - minDb;
-    const robustNoiseFloor_dB = minDb + dynamicRange * 0.6;
-
-    console.log('[findOptimalLowFrequencyThreshold] CONFIGURATION:');
-    console.log(`  Scope: Time[${validPeakFrameIdx}-${searchEndFrame}], Freq[Bin 0-${peakBinIdx}]`);
-    console.log(`  Robust Noise Floor: ${robustNoiseFloor_dB.toFixed(2)} dB`);
+    console.log('[findOptimalLowFrequencyThreshold] Zonal Noise Analysis Completed');
     
     // ============================================================
     // Initialize Variables for Reverse Narrowing
@@ -2324,10 +2380,9 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     let optimalThreshold = -24;
     let optimalMeasurement = null;
 
-    // [NEW] Ratcheting mechanism: Start from Peak, but push forward as we find tail
     let currentSearchStartFrame = validPeakFrameIdx;
 
-    // 測試閾值範圍：-24 到 -70 dB
+    // Test thresholds: -24 to -70 dB
     const thresholdRange = [];
     for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
       thresholdRange.push(threshold);
@@ -2343,20 +2398,14 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       const lowFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
       
       // ============================================================
-      // 2. Gap-Bridging Forward Scan with Reverse Narrowing
-      // Logic: Scan from 'currentSearchStartFrame' to 'searchEndFrame'
-      // If signal found at Frame 53, next loop starts at Frame 53.
+      // 2. Gap-Bridging Forward Scan
       // ============================================================
-      
-      // Default: If no new signal found further out, the end is where we started this loop
       let activeEndFrameIdx = currentSearchStartFrame; 
       
-      // OPTIMIZED SCAN: Start from the furthest known signal point
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
         
-        // Quick check: does this frame have ANY energy above threshold?
         for (let b = 0; b < numBins; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
@@ -2369,14 +2418,12 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
         } 
       }
       
-      // [CRITICAL] Update the start pointer for the NEXT iteration
-      // This "locks in" the progress. We will never scan before activeEndFrameIdx again.
       currentSearchStartFrame = activeEndFrameIdx;
       
       // ============================================================
       // 3. Measure Low Frequency at the found End Frame
       // ============================================================
-      let currentLowFreqPower_dB = -Infinity; // Store for noise check
+      let currentLowFreqPower_dB = -Infinity; 
 
       if (activeEndFrameIdx !== -1) {
         const targetFramePower = spectrogram[activeEndFrameIdx];
@@ -2412,7 +2459,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       }
 
       // ============================================================
-      // 4. JUMP PROTECTION & NOISE FLOOR CHECK
+      // 4. JUMP PROTECTION & ZONAL NOISE FLOOR CHECK
       // ============================================================
       if (foundBin && lowFreq_Hz !== null) {
         const currentLowFreq_kHz = lowFreq_Hz / 1000;
@@ -2431,16 +2478,20 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
             
             // Low Freq Jump Threshold (2.0 kHz)
             if (jumpDiff > 2.0) {
-                console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz (Diff: ${jumpDiff.toFixed(2)})`);
+                // [UPDATED] Get Noise Floor specific to THIS frequency zone
+                const specificNoiseFloor_dB = getNoiseFloorForFreq(currentLowFreq_kHz);
                 
-                // Check against Restricted Scope Noise Floor
-                if (currentLowFreqPower_dB > robustNoiseFloor_dB) {
-                    console.log(`    ✓ Signal ABOVE noise floor -> Continue (Valid extension)`);
+                console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
+                console.log(`    Zone Noise Floor (${Math.floor(currentLowFreq_kHz/10)*10}kHz band): ${specificNoiseFloor_dB.toFixed(2)} dB | Signal: ${currentLowFreqPower_dB.toFixed(2)} dB`);
+                
+                // Check if signal is above its zonal noise floor
+                if (currentLowFreqPower_dB > specificNoiseFloor_dB) {
+                    console.log(`    ✓ Signal ABOVE zonal noise floor -> Continue (Valid extension)`);
                 } else {
-                    console.log(`    ✗ Signal AT/BELOW noise floor -> BREAK (hit noise)`);
+                    console.log(`    ✗ Signal AT/BELOW zonal noise floor -> BREAK (hit noise)`);
                     hitNoiseFloor = true;
                     
-                    // Set optimal to the last valid one
+                    // Fallback to last valid
                     for (let j = measurements.length - 1; j >= 0; j--) {
                         if (measurements[j].foundBin && measurements[j].lowFreq_kHz !== null) {
                             optimalMeasurement = measurements[j];
@@ -2467,6 +2518,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
       if (hitNoiseFloor) break;
     }
     
+    // ... (Result Selection logic remains largely the same)
     // ============================================================
     // RESULT SELECTION
     // ============================================================
@@ -2486,10 +2538,7 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     // If not hit noise floor, use first valid (or apply standard anomaly check)
     if (!hitNoiseFloor) {
         if (validMeasurements.length > 0) {
-            // Because of the Hard Stop protection, we can largely trust the process.
-            // However, we can keep the "First Anomaly" logic for smaller drifts (1.5-2.0kHz)
-            // that didn't trigger the Hard Stop.
-            
+            // Standard anomaly check logic (preserved)
             let recordedEarlyAnomaly = null;
             let firstAnomalyIndex = -1;
             let lastValidMeasurement = validMeasurements[0];
@@ -2500,8 +2549,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                 const currFreq = validMeasurements[i].lowFreq_kHz;
                 const diff = Math.abs(currFreq - prevFreq);
 
-                // Minor Anomaly Check (1.5 - 2.0 kHz range)
-                // > 2.0 would have triggered Hard Stop already
                 const isAnomaly = diff > 1.5;
 
                 if (isAnomaly) {
@@ -2511,7 +2558,6 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
                         lastValidMeasurement = validMeasurements[i - 1];
                     }
                 } else {
-                    // Reset if we see stability again
                     if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
                         const checkStart = firstAnomalyIndex + 1;
                         const checkEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
@@ -2550,15 +2596,13 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     let returnEndFreq_Hz = optimalMeasurement.endFreq_Hz;
     let returnEndFreq_kHz = optimalMeasurement.endFreq_kHz;
     
-    // Safety Mechanism Re-calculation (if safeThreshold != finalThreshold)
+    // Safety Mechanism Re-calculation
     if (safeThreshold !== finalThreshold) {
+         // ... (Same safety logic as before) ...
          const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
+         let activeEndFrameIdx_safe = validPeakFrameIdx; 
          
-         // Note: For safety re-scan, we should technically start from Peak 
-         // because we reset the threshold logic.
-         let activeEndFrameIdx_safe = peakFrameIdx; 
-         
-         for (let f = peakFrameIdx; f <= searchEndFrame; f++) {
+         for (let f = validPeakFrameIdx; f <= searchEndFrame; f++) {
             const frame = spectrogram[f];
             for (let b = 0; b < numBins; b++) {
                if (frame[b] > lowFreqThreshold_dB_safe) { activeEndFrameIdx_safe = f; break; }
