@@ -2569,6 +2569,19 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
     }
     
     // ============================================================
+    // [FIX] Auto High Pass Filter Injection
+    // 根據 Peak Freq 自動設定 High Pass Filter，影響後續 Start/Low Freq 判斷
+    // ============================================================
+    const autoCutoff = this.calculateAutoHighpassFilterFreq(call.peakFreq_kHz);
+    
+    // 強制套用自動計算的 cutoff (或者你可以加一個 config 開關來決定是否啟用此行為)
+    if (autoCutoff > 0) {
+        this.config.enableHighpassFilter = true;
+        this.config.highpassFilterFreq_kHz = autoCutoff;
+        // console.log(`[Auto Detect] Peak: ${call.peakFreq_kHz.toFixed(1)}kHz, Applying HPF: ${autoCutoff}kHz`);
+    }
+
+    // ============================================================
     // AUTO MODE: If highFreqThreshold_dB_isAuto is enabled,
     // automatically find optimal threshold using STABLE call.peakPower_dB
     // (NOT the floating globalPeakPower_dB from entire spectrogram)
