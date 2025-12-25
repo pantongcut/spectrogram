@@ -2297,6 +2297,18 @@ export class BatCallDetector {
       let foundBin = false;
       
       const lowFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
+
+      // ============================================================
+      // [NEW] Get Reference from previous valid measurement
+      // 用於 Harmonic Rejection
+      // ============================================================
+      let referenceFreq_kHz = null;
+      for (let i = measurements.length - 1; i >= 0; i--) {
+        if (measurements[i].foundBin && measurements[i].lowFreq_kHz !== null) {
+          referenceFreq_kHz = measurements[i].lowFreq_kHz;
+          break;
+        }
+      }
       
       // ============================================================
       // 2. Gap-Bridging Forward Scan
