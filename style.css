@@ -775,7 +775,7 @@ input[type="range"]#peakThresholdSlider {
   column-gap: 12px;
   row-gap: 5px;
   padding: 8px 12px;
-  width: 600px;
+  width: 560px;
   background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -800,9 +800,16 @@ input[type="range"]#peakThresholdSlider {
   gap: 8px;
 }
 
+#autoDetectThresholdVal {
+  font-weight: bold;
+  margin: -5px 0px 0px -5px;
+}
+
 #auto-detect-tool-bar .tool-item label {
   font-size: 14px;
   white-space: nowrap;
+  margin: -3px 0px 0px 0px;
+  font-weight: bold;
 }
 
 #auto-detect-tool-bar input[type="range"] {
