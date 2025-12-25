@@ -4104,10 +4104,10 @@ findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, call
    * @param {Float32Array} audioData - Audio samples
    * @param {number} filterFreq_Hz - Filter frequency in Hz
    * @param {number} sampleRate - Sample rate in Hz
-   * @param {number} order - Filter order (default 2)
+   * @param {number} order - Filter order (default 4)
    * @returns {Float32Array} Filtered audio data
    */
-  applyHighpassFilter(audioData, filterFreq_Hz, sampleRate, order = 2) {
+  applyHighpassFilter(audioData, filterFreq_Hz, sampleRate, order = 4) {
     if (!audioData || audioData.length === 0 || filterFreq_Hz <= 0) {
       return audioData;
     }
