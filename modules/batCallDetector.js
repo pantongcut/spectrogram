@@ -664,12 +664,43 @@ export class BatCallDetector {
       let segmentCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: false });
 
       // ============================================================
-      // [NEW] ROI 唯一化處理：只保留 Peak Power 最大的一個 Call
+      // [FIXED] ROI 智慧過濾：去除重疊的回音，但保留時間分開的叫聲
       // ============================================================
       if (segmentCalls.length > 1) {
+        // 1. 先依能量排序
         segmentCalls.sort((a, b) => b.peakPower_dB - a.peakPower_dB);
-        segmentCalls = [segmentCalls[0]];
-        console.log(`[ROI Filter] ROI ${i}: Kept strongest call (${segmentCalls[0].peakPower_dB.toFixed(1)} dB) out of ${segmentCalls.length + 1} candidates.`);
+        
+        const keptCalls = [];
+        
+        // 2. 遍歷每一個 Call
+        for (const candidate of segmentCalls) {
+          let isEcho = false;
+          
+          // 檢查是否與已經保留的強 Call 重疊
+          for (const kept of keptCalls) {
+            // 計算時間重疊
+            const start = Math.max(candidate.startTime_s, kept.startTime_s);
+            const end = Math.min(candidate.endTime_s, kept.endTime_s);
+            
+            if (end > start) {
+              // 有重疊。計算重疊比例 (相對於較短的那個)
+              const overlapDur = end - start;
+              const minDur = Math.min(candidate.duration_ms/1000, kept.duration_ms/1000);
+              
+              // 如果重疊超過 50%，視為同一叫聲的回音/殘影，予以丟棄
+              if (overlapDur > minDur * 0.5) {
+                isEcho = true;
+                break;
+              }
+            }
+          }
+          
+          if (!isEcho) {
+            keptCalls.push(candidate);
+          }
+        }
+        
+        segmentCalls = keptCalls;
       }
 
       // Correct call time markers (relative -> absolute time)
