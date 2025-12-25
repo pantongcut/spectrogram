@@ -611,42 +611,56 @@ export class BatCallDetector {
       let segmentAudio = fullAudioData.slice(seg.startSample, seg.endSample);
 
       // ============================================================
-      // [NEW] Auto-HPF Pre-pass
+      // [FIX] Optimized Auto-HPF Pre-pass (No duplicate detectCalls)
+      // 直接生成 Spectrogram 找 Peak，不跑完整的 Detection 流程
       // ============================================================
       
-      // 1. 快速檢測 (Skip SNR for speed)
-      const prePassCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: true });
+      // 1. Generate Spectrogram directly (Fast)
+      const spec = this.generateSpectrogram(segmentAudio, sampleRate, flowKHz, fhighKHz);
       
-      if (prePassCalls.length > 0) {
-          // 取出最強的 Call 的 Peak Freq
-          const dominantCall = prePassCalls.reduce((prev, current) => (prev.peakPower_dB > current.peakPower_dB) ? prev : current);
-          const peakFreq_kHz = dominantCall.peakFreq_kHz;
+      if (spec) {
+          // 2. Find Peak Frequency manually in the matrix
+          let maxPower = -Infinity;
+          let maxBinIdx = 0;
+          const { powerMatrix, freqBins } = spec;
 
-          // 2. 計算所需的 HPF Cutoff
+          // Simple scan for global peak
+          for (let f = 0; f < powerMatrix.length; f++) {
+              const frame = powerMatrix[f];
+              for (let b = 0; b < frame.length; b++) {
+                  if (frame[b] > maxPower) {
+                      maxPower = frame[b];
+                      maxBinIdx = b;
+                  }
+              }
+          }
+
+          const peakFreq_kHz = freqBins[maxBinIdx] / 1000;
+
+          // 3. Calculate HPF Cutoff
           const autoCutoff = this.calculateAutoHighpassFilterFreq(peakFreq_kHz);
           
           if (autoCutoff > 0) {
               console.log(`[Auto HPF] ROI ${i}: Peak ${peakFreq_kHz.toFixed(1)}kHz -> Applying Butterworth HPF @ ${autoCutoff}kHz`);
               
-              // 3. 對原始音訊應用 Butterworth Filter
-              // [FIXED] 現在這裡是合法的，因為 segmentAudio 是 let
+              // 4. Apply Filter to Audio (Re-assign segmentAudio)
               segmentAudio = this.applyHighpassFilter(segmentAudio, autoCutoff * 1000, sampleRate);
               
-              // 更新 Config
+              // 5. Update Config (Enforcing limits for detection)
               this.config.enableHighpassFilter = true;
               this.config.highpassFilterFreq_kHz = autoCutoff;
           } else {
              this.config.enableHighpassFilter = false;
           }
-      } else {
-          // 如果預檢測沒找到任何東西，也確保 HPF 關閉
-          this.config.enableHighpassFilter = false;
       }
-      
+
       // Calculate absolute time offset in seconds
       const timeOffset_s = seg.startSample / sampleRate;
 
-      // Run detailed detection (using the potentially filtered segmentAudio)
+      // ============================================================
+      // [FIX] Run Detailed Detection ONCE (on potentially filtered audio)
+      // 這是唯一一次呼叫 detectCalls，Log 只會出現一次
+      // ============================================================
       const segmentCalls = await this.detectCalls(segmentAudio, sampleRate, flowKHz, fhighKHz, { skipSNR: false });
 
       // Correct call time markers (relative -> absolute time)
