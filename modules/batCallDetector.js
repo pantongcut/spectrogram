@@ -2378,17 +2378,36 @@ export class BatCallDetector {
             }
 
             // ============================================================
-            // Sub-harmonic Rejection Logic
+            // Sub-harmonic Rejection Logic (Hard Stop)
             // ============================================================
             if (referenceFreq_kHz !== null) {
                 const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
                 
-                // 使用 Math.abs 來同時攔截 +15kHz 和 -15kHz 的跳變
+                // 當檢測到異常跳變 (> 15kHz)
                 if (Math.abs(diff) > 15.0) {
                     console.log(`[LowFreq Jump Rejected] Hard Stop at ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
-                    hitNoiseFloor = true; 
-                    break; 
+                    
+                    hitNoiseFloor = true;
+                    
+                    // [CRITICAL FIX] 立即回溯尋找上一個「有效」的測量值
+                    // 我們從 measurements 陣列的最後面開始往前找
+                    // 因為 measurements 存的是之前 threshold (例如 -52dB) 的成功結果
+                    let foundFallback = false;
+                    for (let j = measurements.length - 1; j >= 0; j--) {
+                        if (measurements[j].foundBin && measurements[j].lowFreq_kHz !== null) {
+                            optimalMeasurement = measurements[j];
+                            optimalThreshold = measurements[j].threshold;
+                            foundFallback = true;
+                            // console.log(`  -> Fallback to threshold: ${optimalThreshold}dB, Freq: ${optimalMeasurement.lowFreq_kHz.toFixed(2)}kHz`);
+                            break;
+                        }
+                    }
+
+                    // 如果完全找不到（極罕見，因為有 reference 通常代表有前值），保持 optimalMeasurement 為 null
+                    // 這會在函數最後的防呆機制被處理
+                    
+                    break; // 跳出 threshold 迴圈
                 }
             }
 
