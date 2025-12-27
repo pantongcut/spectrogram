@@ -991,13 +991,34 @@ export class BatCallDetector {
     // Phase 2: Measure precise parameters for each detected call
     const calls = filteredSegments.map(segment => {
       const call = new BatCall();
+
+      // ============================================================
+      // [FIX] 加入 Padding 以保留叫聲微弱的頭尾
+      // 建議加入 5ms 的 Padding，讓 Auto Threshold 機制有空間發揮
+      // ============================================================
+      const padding_ms = 5; // 預留 5ms 緩衝區
+      // 計算 1 個 Frame 代表多少秒
+      const timePerFrame = timeFrames[1] - timeFrames[0];
+      // 計算需要擴張多少個 Frame
+      const paddingFrames = Math.ceil((padding_ms / 1000) / timePerFrame);
       // These are Absolute Times based on the full spectrogram
-      call.startTime_s = timeFrames[segment.startFrame];
-      call.endTime_s = timeFrames[Math.min(segment.endFrame + 1, timeFrames.length - 1)];
+      // 計算擴張後的安全邊界 (防止超出陣列範圍)
+      const safeStartFrame = Math.max(0, segment.startFrame - paddingFrames);
+      const safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
       
-      // Slice the spectrogram for this specific call (Relative Data)
-      call.spectrogram = powerMatrix.slice(segment.startFrame, segment.endFrame + 1);
-      call.timeFrames = timeFrames.slice(segment.startFrame, segment.endFrame + 2);
+      // ============================================================
+      // 使用擴張後的邊界進行切片 (Slicing)
+      // ============================================================
+      
+      // 設定粗略的開始時間 (這會在 measureFrequencyParameters 中被更精確的值覆蓋)
+      call.startTime_s = timeFrames[safeStartFrame];
+      // 設定粗略的結束時間
+      call.endTime_s = timeFrames[Math.min(safeEndFrame + 1, timeFrames.length - 1)];
+            // 切割頻譜 (包含 Padding)
+      call.spectrogram = powerMatrix.slice(safeStartFrame, safeEndFrame + 1);
+            // 切割時間軸 (包含 Padding)
+      call.timeFrames = timeFrames.slice(safeStartFrame, safeEndFrame + 2);
+      
       call.freqBins = freqBins;
       
       call.calculateDuration();
