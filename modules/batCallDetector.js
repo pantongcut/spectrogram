@@ -3253,106 +3253,132 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // STEP 2.5: Calculate START FREQUENCY (獨立於 High Frequency)
+    // STEP 2.5: Calculate START FREQUENCY using Back-tracking Continuity Check
     // 
-    // 2025 關鍵修正：
-    // Start Frequency 是真正的 "First frame of call signal (frame 0)"
-    // 總是從第一幀掃描得出，但其值由規則 (a)/(b) 決定
+    // 2025 MAJOR REFACTOR: Implement Back-tracking Signal Tracer
     // 
-    // 方法：
-    // 在 AUTO MODE 和 NON-AUTO MODE 中，都使用 -24dB 閾值計算 Start Frequency
-    // (a) 若 -24dB 閾值的頻率 < Peak Frequency：使用該值為 Start Frequency
-    // (b) 若 -24dB 閾值的頻率 >= Peak Frequency：Start Frequency = High Frequency
+    // Problem Solved:
+    // - Previous Frame 0 scan with fixed -24dB threshold picked up padding noise
+    // - Noisy Start Frequency incorrectly overrode valid Low Frequency
     // 
-    // 時間點說明：
-    // Start Frequency 總是在第一幀（frame 0），時間 = 0 ms
-    // 但 Start Frequency 的值可能等於 High Frequency（規則 b）
+    // Solution: Back-tracking from High Frequency anchor point
+    // - Ensures Start Frequency is part of continuous signal
+    // - Prevents isolated noise peaks from being detected
+    // - Uses same threshold as High Frequency detection for consistency
+    // 
+    // Algorithm:
+    // 1. Anchor: Start from (highFreqFrameIdx, highFreqBinIdx)
+    // 2. Scan backwards frame by frame (highFreqFrameIdx - 1 -> 0)
+    // 3. For each frame: Find max energy bin within ±2 kHz of current frequency
+    // 4. Continuity check: Only accept bins above used threshold
+    // 5. Stop when: Signal break or frequency jump > 2 kHz detected
     // ============================================================
-    const firstFramePower = spectrogram[0];
+    
     let startFreq_Hz = null;
     let startFreq_kHz = null;
-    let startFreqBinIdx = 0;  // 2025: Track independent bin index for Start Frequency
-    let startFreqFrameIdx = 0;  // 2025: Start Frequency is always in frame 0
+    let startFreqBinIdx = highFreqBinIdx;  // Start from High Frequency's bin
+    let startFreqFrameIdx = highFreqFrameIdx;  // Start from High Frequency's frame
     
-    // 使用 -24dB 閾值計算 Start Frequency（無論是否 Auto Mode）
-    const threshold_24dB = peakPower_dB - 24;
+    // Get the threshold used to find High Frequency
+    // In Auto Mode: stored in call.highFreqThreshold_dB_used
+    // In Manual Mode: calculate from peakPower_dB + config threshold
+    let usedThreshold_dB;
+    if (call.highFreqThreshold_dB_used !== undefined) {
+      // Auto Mode: Use stored threshold (relative to peakPower_dB)
+      usedThreshold_dB = peakPower_dB + call.highFreqThreshold_dB_used;
+    } else {
+      // Manual Mode: Calculate from config
+      usedThreshold_dB = peakPower_dB + highFreqThreshold_dB;
+    }
     
-    // 2025: 低頻 Noise 保護閾值
-    const LOW_FREQ_NOISE_THRESHOLD_kHz = 40;  // kHz - 低於此頻率的 bin 在某些情況下應被忽略
-    const HIGH_PEAK_THRESHOLD_kHz = 60;       // kHz - Peak >= 此值時啟動低頻保護
-    const peakFreqInKHz = peakFreq_Hz / 1000; // 將 Peak 頻率轉換為 kHz
-    const shouldIgnoreLowFreqNoise = peakFreqInKHz >= HIGH_PEAK_THRESHOLD_kHz;
+    // Calculate frequency window for continuity check (±2 kHz)
+    const MAX_FREQ_JUMP_kHz = 2;
+    const maxJumpBins = Math.ceil(MAX_FREQ_JUMP_kHz * 1000 / freqResolution);
     
-    // 從低到高掃描，找最低頻率（規則 a）
-    for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
-      if (firstFramePower[binIdx] > threshold_24dB) {
-        const testStartFreq_Hz = freqBins[binIdx];
-        const testStartFreq_kHz = testStartFreq_Hz / 1000;
-
-        // Apply Highpass Filter Protection
-        // If Highpass Filter is enabled, ignore frequencies below the cutoff
-        // This prevents the detector from picking up filtered-out noise as Start Frequency
-        if (this.config.enableHighpassFilter && testStartFreq_kHz < this.config.highpassFilterFreq_kHz) {
-          continue; // Skip frequencies cut off by the highpass filter
+    // Initialize current tracking point to High Frequency
+    let currentFreq_Hz = highFreq_Hz;
+    let currentBinIdx = highFreqBinIdx;
+    let currentFrameIdx = highFreqFrameIdx;
+    
+    // Start backward scan from frame before High Frequency
+    for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
+      const framePower = spectrogram[f];
+      
+      // Define search window: ±2 kHz around current bin
+      const binSearchMin = Math.max(0, currentBinIdx - maxJumpBins);
+      const binSearchMax = Math.min(framePower.length - 1, currentBinIdx + maxJumpBins);
+      
+      // Find maximum energy bin within the window
+      let maxPower_dB = -Infinity;
+      let maxBinIdx = -1;
+      
+      for (let binIdx = binSearchMin; binIdx <= binSearchMax; binIdx++) {
+        if (framePower[binIdx] > maxPower_dB) {
+          maxPower_dB = framePower[binIdx];
+          maxBinIdx = binIdx;
         }
-
-        // 應用低頻 Noise 保護機制
-        // 若 Peak ≥ 60 kHz，忽略 40 kHz 或以下的候選值
-        if (shouldIgnoreLowFreqNoise && testStartFreq_kHz <= LOW_FREQ_NOISE_THRESHOLD_kHz) {
-          continue;
-        }
-
-        // 檢查是否低於 Peak Frequency（規則 a）
-        if (testStartFreq_kHz < peakFreqInKHz) {
-          // 滿足規則 (a)：使用此值為 Start Frequency
-          startFreq_Hz = testStartFreq_Hz;
-          startFreq_kHz = testStartFreq_kHz;
-          startFreqBinIdx = binIdx;  // 2025: Store independent bin index for Start Frequency
+      }
+      
+      // Check continuity: Is the found bin above threshold AND within frequency window?
+      if (maxBinIdx !== -1 && maxPower_dB > usedThreshold_dB) {
+        const foundFreq_Hz = freqBins[maxBinIdx];
+        const freqJump_Hz = Math.abs(foundFreq_Hz - currentFreq_Hz);
+        
+        // Frequency continuity check: Must be within ±2 kHz
+        if (freqJump_Hz <= MAX_FREQ_JUMP_kHz * 1000) {
+          // Valid continuation found - update tracking point
+          startFreq_Hz = foundFreq_Hz;
+          startFreq_kHz = foundFreq_Hz / 1000;
+          startFreqBinIdx = maxBinIdx;
+          startFreqFrameIdx = f;
           
-          // 嘗試線性插值以獲得更高精度
-          if (binIdx > 0) {
-            const thisPower = firstFramePower[binIdx];
-            const prevPower = firstFramePower[binIdx - 1];
-            
-            if (prevPower < threshold_24dB && thisPower > threshold_24dB) {
-              const powerRatio = (thisPower - threshold_24dB) / (thisPower - prevPower);
-              const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
-              startFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
-              startFreq_kHz = startFreq_Hz / 1000;
-            }
-          }
+          // Update current point for next iteration
+          currentFreq_Hz = foundFreq_Hz;
+          currentBinIdx = maxBinIdx;
+          currentFrameIdx = f;
+          
+          // Continue scanning backwards
+          continue;
+        } else {
+          // Frequency jump too large - signal break detected
+          // Stop scanning, last valid point is the Start Frequency
           break;
         }
+      } else {
+        // No valid bin found in this frame OR below threshold
+        // Signal break detected - stop scanning
+        break;
       }
     }
     
-    // 如果規則 (a) 不滿足（-24dB 頻率 >= Peak Frequency），使用規則 (b)
+    // Safety fallback: If no backward continuation found, use High Frequency itself
     if (startFreq_Hz === null) {
-      // Start Frequency = High Frequency（規則 b）
-      // Note: 此時 Start Frequency 的值等於 High Frequency 的值
-      // 但 Start Frequency 的幀索引固定為 0（frame 0）
       startFreq_Hz = highFreq_Hz;
       startFreq_kHz = highFreq_Hz / 1000;
-      startFreqBinIdx = highFreqBinIdx;  // 2025: Use High Frequency's bin index
-      // 但時間點仍然是 0 ms（第一幀）
+      startFreqBinIdx = highFreqBinIdx;
+      startFreqFrameIdx = highFreqFrameIdx;
     }
     
     // 存儲 Start Frequency 及其信息
     call.startFreq_kHz = startFreq_kHz;
-    call.startFreqTime_s = timeFrames[0];  // Time of first frame (frame 0)
-    call.startFreqBinIdx = startFreqBinIdx;  // 2025: Store independent bin index
-    call.startFreqFrameIdx = startFreqFrameIdx;  // 2025: Always frame 0
+    call.startFreqTime_s = timeFrames[startFreqFrameIdx];  // Time of actual start frequency frame
+    call.startFreqBinIdx = startFreqBinIdx;  // Store bin index from back-tracking
+    call.startFreqFrameIdx = startFreqFrameIdx;  // Store actual frame index
     
     // ============================================================
     // NEW (2025): Calculate start frequency time in milliseconds
-    // startFreq_ms = absolute time of start frequency (always at first frame = 0 ms)
+    // startFreq_ms = absolute time of actual start frequency frame within selection
     // Unit: ms (milliseconds), relative to selection area start
     // 
-    // NOTE: Start Frequency is ALWAYS at frame 0 by definition
-    // (Start Frequency is the "First frame of call signal")
+    // CRITICAL FIX: Now uses ACTUAL frame index from back-tracking, not hardcoded to 0
     // ============================================================
-    const firstFrameTime_ms = 0;  // First frame is at time 0 relative to selection area start
-    call.startFreq_ms = firstFrameTime_ms;  // Start frequency time is always at frame 0
+    let startFreqTime_ms = 0;
+    if (startFreqFrameIdx < timeFrames.length) {
+      const startFreqTimeInSeconds = timeFrames[startFreqFrameIdx];
+      const firstFrameTimeInSeconds = timeFrames[0];
+      startFreqTime_ms = (startFreqTimeInSeconds - firstFrameTimeInSeconds) * 1000;
+    }
+    call.startFreq_ms = startFreqTime_ms;  // Start frequency time based on actual frame
     
     // ============================================================
     // STEP 3: Calculate LOW FREQUENCY from last frame
@@ -3651,23 +3677,43 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // LOW FREQUENCY OPTIMIZATION: Compare with Start Frequency
+    // LOW FREQUENCY OPTIMIZATION: Compare with Start Frequency (with safety check)
     // If Start Frequency is lower, use it as Low Frequency
-    // 優化邏輯：如果 Start Frequency 比計算的 Low Frequency 更低
-    // 則使用 Start Frequency 作為 Low Frequency
+    // 優化邏輯：如果 Start Frequency 比計算的 Low Frequency 更低，則使用 Start Frequency 作為 Low Frequency
     // 
-    // IMPORTANT: This optimization respects anti-rebounce mechanism
-    // Start Frequency is from FIRST frame (after anti-rebounce boundary)
-    // Low Frequency is from LAST frame (also respects anti-rebounce)
-    // Both are measured within the same protected boundaries
+    // 2025 SAFETY CHECK: Prevent noisy Start Frequency from overriding clean Auto Low Frequency
+    // Issue: Back-tracking can sometimes still encounter edge cases where High Frequency is noisy
+    // Solution: Only allow Start Frequency to override if:
+    // 1. The difference is small (< 10 kHz), OR
+    // 2. We are NOT in Auto Mode for Low Frequency (manual adjustment is explicit)
+    // 
+    // This ensures automatic low frequency detection remains robust and clean.
     // ============================================================
     if (startFreq_kHz !== null && startFreq_kHz < lowFreq_kHz) {
-      lowFreq_kHz = startFreq_kHz;
+      // Check if we should accept the Start Frequency override
+      const freqDifference = lowFreq_kHz - startFreq_kHz;
+      const isAutoLowFreqMode = this.config.lowFreqThreshold_dB_isAuto === true;
       
-      // Update validation metadata to reflect use of Start Frequency
-      if (call._lowFreqValidation) {
-        call._lowFreqValidation.usedStartFreq = true;
-        call._lowFreqValidation.note = 'Low Frequency replaced by Start Frequency (lower value)';
+      // Allow override if:
+      // - Difference is small (< 10 kHz), OR
+      // - Not in Auto Mode (explicit manual control)
+      const shouldApplyStartFreqOverride = (freqDifference < 10) || (!isAutoLowFreqMode);
+      
+      if (shouldApplyStartFreqOverride) {
+        lowFreq_kHz = startFreq_kHz;
+        
+        // Update validation metadata to reflect use of Start Frequency
+        if (call._lowFreqValidation) {
+          call._lowFreqValidation.usedStartFreq = true;
+          call._lowFreqValidation.note = `Low Frequency replaced by Start Frequency (difference: ${freqDifference.toFixed(2)} kHz, override allowed)`;
+        }
+      } else {
+        // Reject override - Start Frequency is too far below Low Frequency
+        // This indicates noisy Start Frequency in Auto Mode
+        if (call._lowFreqValidation) {
+          call._lowFreqValidation.usedStartFreq = false;
+          call._lowFreqValidation.note = `Start Frequency override rejected (Auto Mode, difference: ${freqDifference.toFixed(2)} kHz exceeds 10 kHz limit, possible noise)`;
+        }
       }
     }
     
