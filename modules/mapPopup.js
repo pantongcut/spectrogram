@@ -629,6 +629,40 @@ export function initMapPopup({
     layersControl = L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
     layersControlContainer = layersControl.getContainer();
 
+    // =========== 新增開始: 2.5D Buildings Layer ===========
+    // 檢查 OSMBuildings 是否已加載
+    if (typeof OSMBuildings !== 'undefined') {
+      // 創建一個自定義 Leaflet Layer 來封裝 OSMBuildings
+      // 這樣才能讓它在 Layer Control 中被開關
+      const OsmBuildingsLayer = L.Layer.extend({
+        onAdd: function(map) {
+          this._osmb = new OSMBuildings(map);
+          // 載入建築物數據 (使用默認的公共 Key)
+          this._osmb.load('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
+          
+          // 設定當前時間以計算陰影 (可選)
+          this._osmb.date(new Date());
+          
+          // 設定樣式 (可選)
+          this._osmb.style({ wallColor: 'rgb(200, 190, 180)', roofColor: 'rgb(220, 220, 220)', shadows: true });
+        },
+        onRemove: function(map) {
+          if (this._osmb) {
+            this._osmb.destroy(); // 移除圖層
+            this._osmb = null;
+          }
+        }
+      });
+
+      const buildings3D = new OsmBuildingsLayer();
+      
+      // 將其加入到 Overlay (複選框)，這樣可以疊加在任何底圖上
+      layersControl.addOverlay(buildings3D, "2.5D Buildings");
+    } else {
+      console.warn("OSMBuildings script not loaded via HTML.");
+    }
+    // =========== 新增結束 ===========
+
     fetch("https://raw.githubusercontent.com/hkbatradar/SonoRadar/main/hkgrid.geojson")
       .then((r) => r.json())
       .then((hkgriddata) => {
