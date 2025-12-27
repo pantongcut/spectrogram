@@ -2358,19 +2358,21 @@ export class BatCallDetector {
             }
 
             // ============================================================
-            // [NEW] Harmonic Rejection Logic
-            // 如果當前找到的最低頻率比上一次有效測量高出 20kHz，
-            // 說明基頻（Fundamental）已丟失，我們正看著諧波。
+            // [NEW] Harmonic & Sub-harmonic Rejection Logic
+            // 防止頻率突然大幅跳變 (> 20kHz)，無論是向上 (Harmonic) 還是向下 (Sub-harmonic)
             // ============================================================
             if (referenceFreq_kHz !== null) {
                 const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
                 
-                if (diff > 20.0) {
-                    // console.log(`[LowFreq Harmonic Skip] Skipped ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
-                    // 這裡 continue 會繼續檢查更高的頻率 (binIdx++)
-                    // 因為我們是從低往高掃，後面的頻率只會更高，同樣會被 diff > 20 擋住
-                    // 這導致 foundBin = false，正確地放棄此閾值
+                // 使用 Math.abs 來同時攔截 +20kHz 和 -20kHz 的跳變
+                if (Math.abs(diff) > 20.0) {
+                     // console.log(`[LowFreq Jump Rejected] Skipped ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
+                    
+                    // continue 會導致當前 bin 被略過，繼續往更高頻找
+                    // 但因為我們是從低頻往高頻掃描，如果最低的這個已經跟 Ref 差太遠
+                    // 後面的頻率只會更高 (針對向下跳的情況) 或者更離譜
+                    // 所以這實際上會讓這一次的 Threshold 測試失敗 (foundBin = false)
                     continue; 
                 }
             }
