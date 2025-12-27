@@ -1777,16 +1777,14 @@ export class BatCallDetector {
     
     // ============================================================
     // 1. [UPDATED] Calculate Zonal Robust Noise Floors
-    // Scope: Time[0 -> Peak Frame] (Focus on the attack phase)
+    // Scope: FULL SEGMENT (Frame 0 -> End) to avoid rebounce bias
     // Method: Frequency Histogram Mode per 10kHz band
     // ============================================================
-    // 呼叫先前定義的 calculateZonalNoiseFloors 方法
-    // 注意：這裡的時間範圍是 0 到 currentSearchLimitFrame
     const zonalNoiseFloors = this.calculateZonalNoiseFloors(
       spectrogram, 
       freqBins, 
-      0, 
-      currentSearchLimitFrame
+      0, // Start from Frame 0
+      spectrogram.length - 1 // End at last frame of the segment
     );
 
     // Helper to get noise floor for a specific frequency
@@ -2274,13 +2272,14 @@ export class BatCallDetector {
     const validPeakFrameIdx = Math.min(peakFrameIdx, spectrogram.length - 1);
 
     // ============================================================
-    // 1. Calculate Zonal Robust Noise Floors
+    // 1. [UPDATED] Calculate Zonal Robust Noise Floors
+    // Scope: FULL SEGMENT (Frame 0 -> End) to avoid rebounce bias
     // ============================================================
     const zonalNoiseFloors = this.calculateZonalNoiseFloors(
       spectrogram, 
       freqBins, 
-      validPeakFrameIdx, 
-      searchEndFrame
+      0, // Start from Frame 0
+      spectrogram.length - 1 // End at last frame of the segment
     );
     
     const getNoiseFloorForFreq = (freqKHz) => {
