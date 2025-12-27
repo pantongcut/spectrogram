@@ -3336,7 +3336,8 @@ export class BatCallDetector {
 
     // 5. Assign Final Result
     // Start Frequency is the earliest frame where we maintained connection
-    call.startFreq_kHz = validStartFreq_Hz / 1000;
+    const startFreq_kHz = validStartFreq_Hz / 1000;
+    call.startFreq_kHz = startFreq_kHz;
     call.startFreqBinIdx = validStartBinIdx;
     call.startFreqFrameIdx = validStartFrameIdx;
     
