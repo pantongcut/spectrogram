@@ -2243,7 +2243,7 @@ export class BatCallDetector {
         const powerDb = frame[b];
         
         // Ignore extremely low values (silence/padding) to avoid skewing mode
-        if (powerDb < -100) continue;
+        if (powerDb < -130) continue;
         
         const zoneKey = getZoneKey(freqHz);
         
