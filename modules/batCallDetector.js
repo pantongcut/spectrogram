@@ -1795,7 +1795,7 @@ export class BatCallDetector {
       return -80; // Fallback
     };
 
-    console.log('[findOptimalHighFrequencyThreshold] Zonal Noise Analysis Completed (Scope: Start->Peak)');
+    // console.log('[findOptimalHighFrequencyThreshold] Zonal Noise Analysis Completed (Scope: Start->Peak)');
 
     const stablePeakPower_dB = callPeakPower_dB;
     
@@ -1814,6 +1814,9 @@ export class BatCallDetector {
     
     const measurements = [];
     
+    // [2025] Summary Table Data Collection
+    const summaryLog = [];
+
     // Track the highFreqFrameIdx for narrowing searches
     let lastValidHighFreqFrameIdx = currentSearchLimitFrame;
 
@@ -1904,6 +1907,17 @@ export class BatCallDetector {
         startFreq_Hz = null;
         highFreqFrameIdx = 0;
       }
+
+      // Prepare log row
+      let logRow = {
+          'Thr (dB)': testThreshold_dB,
+          'Freq (kHz)': highFreq_Hz !== null ? (highFreq_Hz / 1000).toFixed(2) : '-',
+          'Ref (kHz)': referenceFreq_kHz !== null ? referenceFreq_kHz.toFixed(2) : '-',
+          'Diff (kHz)': '-',
+          'Signal (dB)': '-',
+          'Noise (dB)': '-',
+          'Judgment': 'OK'
+      };
       
       // ============================================================
       // 4. JUMP PROTECTION (> 4.0 kHz) with ZONAL NOISE FLOOR CHECK
@@ -1924,17 +1938,19 @@ export class BatCallDetector {
         if (lastValidFreq_kHz !== null) {
           const jumpDiff = Math.abs(currentHighFreq_kHz - lastValidFreq_kHz);
           
+          logRow['Ref (kHz)'] = lastValidFreq_kHz.toFixed(2);
+          logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
+          logRow['Signal (dB)'] = currentHighFreqPower_dB.toFixed(2);
+
           if (jumpDiff > 4.0) {
             // [UPDATED] Use Zonal Noise Floor Logic
             const specificNoiseFloor_dB = getNoiseFloorForFreq(currentHighFreq_kHz);
-            
-            console.log(`  [HIGH FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} → ${currentHighFreq_kHz.toFixed(2)} kHz`);
-            console.log(`    Zone Noise Floor (${Math.floor(currentHighFreq_kHz/10)*10}kHz band): ${specificNoiseFloor_dB.toFixed(2)} dB | Signal: ${currentHighFreqPower_dB.toFixed(2)} dB`);
+            logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
             
             if (currentHighFreqPower_dB > specificNoiseFloor_dB) {
-              console.log(`    ✓ Signal ABOVE zonal noise floor → Continue (valid signal transition)`);
+              logRow['Judgment'] = 'Jump > 4kHz (Signal > Noise) -> Continue';
             } else {
-              console.log(`    ✗ Signal AT/BELOW zonal noise floor → BREAK (hit noise)`);
+              logRow['Judgment'] = 'Jump > 4kHz (Noise Hit) -> STOP';
               
               hitNoiseFloor = true;
               // Revert to last valid
@@ -1945,12 +1961,15 @@ export class BatCallDetector {
                   break;
                 }
               }
+              summaryLog.push(logRow); // Add final row before breaking
               break; // HARD STOP
             }
           }
         }
       }
       
+      summaryLog.push(logRow);
+
       measurements.push({
         threshold: testThreshold_dB,
         highFreqThreshold_dB: highFreqThreshold_dB,
@@ -1980,6 +1999,7 @@ export class BatCallDetector {
     const validMeasurements = measurements.filter(m => m.foundBin);
     
     if (validMeasurements.length === 0) {
+      console.table(summaryLog);
       return {
         threshold: -24,
         highFreq_Hz: null,
@@ -2004,6 +2024,9 @@ export class BatCallDetector {
       let recordedEarlyAnomaly = null;
       let firstAnomalyIndex = -1;
       
+      // Add a separator or note in summary if anomaly checking begins
+      // summaryLog.push({ 'Judgment': '--- Anomaly Check Phase ---' });
+
       for (let i = 1; i < validMeasurements.length; i++) {
         const prevFreq_kHz = validMeasurements[i - 1].highFreq_kHz;
         const currFreq_kHz = validMeasurements[i].highFreq_kHz;
@@ -2013,6 +2036,8 @@ export class BatCallDetector {
         if (freqDifference > 4.0) {
           optimalThreshold = validMeasurements[i - 1].threshold;
           optimalMeasurement = validMeasurements[i - 1];
+          // Log decision
+          // summaryLog.find(r => r['Thr (dB)'] === validMeasurements[i].threshold)['Judgment'] += ' [Late Hard Stop]';
           break;
         }
         
@@ -2024,7 +2049,16 @@ export class BatCallDetector {
           const specificNoiseFloor_dB = getNoiseFloorForFreq(currFreq_kHz);
           
           if (currentPower_dB !== null && currentPower_dB <= specificNoiseFloor_dB) {
-            console.log(`    [ANOMALY] ${currFreq_kHz.toFixed(1)}kHz Power ${currentPower_dB.toFixed(1)}dB <= ZoneFloor ${specificNoiseFloor_dB.toFixed(1)}dB`);
+            // console.log(`    [ANOMALY] ${currFreq_kHz.toFixed(1)}kHz Power ${currentPower_dB.toFixed(1)}dB <= ZoneFloor ${specificNoiseFloor_dB.toFixed(1)}dB`);
+            
+            // Mark in summary
+            const targetRow = summaryLog.find(r => r['Thr (dB)'] === validMeasurements[i].threshold);
+            if (targetRow) {
+                targetRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
+                targetRow['Signal (dB)'] = currentPower_dB.toFixed(2);
+                targetRow['Judgment'] = `Anomaly > 2.5kHz (Signal <= Noise)`;
+            }
+
             isAnomaly = true;
           } else {
             isAnomaly = false;
@@ -2075,9 +2109,16 @@ export class BatCallDetector {
         optimalMeasurement = lastValidMeasurement;
       }
     } else {
-      console.log(`[findOptimalHighFrequencyThreshold] Hard stop at noise floor. Using threshold: ${optimalThreshold}dB`);
+      // console.log(`[findOptimalHighFrequencyThreshold] Hard stop at noise floor. Using threshold: ${optimalThreshold}dB`);
     }
     
+    // Output the summary table
+    if (summaryLog.length > 0) {
+        console.groupCollapsed(`[High Freq] Scan Summary (Selected: ${optimalThreshold} dB)`);
+        console.table(summaryLog);
+        console.groupEnd();
+    }
+
     // ... (Final Safety Threshold Logic / Re-scan remains identical) ...
     const finalThreshold = Math.max(Math.min(optimalThreshold, -22), -70);
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
@@ -2289,8 +2330,6 @@ export class BatCallDetector {
       return -80; 
     };
 
-    // console.log('[findOptimalLowFrequencyThreshold] Zonal Noise Analysis Completed');
-    
     // ============================================================
     // Initialize Variables
     // ============================================================
@@ -2312,6 +2351,9 @@ export class BatCallDetector {
     
     const measurements = [];
     
+    // [2025] Summary Table Data Collection
+    const summaryLog = [];
+    
     for (const testThreshold_dB of thresholdRange) {
       let lowFreq_Hz = null;
       let endFreq_Hz = null;
@@ -2327,6 +2369,17 @@ export class BatCallDetector {
           break;
         }
       }
+
+      // Initialize log row
+      let logRow = {
+          'Thr (dB)': testThreshold_dB,
+          'Freq (kHz)': '-',
+          'Ref (kHz)': referenceFreq_kHz !== null ? referenceFreq_kHz.toFixed(2) : '-',
+          'Diff (kHz)': '-',
+          'Signal (dB)': '-',
+          'Noise (dB)': '-',
+          'Judgment': 'OK'
+      };
       
       // ============================================================
       // 2. Gap-Bridging Forward Scan
@@ -2377,16 +2430,21 @@ export class BatCallDetector {
               }
             }
 
+            const candidateFreq_kHz = candidateFreq_Hz / 1000;
+
             // ============================================================
             // Sub-harmonic Rejection Logic (Hard Stop)
             // ============================================================
             if (referenceFreq_kHz !== null) {
-                const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
                 
                 // > 15kHz Jump Protection
                 if (Math.abs(diff) > 15.0) {
-                    console.log(`[LowFreq Jump Rejected] Hard Stop at ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
+                    // console.log(`[LowFreq Jump Rejected] Hard Stop at ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
+                    
+                    logRow['Freq (kHz)'] = candidateFreq_kHz.toFixed(2);
+                    logRow['Diff (kHz)'] = Math.abs(diff).toFixed(2);
+                    logRow['Judgment'] = 'Hard Stop > 15kHz (Sub-harmonic)';
                     
                     hitNoiseFloor = true;
                     
@@ -2412,8 +2470,16 @@ export class BatCallDetector {
         }
       }
       
+      // Update Log Row with found frequency
+      if (foundBin && lowFreq_Hz !== null) {
+          logRow['Freq (kHz)'] = (lowFreq_Hz / 1000).toFixed(2);
+      }
+      
       // 如果內部觸發了 hitNoiseFloor (Hard Stop)，直接跳出 Threshold 循環
-      if (hitNoiseFloor) break;
+      if (hitNoiseFloor) {
+          summaryLog.push(logRow);
+          break;
+      }
       
       if (foundBin) {
         endFreq_Hz = lowFreq_Hz;
@@ -2440,17 +2506,24 @@ export class BatCallDetector {
         if (lastValidFreq_kHz !== null) {
             const jumpDiff = Math.abs(currentLowFreq_kHz - lastValidFreq_kHz);
             
+            logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
+            logRow['Signal (dB)'] = currentLowFreqPower_dB.toFixed(2);
+
             // Standard Anomaly Check (> 2.0 kHz)
             if (jumpDiff > 2.0) {
                 const specificNoiseFloor_dB = getNoiseFloorForFreq(currentLowFreq_kHz);
+                logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
                 
-                console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
-                console.log(`    Zone Noise Floor (${Math.floor(currentLowFreq_kHz/10)*10}kHz band): ${specificNoiseFloor_dB.toFixed(2)} dB | Signal: ${currentLowFreqPower_dB.toFixed(2)} dB`);
+                // console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
+                // console.log(`    Zone Noise Floor (${Math.floor(currentLowFreq_kHz/10)*10}kHz band): ${specificNoiseFloor_dB.toFixed(2)} dB | Signal: ${currentLowFreqPower_dB.toFixed(2)} dB`);
                 
                 if (currentLowFreqPower_dB > specificNoiseFloor_dB) {
-                    console.log(`    ✓ Signal ABOVE zonal noise floor -> Continue`);
+                    // console.log(`    ✓ Signal ABOVE zonal noise floor -> Continue`);
+                    logRow['Judgment'] = 'Jump > 2kHz (Signal > Noise) -> Continue';
                 } else {
-                    console.log(`    ✗ Signal AT/BELOW zonal noise floor -> BREAK (hit noise)`);
+                    // console.log(`    ✗ Signal AT/BELOW zonal noise floor -> BREAK (hit noise)`);
+                    logRow['Judgment'] = 'Jump > 2kHz (Noise Hit) -> STOP';
+                    
                     hitNoiseFloor = true;
                     
                     // Fallback to last valid
@@ -2461,12 +2534,15 @@ export class BatCallDetector {
                             break;
                         }
                     }
+                    summaryLog.push(logRow);
                     break; // HARD STOP
                 }
             }
         }
       }
       
+      summaryLog.push(logRow);
+
       measurements.push({
         threshold: testThreshold_dB,
         lowFreqThreshold_dB: lowFreqThreshold_dB,
@@ -2493,6 +2569,11 @@ export class BatCallDetector {
              optimalThreshold = validMeasurements[0].threshold;
         } else {
             // No valid measurements at all
+            if (summaryLog.length > 0) {
+                console.groupCollapsed(`[Low Freq] Scan Summary (No Valid Found)`);
+                console.table(summaryLog);
+                console.groupEnd();
+            }
             return {
                 threshold: -24,
                 lowFreq_Hz: null,
@@ -2524,6 +2605,12 @@ export class BatCallDetector {
                     recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
                     lastValidMeasurement = validMeasurements[i - 1];
                 }
+                // Mark anomaly in summary log (retroactively or by index matching)
+                const targetRow = summaryLog.find(r => r['Thr (dB)'] === validMeasurements[i].threshold);
+                if (targetRow) {
+                    targetRow['Judgment'] += ' [Diff > 1.5kHz]';
+                }
+
             } else {
                 if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
                     const checkStart = firstAnomalyIndex + 1;
@@ -2549,6 +2636,13 @@ export class BatCallDetector {
             optimalThreshold = lastValidThreshold;
             optimalMeasurement = lastValidMeasurement;
         }
+    }
+    
+    // Output the summary table
+    if (summaryLog.length > 0) {
+        console.groupCollapsed(`[Low Freq] Scan Summary (Selected: ${optimalThreshold} dB)`);
+        console.table(summaryLog);
+        console.groupEnd();
     }
     
     // Final Safety Limits
