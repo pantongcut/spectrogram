@@ -2283,7 +2283,7 @@ export class BatCallDetector {
       
       // The Mode represents the center of the noise floor distribution.
       // This makes it a "Robust" floor for comparison.
-      zoneFloors[key] = modeBin + 1.0;
+      zoneFloors[key] = modeBin - 1.0;
     });
     
     return zoneFloors;
