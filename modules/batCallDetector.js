@@ -1826,12 +1826,12 @@ export class BatCallDetector {
    * * 2025 ENHANCED ALGORITHM v3 (Zonal Noise Floor):
    * 1. Start with widest range (Frame 0 to Peak Frame)
    * 2. Calculate Zonal Noise Floors (10kHz bands) for this specific time range
-   * 3. Test threshold (-18 -> -70 dB), detect highFreq position
+   * 3. Test threshold (-12 -> -70 dB), detect highFreq position
    * 4. Apply Jump Protection using Zonal Noise Floors
    */
   findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
-      threshold: -18,
+      threshold: -12,
       highFreq_Hz: null,
       highFreq_kHz: null,
       highFreqFrameIdx: 0,
@@ -1866,12 +1866,12 @@ export class BatCallDetector {
     // Initialize Hard Stop Flag and Optimal Variables
     // ============================================================
     let hitNoiseFloor = false;
-    let optimalThreshold = -18;
+    let optimalThreshold = -12;
     let optimalMeasurement = null;
     
-    // Test thresholds: -18 to -70 dB, step 1.0 dB
+    // Test thresholds: -12 to -70 dB, step 1.0 dB
     const thresholdRange = [];
-    for (let threshold = -18; threshold >= -70; threshold -= 1.0) {
+    for (let threshold = -12; threshold >= -70; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
     
@@ -2340,11 +2340,11 @@ export class BatCallDetector {
 
     // ============================================================
     // [UPDATED] Test Thresholds Configuration
-    // Range: -18dB down to -70dB
+    // Range: -12dB down to -70dB
     // Step: 1.0 dB
     // ============================================================
     const thresholdRange = [];
-    for (let threshold = -18; threshold >= -70; threshold -= 1.0) {
+    for (let threshold = -12; threshold >= -70; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
     
@@ -2654,7 +2654,7 @@ export class BatCallDetector {
     }
     
     // Final Safety Limits
-    const finalThreshold = Math.max(Math.min(optimalThreshold, -18), -70);
+    const finalThreshold = Math.max(Math.min(optimalThreshold, -12), -70);
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
     const hasWarning = finalThreshold <= -70;
     
