@@ -1941,7 +1941,7 @@ export class BatCallDetector {
             );
             
             const zoneKey = Math.floor(currentHighFreq_kHz / 10) * 10;
-            const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -80;
+            const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
             logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
             
             if (currentHighFreqPower_dB > specificNoiseFloor_dB) {
@@ -2051,7 +2051,7 @@ export class BatCallDetector {
           
           const currentPower_dB = validMeasurements[i].highFreqPower_dB;
           const zoneKey = Math.floor(currFreq_kHz / 10) * 10;
-          const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -80;
+          const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
           
           if (currentPower_dB !== null && currentPower_dB <= specificNoiseFloor_dB) {
             // console.log(`    [ANOMALY] ${currFreq_kHz.toFixed(1)}kHz Power ${currentPower_dB.toFixed(1)}dB <= ZoneFloor ${specificNoiseFloor_dB.toFixed(1)}dB`);
@@ -2519,7 +2519,7 @@ export class BatCallDetector {
                 );
                 
                 const zoneKey = Math.floor(currentLowFreq_kHz / 10) * 10;
-                const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -80;
+                const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
                 logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
                 
                 // console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
