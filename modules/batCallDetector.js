@@ -1777,25 +1777,12 @@ export class BatCallDetector {
     
     // ============================================================
     // 1. [UPDATED] Calculate Zonal Robust Noise Floors
-    // Scope: Time[0 -> Peak Frame] (Focus on the attack phase)
+    // Scope: DYNAMIC - Frame 0 to Current High Freq Frame
     // Method: Frequency Histogram Mode per 10kHz band
+    // Note: Noise Floor is now calculated DYNAMICALLY within the threshold loop
+    //       (moved to Jump Protection section below)
     // ============================================================
-    // 呼叫先前定義的 calculateZonalNoiseFloors 方法
-    // 注意：這裡的時間範圍是 0 到 currentSearchLimitFrame
-    const zonalNoiseFloors = this.calculateZonalNoiseFloors(
-      spectrogram, 
-      freqBins, 
-      0, 
-      currentSearchLimitFrame
-    );
-
-    // Helper to get noise floor for a specific frequency
-    const getNoiseFloorForFreq = (freqKHz) => {
-      if (!freqKHz) return -80;
-      const zoneKey = Math.floor(freqKHz / 10) * 10;
-      if (zonalNoiseFloors[zoneKey] !== undefined) return zonalNoiseFloors[zoneKey];
-      return -80; // Fallback
-    };
+    // Removed pre-calculation. See Jump Protection section in loop.
 
     // console.log('[findOptimalHighFrequencyThreshold] Zonal Noise Analysis Completed (Scope: Start->Peak)');
 
@@ -1922,7 +1909,7 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 4. JUMP PROTECTION (> 4.0 kHz) with ZONAL NOISE FLOOR CHECK
+      // 4. JUMP PROTECTION (> 4.0 kHz) with DYNAMIC ZONAL NOISE FLOOR CHECK
       // ============================================================
       if (foundBin && highFreq_Hz !== null) {
         const currentHighFreq_kHz = highFreq_Hz / 1000;
@@ -1945,8 +1932,16 @@ export class BatCallDetector {
           logRow['Signal (dB)'] = currentHighFreqPower_dB.toFixed(2);
 
           if (jumpDiff > 4.0) {
-            // [UPDATED] Use Zonal Noise Floor Logic
-            const specificNoiseFloor_dB = getNoiseFloorForFreq(currentHighFreq_kHz);
+            // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current highFreqFrameIdx
+            const currentZoneFloors = this.calculateZonalNoiseFloors(
+              spectrogram,
+              freqBins,
+              0,                    // Start from Frame 0
+              highFreqFrameIdx      // End at current High Freq Frame
+            );
+            
+            const zoneKey = Math.floor(currentHighFreq_kHz / 10) * 10;
+            const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -80;
             logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
             
             if (currentHighFreqPower_dB > specificNoiseFloor_dB) {
@@ -2018,7 +2013,7 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // ANOMALY CHECK (2.5 - 4.0 kHz) with Zonal Noise Floor
+    // ANOMALY CHECK (2.5 - 4.0 kHz) with DYNAMIC Zonal Noise Floor
     // ============================================================
     if (!hitNoiseFloor) {
       let lastValidThreshold = validMeasurements[0].threshold;
@@ -2046,9 +2041,17 @@ export class BatCallDetector {
         // Minor Anomaly Logic
         let isAnomaly = false;
         if (freqDifference > 2.5) {
-          // [UPDATED] Check against Zonal Noise Floor
+          // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current measurement's highFreqFrameIdx
+          const currentZoneFloors = this.calculateZonalNoiseFloors(
+            spectrogram,
+            freqBins,
+            0,                                    // Start from Frame 0
+            validMeasurements[i].highFreqFrameIdx // End at current High Freq Frame
+          );
+          
           const currentPower_dB = validMeasurements[i].highFreqPower_dB;
-          const specificNoiseFloor_dB = getNoiseFloorForFreq(currFreq_kHz);
+          const zoneKey = Math.floor(currFreq_kHz / 10) * 10;
+          const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -80;
           
           if (currentPower_dB !== null && currentPower_dB <= specificNoiseFloor_dB) {
             // console.log(`    [ANOMALY] ${currFreq_kHz.toFixed(1)}kHz Power ${currentPower_dB.toFixed(1)}dB <= ZoneFloor ${specificNoiseFloor_dB.toFixed(1)}dB`);
@@ -2319,24 +2322,12 @@ export class BatCallDetector {
     
     // ============================================================
     // 1. [UPDATED] Calculate Zonal Robust Noise Floors
-    // Scope: Time[0 -> Peak Frame] (Focus on the attack phase)
+    // Scope: DYNAMIC - Frame 0 to Current Low Freq Frame
     // Method: Frequency Histogram Mode per 10kHz band
+    // Note: Noise Floor is now calculated DYNAMICALLY within the threshold loop
+    //       (moved to Jump Protection section below)
     // ============================================================
-    // 呼叫先前定義的 calculateZonalNoiseFloors 方法
-    // 注意：這裡的時間範圍是 0 到 currentSearchLimitFrame
-    const zonalNoiseFloors = this.calculateZonalNoiseFloors(
-      spectrogram, 
-      freqBins, 
-      0, 
-      currentSearchLimitFrame
-    );
-    
-    const getNoiseFloorForFreq = (freqKHz) => {
-      if (!freqKHz) return -80;
-      const zoneKey = Math.floor(freqKHz / 10) * 10;
-      if (zonalNoiseFloors[zoneKey] !== undefined) return zonalNoiseFloors[zoneKey];
-      return -80; 
-    };
+    // Removed pre-calculation. See Jump Protection section in loop.
 
     // ============================================================
     // Initialize Variables
@@ -2497,7 +2488,7 @@ export class BatCallDetector {
       }
 
       // ============================================================
-      // 4. JUMP PROTECTION & ZONAL NOISE FLOOR CHECK
+      // 4. JUMP PROTECTION & DYNAMIC ZONAL NOISE FLOOR CHECK
       // ============================================================
       if (foundBin && lowFreq_Hz !== null) {
         const currentLowFreq_kHz = lowFreq_Hz / 1000;
@@ -2519,7 +2510,16 @@ export class BatCallDetector {
 
             // Standard Anomaly Check (> 2.0 kHz)
             if (jumpDiff > 2.0) {
-                const specificNoiseFloor_dB = getNoiseFloorForFreq(currentLowFreq_kHz);
+                // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current activeEndFrameIdx
+                const currentZoneFloors = this.calculateZonalNoiseFloors(
+                  spectrogram,
+                  freqBins,
+                  0,                    // Start from Frame 0
+                  activeEndFrameIdx     // End at current Low Freq Frame
+                );
+                
+                const zoneKey = Math.floor(currentLowFreq_kHz / 10) * 10;
+                const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -80;
                 logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
                 
                 // console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
