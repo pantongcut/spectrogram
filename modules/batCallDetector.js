@@ -2358,21 +2358,14 @@ export class BatCallDetector {
             }
 
             // ============================================================
-            // [NEW] Harmonic & Sub-harmonic Rejection Logic
-            // 防止頻率突然大幅跳變 (> 20kHz)，無論是向上 (Harmonic) 還是向下 (Sub-harmonic)
+            // Sub-harmonic Rejection Logic
             // ============================================================
             if (referenceFreq_kHz !== null) {
                 const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
                 
-                // 使用 Math.abs 來同時攔截 +20kHz 和 -20kHz 的跳變
-                if (Math.abs(diff) > 20.0) {
-                     // console.log(`[LowFreq Jump Rejected] Skipped ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
-                    
-                    // continue 會導致當前 bin 被略過，繼續往更高頻找
-                    // 但因為我們是從低頻往高頻掃描，如果最低的這個已經跟 Ref 差太遠
-                    // 後面的頻率只會更高 (針對向下跳的情況) 或者更離譜
-                    // 所以這實際上會讓這一次的 Threshold 測試失敗 (foundBin = false)
+                if (Math.abs(diff) > 15.0) {
+                     console.log(`[LowFreq Jump Rejected] Skipped ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
                     continue; 
                 }
             }
