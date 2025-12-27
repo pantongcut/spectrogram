@@ -2247,13 +2247,13 @@ export class BatCallDetector {
    * 2025 ENHANCEMENT: Find Optimal Low Frequency Threshold
    * Optimized with:
    * 1. Zonal Noise Floor (10kHz bands, Mode-based)
-   * 2. "Reverse Narrowing / Ratcheting" (Locking forward progress)
-   * 3. "Hard Stop Logic" (Jump Protection)
-   4. [NEW] Harmonic Rejection (> 20kHz jump protection)
+   * 2. "Reverse Narrowing / Ratcheting"
+   * 3. Hard Stop Logic with Fallback
+   * 4. Sub-harmonic Rejection (> 15kHz jump protection)
    */
   findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null) {
     if (spectrogram.length === 0) return {
-      threshold: -24,
+      threshold: -24, // Default fallback
       lowFreq_Hz: null,
       lowFreq_kHz: null,
       endFreq_Hz: null,
@@ -2272,14 +2272,14 @@ export class BatCallDetector {
     const validPeakFrameIdx = Math.min(peakFrameIdx, spectrogram.length - 1);
 
     // ============================================================
-    // 1. [UPDATED] Calculate Zonal Robust Noise Floors
-    // Scope: FULL SEGMENT (Frame 0 -> End) to avoid rebounce bias
+    // 1. Calculate Zonal Robust Noise Floors
+    // Scope: FULL SEGMENT (Frame 0 -> End)
     // ============================================================
     const zonalNoiseFloors = this.calculateZonalNoiseFloors(
       spectrogram, 
       freqBins, 
-      0, // Start from Frame 0
-      spectrogram.length - 1 // End at last frame of the segment
+      0, 
+      spectrogram.length - 1
     );
     
     const getNoiseFloorForFreq = (freqKHz) => {
@@ -2289,20 +2289,24 @@ export class BatCallDetector {
       return -80; 
     };
 
-    console.log('[findOptimalLowFrequencyThreshold] Zonal Noise Analysis Completed');
+    // console.log('[findOptimalLowFrequencyThreshold] Zonal Noise Analysis Completed');
     
     // ============================================================
     // Initialize Variables
     // ============================================================
     let hitNoiseFloor = false;
-    let optimalThreshold = -24;
+    let optimalThreshold = -24; // Default safe value
     let optimalMeasurement = null;
 
     let currentSearchStartFrame = validPeakFrameIdx;
 
-    // Test thresholds: -24 to -70 dB
+    // ============================================================
+    // [UPDATED] Test Thresholds Configuration
+    // Range: -18dB down to -70dB
+    // Step: 1.0 dB
+    // ============================================================
     const thresholdRange = [];
-    for (let threshold = -24; threshold >= -70; threshold -= 0.5) {
+    for (let threshold = -18; threshold >= -70; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
     
@@ -2315,10 +2319,7 @@ export class BatCallDetector {
       
       const lowFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
 
-      // ============================================================
-      // [NEW] Get Reference from previous valid measurement
-      // 用於 Harmonic Rejection
-      // ============================================================
+      // Get Reference from previous valid measurement for Jump Protection
       let referenceFreq_kHz = null;
       for (let i = measurements.length - 1; i >= 0; i--) {
         if (measurements[i].foundBin && measurements[i].lowFreq_kHz !== null) {
@@ -2362,7 +2363,6 @@ export class BatCallDetector {
         for (let binIdx = 0; binIdx < targetFramePower.length; binIdx++) {
           if (targetFramePower[binIdx] > lowFreqThreshold_dB) {
             
-            // 暫存候選頻率
             let candidateFreq_Hz = freqBins[binIdx];
             
             // Linear Interpolation
@@ -2384,41 +2384,36 @@ export class BatCallDetector {
                 const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
                 
-                // 當檢測到異常跳變 (> 15kHz)
+                // > 15kHz Jump Protection
                 if (Math.abs(diff) > 15.0) {
                     console.log(`[LowFreq Jump Rejected] Hard Stop at ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
                     
                     hitNoiseFloor = true;
                     
-                    // [CRITICAL FIX] 立即回溯尋找上一個「有效」的測量值
-                    // 我們從 measurements 陣列的最後面開始往前找
-                    // 因為 measurements 存的是之前 threshold (例如 -52dB) 的成功結果
-                    let foundFallback = false;
+                    // [CRITICAL FIX] Fallback to last valid measurement
                     for (let j = measurements.length - 1; j >= 0; j--) {
                         if (measurements[j].foundBin && measurements[j].lowFreq_kHz !== null) {
                             optimalMeasurement = measurements[j];
                             optimalThreshold = measurements[j].threshold;
-                            foundFallback = true;
-                            // console.log(`  -> Fallback to threshold: ${optimalThreshold}dB, Freq: ${optimalMeasurement.lowFreq_kHz.toFixed(2)}kHz`);
                             break;
                         }
                     }
-
-                    // 如果完全找不到（極罕見，因為有 reference 通常代表有前值），保持 optimalMeasurement 為 null
-                    // 這會在函數最後的防呆機制被處理
-                    
-                    break; // 跳出 threshold 迴圈
+                    // Break out of bin loop (and will break threshold loop below)
+                    break; 
                 }
             }
 
-            // 如果通過檢查，確認為 Low Frequency
+            // Valid Low Frequency Found
             lowFreq_Hz = candidateFreq_Hz;
             foundBin = true;
-            currentLowFreqPower_dB = targetFramePower[binIdx]; // Capture power
-            break; // 找到最低頻後立即跳出
+            currentLowFreqPower_dB = targetFramePower[binIdx];
+            break; 
           }
         }
       }
+      
+      // 如果內部觸發了 hitNoiseFloor (Hard Stop)，直接跳出 Threshold 循環
+      if (hitNoiseFloor) break;
       
       if (foundBin) {
         endFreq_Hz = lowFreq_Hz;
@@ -2433,7 +2428,7 @@ export class BatCallDetector {
       if (foundBin && lowFreq_Hz !== null) {
         const currentLowFreq_kHz = lowFreq_Hz / 1000;
         
-        // Find last valid measurement (Redundant lookup but explicit for clarity)
+        // Find last valid measurement for comparison
         let lastValidFreq_kHz = null;
         for (let i = measurements.length - 1; i >= 0; i--) {
             if (measurements[i].foundBin && measurements[i].lowFreq_kHz !== null) {
@@ -2445,17 +2440,15 @@ export class BatCallDetector {
         if (lastValidFreq_kHz !== null) {
             const jumpDiff = Math.abs(currentLowFreq_kHz - lastValidFreq_kHz);
             
-            // Low Freq Jump Threshold (2.0 kHz) - Regular anomaly check
+            // Standard Anomaly Check (> 2.0 kHz)
             if (jumpDiff > 2.0) {
-                // Get Noise Floor specific to THIS frequency zone
                 const specificNoiseFloor_dB = getNoiseFloorForFreq(currentLowFreq_kHz);
                 
                 console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
                 console.log(`    Zone Noise Floor (${Math.floor(currentLowFreq_kHz/10)*10}kHz band): ${specificNoiseFloor_dB.toFixed(2)} dB | Signal: ${currentLowFreqPower_dB.toFixed(2)} dB`);
                 
-                // Check if signal is above its zonal noise floor
                 if (currentLowFreqPower_dB > specificNoiseFloor_dB) {
-                    console.log(`    ✓ Signal ABOVE zonal noise floor -> Continue (Valid extension)`);
+                    console.log(`    ✓ Signal ABOVE zonal noise floor -> Continue`);
                 } else {
                     console.log(`    ✗ Signal AT/BELOW zonal noise floor -> BREAK (hit noise)`);
                     hitNoiseFloor = true;
@@ -2492,70 +2485,74 @@ export class BatCallDetector {
     // ============================================================
     const validMeasurements = measurements.filter(m => m.foundBin);
     
-    if (validMeasurements.length === 0) {
-      return {
-        threshold: -24,
-        lowFreq_Hz: null,
-        lowFreq_kHz: null,
-        endFreq_Hz: null,
-        endFreq_kHz: null,
-        warning: false
-      };
+    // [FIX] Safety check: If optimalMeasurement is null (e.g. first try Hard Stop or no signal found)
+    if (!optimalMeasurement) {
+        if (validMeasurements.length > 0) {
+             // Fallback to the first valid one if we have any (e.g., -18dB)
+             optimalMeasurement = validMeasurements[0];
+             optimalThreshold = validMeasurements[0].threshold;
+        } else {
+            // No valid measurements at all
+            return {
+                threshold: -24,
+                lowFreq_Hz: null,
+                lowFreq_kHz: null,
+                endFreq_Hz: null,
+                endFreq_kHz: null,
+                warning: false
+            };
+        }
     }
     
-    // If not hit noise floor, use first valid (or apply standard anomaly check)
-    if (!hitNoiseFloor) {
-        if (validMeasurements.length > 0) {
-            // Standard anomaly check logic (preserved)
-            let recordedEarlyAnomaly = null;
-            let firstAnomalyIndex = -1;
-            let lastValidMeasurement = validMeasurements[0];
-            let lastValidThreshold = validMeasurements[0].threshold;
+    // If we didn't hit noise floor, apply standard anomaly check logic to pick best from full range
+    if (!hitNoiseFloor && validMeasurements.length > 0) {
+        let recordedEarlyAnomaly = null;
+        let firstAnomalyIndex = -1;
+        let lastValidMeasurement = validMeasurements[0];
+        let lastValidThreshold = validMeasurements[0].threshold;
 
-            for (let i = 1; i < validMeasurements.length; i++) {
-                const prevFreq = validMeasurements[i - 1].lowFreq_kHz;
-                const currFreq = validMeasurements[i].lowFreq_kHz;
-                const diff = Math.abs(currFreq - prevFreq);
+        for (let i = 1; i < validMeasurements.length; i++) {
+            const prevFreq = validMeasurements[i - 1].lowFreq_kHz;
+            const currFreq = validMeasurements[i].lowFreq_kHz;
+            const diff = Math.abs(currFreq - prevFreq);
 
-                const isAnomaly = diff > 1.5;
+            const isAnomaly = diff > 1.5;
 
-                if (isAnomaly) {
-                    if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
-                        firstAnomalyIndex = i;
-                        recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
-                        lastValidMeasurement = validMeasurements[i - 1];
-                    }
-                } else {
-                    if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
-                        const checkStart = firstAnomalyIndex + 1;
-                        const checkEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
-                        let stable = true;
-                        for (let k = checkStart; k <= checkEnd; k++) {
-                           if (Math.abs(validMeasurements[k].lowFreq_kHz - validMeasurements[k-1].lowFreq_kHz) > 1.5) stable = false;
-                        }
-                        if (stable && (checkEnd - checkStart + 1) >= 3) {
-                            recordedEarlyAnomaly = null;
-                            firstAnomalyIndex = -1;
-                        }
-                    }
-                    lastValidMeasurement = validMeasurements[i];
-                    lastValidThreshold = validMeasurements[i].threshold;
+            if (isAnomaly) {
+                if (recordedEarlyAnomaly === null && firstAnomalyIndex === -1) {
+                    firstAnomalyIndex = i;
+                    recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
+                    lastValidMeasurement = validMeasurements[i - 1];
                 }
-            }
-
-            if (recordedEarlyAnomaly !== null) {
-                optimalThreshold = recordedEarlyAnomaly;
-                optimalMeasurement = lastValidMeasurement;
             } else {
-                optimalThreshold = lastValidThreshold;
-                optimalMeasurement = lastValidMeasurement;
+                if (recordedEarlyAnomaly !== null && firstAnomalyIndex !== -1) {
+                    const checkStart = firstAnomalyIndex + 1;
+                    const checkEnd = Math.min(firstAnomalyIndex + 3, validMeasurements.length - 1);
+                    let stable = true;
+                    for (let k = checkStart; k <= checkEnd; k++) {
+                       if (Math.abs(validMeasurements[k].lowFreq_kHz - validMeasurements[k-1].lowFreq_kHz) > 1.5) stable = false;
+                    }
+                    if (stable && (checkEnd - checkStart + 1) >= 3) {
+                        recordedEarlyAnomaly = null;
+                        firstAnomalyIndex = -1;
+                    }
+                }
+                lastValidMeasurement = validMeasurements[i];
+                lastValidThreshold = validMeasurements[i].threshold;
             }
         }
-    } else {
-        console.log(`[findOptimalLowFrequencyThreshold] Hard stop used. Threshold: ${optimalThreshold}dB`);
+
+        if (recordedEarlyAnomaly !== null) {
+            optimalThreshold = recordedEarlyAnomaly;
+            optimalMeasurement = lastValidMeasurement;
+        } else {
+            optimalThreshold = lastValidThreshold;
+            optimalMeasurement = lastValidMeasurement;
+        }
     }
     
-    const finalThreshold = Math.max(Math.min(optimalThreshold, -24), -70);
+    // Final Safety Limits
+    const finalThreshold = Math.max(Math.min(optimalThreshold, -18), -70);
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
     const hasWarning = finalThreshold <= -70;
     
@@ -2564,7 +2561,7 @@ export class BatCallDetector {
     let returnEndFreq_Hz = optimalMeasurement.endFreq_Hz;
     let returnEndFreq_kHz = optimalMeasurement.endFreq_kHz;
     
-    // Safety Mechanism Re-calculation
+    // Safety Mechanism Re-calculation (If threshold was clamped due to safety limits)
     if (safeThreshold !== finalThreshold) {
          const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
          let activeEndFrameIdx_safe = validPeakFrameIdx; 
