@@ -1747,17 +1747,91 @@ export class BatCallDetector {
     return result;
   }
 
+  /**
+   * [2025 NEW] Calculate Noise Floor per 10kHz Frequency Zone
+   * Uses Histogram Analysis to find the "Mode" (most frequent dB value) per zone.
+   * * @param {Array} spectrogram - Power matrix [time][freq]
+   * @param {Float32Array} freqBins - Frequency bin values in Hz
+   * @param {number} startFrame - Analysis start frame index
+   * @param {number} endFrame - Analysis end frame index
+   * @returns {Object} Map of zone start freq (kHz) -> noise floor (dB)
+   */
+  calculateZonalNoiseFloors(spectrogram, freqBins, startFrame, endFrame) {
+    const zoneFloors = {};
+    const zoneHistograms = {}; // Key: "10", "20" -> Array of dB values
+    
+    // 1. Initialize Histograms
+    // 10kHz zones: 0-10, 10-20, 20-30, etc.
+    const getZoneKey = (freqHz) => Math.floor(freqHz / 10000) * 10;
+    
+    // 2. Collect dB values into zones
+    // Only analyze the relevant time scope (Restricted Scope)
+    for (let f = startFrame; f <= endFrame; f++) {
+      if (f >= spectrogram.length) break;
+      const frame = spectrogram[f];
+      
+      for (let b = 0; b < frame.length; b++) {
+        const freqHz = freqBins[b];
+        const powerDb = frame[b];
+        
+        // Ignore extremely low values (silence/padding) to avoid skewing mode
+        if (powerDb < -100) continue;
+        
+        const zoneKey = getZoneKey(freqHz);
+        
+        if (!zoneHistograms[zoneKey]) {
+          zoneHistograms[zoneKey] = [];
+        }
+        zoneHistograms[zoneKey].push(powerDb);
+      }
+    }
+    
+    // 3. Calculate Mode (Most Frequent Value) for each zone
+    // Using a binning approach (0.5 dB resolution)
+    const BIN_SIZE = 0.5; 
+    
+    Object.keys(zoneHistograms).forEach(key => {
+      const values = zoneHistograms[key];
+      if (values.length === 0) {
+        zoneFloors[key] = -100; // Fallback default
+        return;
+      }
+      
+      // Create frequency map for histogram
+      const histogram = {};
+      let maxCount = 0;
+      let modeBin = -100;
+      
+      for (const val of values) {
+        // Bin the dB value (e.g., -60.3 -> -60.5 or -60.0)
+        const bin = Math.floor(val / BIN_SIZE) * BIN_SIZE;
+        histogram[bin] = (histogram[bin] || 0) + 1;
+        
+        if (histogram[bin] > maxCount) {
+          maxCount = histogram[bin];
+          modeBin = bin;
+        }
+      }
+      
+      // The Mode represents the center of the noise floor distribution.
+      // This makes it a "Robust" floor for comparison.
+      zoneFloors[key] = modeBin - 1.0;
+    });
+    
+    return zoneFloors;
+  }
+
 /**
    * Find optimal High Threshold by testing range and detecting anomalies
    * * 2025 ENHANCED ALGORITHM v3 (Zonal Noise Floor):
    * 1. Start with widest range (Frame 0 to Peak Frame)
    * 2. Calculate Zonal Noise Floors (10kHz bands) for this specific time range
-   * 3. Test threshold (-22 -> -70 dB), detect highFreq position
+   * 3. Test threshold (-18 -> -70 dB), detect highFreq position
    * 4. Apply Jump Protection using Zonal Noise Floors
    */
   findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
-      threshold: -22,
+      threshold: -18,
       highFreq_Hz: null,
       highFreq_kHz: null,
       highFreqFrameIdx: 0,
@@ -1792,12 +1866,12 @@ export class BatCallDetector {
     // Initialize Hard Stop Flag and Optimal Variables
     // ============================================================
     let hitNoiseFloor = false;
-    let optimalThreshold = -22;
+    let optimalThreshold = -18;
     let optimalMeasurement = null;
     
-    // Test thresholds: -22 to -70 dB, step 1.0 dB
+    // Test thresholds: -18 to -70 dB, step 1.0 dB
     const thresholdRange = [];
-    for (let threshold = -22; threshold >= -70; threshold -= 1.0) {
+    for (let threshold = -18; threshold >= -70; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
     
@@ -2213,80 +2287,6 @@ export class BatCallDetector {
       finalSearchLimitFrame: finalSearchLimitFrame,
       warning: hasWarning
     };
-  }
-
-  /**
-   * [2025 NEW] Calculate Noise Floor per 10kHz Frequency Zone
-   * Uses Histogram Analysis to find the "Mode" (most frequent dB value) per zone.
-   * * @param {Array} spectrogram - Power matrix [time][freq]
-   * @param {Float32Array} freqBins - Frequency bin values in Hz
-   * @param {number} startFrame - Analysis start frame index
-   * @param {number} endFrame - Analysis end frame index
-   * @returns {Object} Map of zone start freq (kHz) -> noise floor (dB)
-   */
-  calculateZonalNoiseFloors(spectrogram, freqBins, startFrame, endFrame) {
-    const zoneFloors = {};
-    const zoneHistograms = {}; // Key: "10", "20" -> Array of dB values
-    
-    // 1. Initialize Histograms
-    // 10kHz zones: 0-10, 10-20, 20-30, etc.
-    const getZoneKey = (freqHz) => Math.floor(freqHz / 10000) * 10;
-    
-    // 2. Collect dB values into zones
-    // Only analyze the relevant time scope (Restricted Scope)
-    for (let f = startFrame; f <= endFrame; f++) {
-      if (f >= spectrogram.length) break;
-      const frame = spectrogram[f];
-      
-      for (let b = 0; b < frame.length; b++) {
-        const freqHz = freqBins[b];
-        const powerDb = frame[b];
-        
-        // Ignore extremely low values (silence/padding) to avoid skewing mode
-        if (powerDb < -100) continue;
-        
-        const zoneKey = getZoneKey(freqHz);
-        
-        if (!zoneHistograms[zoneKey]) {
-          zoneHistograms[zoneKey] = [];
-        }
-        zoneHistograms[zoneKey].push(powerDb);
-      }
-    }
-    
-    // 3. Calculate Mode (Most Frequent Value) for each zone
-    // Using a binning approach (0.5 dB resolution)
-    const BIN_SIZE = 0.5; 
-    
-    Object.keys(zoneHistograms).forEach(key => {
-      const values = zoneHistograms[key];
-      if (values.length === 0) {
-        zoneFloors[key] = -100; // Fallback default
-        return;
-      }
-      
-      // Create frequency map for histogram
-      const histogram = {};
-      let maxCount = 0;
-      let modeBin = -100;
-      
-      for (const val of values) {
-        // Bin the dB value (e.g., -60.3 -> -60.5 or -60.0)
-        const bin = Math.floor(val / BIN_SIZE) * BIN_SIZE;
-        histogram[bin] = (histogram[bin] || 0) + 1;
-        
-        if (histogram[bin] > maxCount) {
-          maxCount = histogram[bin];
-          modeBin = bin;
-        }
-      }
-      
-      // The Mode represents the center of the noise floor distribution.
-      // This makes it a "Robust" floor for comparison.
-      zoneFloors[key] = modeBin - 1.0;
-    });
-    
-    return zoneFloors;
   }
 
 /**
