@@ -1806,9 +1806,9 @@ export class BatCallDetector {
     let optimalThreshold = -22;
     let optimalMeasurement = null;
     
-    // Test thresholds: -22 to -70 dB, step 0.5 dB
+    // Test thresholds: -22 to -70 dB, step 1.0 dB
     const thresholdRange = [];
-    for (let threshold = -22; threshold >= -70; threshold -= 0.5) {
+    for (let threshold = -22; threshold >= -70; threshold -= 1.0{
       thresholdRange.push(threshold);
     }
     
