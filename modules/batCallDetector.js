@@ -2384,9 +2384,11 @@ export class BatCallDetector {
                 const candidateFreq_kHz = candidateFreq_Hz / 1000;
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
                 
+                // 使用 Math.abs 來同時攔截 +15kHz 和 -15kHz 的跳變
                 if (Math.abs(diff) > 15.0) {
-                     console.log(`[LowFreq Jump Rejected] Skipped ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
-                    continue; 
+                    console.log(`[LowFreq Jump Rejected] Hard Stop at ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
+                    hitNoiseFloor = true; 
+                    break; 
                 }
             }
 
