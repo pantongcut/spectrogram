@@ -1576,7 +1576,7 @@ export class BatCallDetector {
     // 定義系統最低底噪 (Hard floor)
     // 任何低於此值的信號都被視為絕對靜音/底噪，並納入統計
     // 這確保了高頻區的"安靜" Bin 能夠將 Mode 拉回正確的低水平
-    const MIN_NOISE_FLOOR_DB = -115.0;
+    const MIN_NOISE_FLOOR_DB = -100.0;
     
     // 1. Initialize Histograms
     const getZoneKey = (freqHz) => Math.floor(freqHz / 10000) * 10;
@@ -1592,7 +1592,7 @@ export class BatCallDetector {
         
         // [FIX] 不再過濾掉 <-100 的值 (if powerDb < -100 continue)
         // 而是將其 Clamp 到最低底噪值並納入統計。
-        // 這樣如果高頻區大部分是靜音，Histogram 的 Mode 就會正確落在 -115dB
+        // 這樣如果高頻區大部分是靜音，Histogram 的 Mode 就會正確落在 -100dB
         if (powerDb < MIN_NOISE_FLOOR_DB) {
            powerDb = MIN_NOISE_FLOOR_DB;
         }
