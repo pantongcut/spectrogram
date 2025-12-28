@@ -1560,10 +1560,8 @@ export class BatCallDetector {
   }
 
   /**
-   * [2025 OPTIMIZED] Calculate Noise Floor per 10kHz Frequency Zone
-   * Optimization: Handles high-frequency zones where most background is < -100dB.
-   * Logic: If > 70% of bins are "silent" (< -100dB), apply a -4dB offset to the mode
-   * to prevent the noise floor from locking onto signal tails.
+   * [2025 NEW] Calculate Noise Floor per 10kHz Frequency Zone
+   * Uses Histogram Analysis to find the "Mode" (most frequent dB value) per zone.
    * * @param {Array} spectrogram - Power matrix [time][freq]
    * @param {Float32Array} freqBins - Frequency bin values in Hz
    * @param {number} startFrame - Analysis start frame index
@@ -1572,16 +1570,14 @@ export class BatCallDetector {
    */
   calculateZonalNoiseFloors(spectrogram, freqBins, startFrame, endFrame) {
     const zoneFloors = {};
-    const zoneHistograms = {};    // Key: "10", "20" -> Array of dB values > -100
-    const zoneTotalCounts = {};   // Key: "10" -> Total bins visited
-    const zoneSilenceCounts = {}; // Key: "10" -> Bins < -100 (Silence)
+    const zoneHistograms = {}; // Key: "10", "20" -> Array of dB values
     
-    // 1. Initialize Helper
+    // 1. Initialize Histograms
     // 10kHz zones: 0-10, 10-20, 20-30, etc.
     const getZoneKey = (freqHz) => Math.floor(freqHz / 10000) * 10;
-    const SILENCE_THRESHOLD = -100;
     
-    // 2. Collect dB values and Silence Statistics
+    // 2. Collect dB values into zones
+    // Only analyze the relevant time scope (Restricted Scope)
     for (let f = startFrame; f <= endFrame; f++) {
       if (f >= spectrogram.length) break;
       const frame = spectrogram[f];
@@ -1589,46 +1585,31 @@ export class BatCallDetector {
       for (let b = 0; b < frame.length; b++) {
         const freqHz = freqBins[b];
         const powerDb = frame[b];
+        
+        // Ignore extremely low values (silence/padding) to avoid skewing mode
+        if (powerDb < -100) continue;
+        
         const zoneKey = getZoneKey(freqHz);
         
-        // Initialize counters if this zone is encountered for the first time
-        if (zoneTotalCounts[zoneKey] === undefined) {
-            zoneTotalCounts[zoneKey] = 0;
-            zoneSilenceCounts[zoneKey] = 0;
-            zoneHistograms[zoneKey] = [];
+        if (!zoneHistograms[zoneKey]) {
+          zoneHistograms[zoneKey] = [];
         }
-
-        zoneTotalCounts[zoneKey]++;
-        
-        // Check Silence
-        if (powerDb < SILENCE_THRESHOLD) {
-          zoneSilenceCounts[zoneKey]++;
-          // Do NOT add to histogram (it skews the mode calculation for visible noise)
-        } else {
-          zoneHistograms[zoneKey].push(powerDb);
-        }
+        zoneHistograms[zoneKey].push(powerDb);
       }
     }
     
-    // 3. Calculate Mode and Apply Logic based on Silence Ratio
+    // 3. Calculate Mode (Most Frequent Value) for each zone
+    // Using a binning approach (0.5 dB resolution)
     const BIN_SIZE = 0.5; 
     
-    Object.keys(zoneTotalCounts).forEach(key => {
+    Object.keys(zoneHistograms).forEach(key => {
       const values = zoneHistograms[key];
-      const totalCount = zoneTotalCounts[key];
-      const silenceCount = zoneSilenceCounts[key];
-      
-      // Calculate ratio of bins that were filtered out
-      const silenceRatio = totalCount > 0 ? (silenceCount / totalCount) : 0;
-      
-      // Case A: 100% Silence (No data > -100dB)
-      // The floor is effectively extremely low.
-      if (!values || values.length === 0) {
-        zoneFloors[key] = -120; // Hard floor for pure silence
+      if (values.length === 0) {
+        zoneFloors[key] = -100; // Fallback default
         return;
       }
       
-      // Histogram Analysis for Mode
+      // Create frequency map for histogram
       const histogram = {};
       let maxCount = 0;
       let modeBin = -100;
@@ -1644,20 +1625,9 @@ export class BatCallDetector {
         }
       }
       
-      // 4. Determine Final Noise Floor
-      // If > 70% of the spectrum is silence (< -100dB), the "visible" data 
-      // in histogram likely belongs to the signal itself or transient noise spikes.
-      // Therefore, we must lower the floor significantly to encompass the silence.
-      if (silenceRatio > 0.70) {
-          // High Silence Zone: Mode is likely tracking signal. Drop it.
-          // Example: Mode found at -85dB (signal tail), but 80% is -110dB.
-          // Set floor to -105dB.
-          zoneFloors[key] = modeBin - 4.0;
-          // console.log(`[Zone ${key}kHz] High Silence (${(silenceRatio*100).toFixed(1)}%). Mode: ${modeBin} -> Floor: ${zoneFloors[key]}`);
-      } else {
-          // Normal Zone: Mode represents the dense noise floor.
-          zoneFloors[key] = modeBin - 1.0;
-      }
+      // The Mode represents the center of the noise floor distribution.
+      // This makes it a "Robust" floor for comparison.
+      zoneFloors[key] = modeBin - 1.0;
     });
     
     return zoneFloors;
