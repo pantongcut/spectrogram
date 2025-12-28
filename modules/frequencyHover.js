@@ -700,7 +700,6 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
     const tooltip = document.createElement('div');
     tooltip.className = 'draggable-tooltip freq-tooltip';
     
-    // [修改 8] 加入 container，初始位置會由 updateSelections 設定為百分比
     container.appendChild(tooltip);
     
     // Initial State: Show dashes
@@ -711,6 +710,10 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
     
     tooltip.innerHTML = `
       <table class="freq-tooltip-table">
+        <tr>
+          <td class="label">Freq.Start:</td>
+          <td class="value"><span class="fstart">${dispStart}</span> kHz</td>
+        </tr>
         <tr>
           <td class="label">Freq.High:</td>
           <td class="value"><span class="fhigh">${dispFhigh}</span> kHz</td>
@@ -1061,7 +1064,7 @@ function createBtnGroup(sel, isShortSelection = false) {
     });
   }
   
-function updateTooltipValues(sel, left, top, width, height) {
+  function updateTooltipValues(sel, left, top, width, height) {
     const { data, tooltip } = sel;
     
     // Time Expansion parameters
@@ -1070,6 +1073,7 @@ function updateTooltipValues(sel, left, top, width, height) {
     const timeDiv = timeExp ? 10 : 1;
     
     // Default values
+    let dispStart = '-'; // NEW
     let dispFhigh = '-';
     let dispFlow = '-';
     let dispBandwidth = '-';
@@ -1084,6 +1088,7 @@ function updateTooltipValues(sel, left, top, width, height) {
     if (data.batCall) {
       const call = data.batCall;
       
+      if (call.startFreq_kHz != null) dispStart = (call.startFreq_kHz * freqMul).toFixed(2); // NEW
       if (call.highFreq_kHz != null) dispFhigh = (call.highFreq_kHz * freqMul).toFixed(2);
       if (call.lowFreq_kHz != null) dispFlow = (call.lowFreq_kHz * freqMul).toFixed(2);
       if (call.peakFreq_kHz != null) dispPeak = (call.peakFreq_kHz * freqMul).toFixed(2);
@@ -1114,6 +1119,7 @@ function updateTooltipValues(sel, left, top, width, height) {
 
     const q = (selector) => tooltip.querySelector(selector);
     
+    if (q('.fstart')) q('.fstart').textContent = dispStart; // NEW
     if (q('.fhigh')) q('.fhigh').textContent = dispFhigh;
     if (q('.flow')) q('.flow').textContent = dispFlow;
     if (q('.fpeak')) q('.fpeak').textContent = dispPeak;
@@ -1124,10 +1130,6 @@ function updateTooltipValues(sel, left, top, width, height) {
   }
 
   function updateSelections() {
-    // [核心修改 9] 改用百分比 (%)
-    // 不再依賴像素寬度計算，而是依賴 "時間比例"
-    // 因為 container.style.width 會被 zoomControl 動態改變
-    // 只要 left/width 是百分比，它就會自動對齐
     
     const totalDur = getDuration();
     if (totalDur <= 0) return;
