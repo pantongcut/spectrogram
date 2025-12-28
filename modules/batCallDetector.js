@@ -1710,17 +1710,23 @@ export class BatCallDetector {
       }
       
       // ============================================================
-      // 2. SCAN HIGH FREQUENCY (Frame-by-Frame)
+      // 2. SCAN HIGH FREQUENCY (Frame-by-Frame) [REVERSED: Peak -> 0]
       // ============================================================
       let highFreq_Hz = null;
       let highFreqBinIdx = 0;
       let highFreqFrameIdx = 0; 
       let foundBin = false;
       
-      for (let f = 0; f <= currentSearchLimitFrame; f++) {
+      // [2025 NEW] Continuity Check Variables
+      let consecutiveSilenceFrames = 0;
+      const MAX_ALLOWED_GAP_FRAMES = 1; // 允許的最大斷層幀數
+
+      // [MODIFIED] Loop from Peak (Limit) BACKWARDS to 0
+      for (let f = currentSearchLimitFrame; f >= 0; f--) {
         const framePower = spectrogram[f];
-        
-        // Scan from High to Low Frequency (Reverse order)
+        let foundInThisFrame = false;
+
+        // Scan from High to Low Frequency (Reverse order within frame)
         for (let b = numBins - 1; b >= 0; b--) {
           if (framePower[b] > highFreqThreshold_dB) {
             
@@ -1746,14 +1752,32 @@ export class BatCallDetector {
             }
 
             // Update Max Frequency found so far
+            // 注意：因為我們是反向掃描，我們依然是在找這整個路徑中的"最高頻"
             if (highFreq_Hz === null || candidateFreq_Hz > highFreq_Hz) {
               highFreq_Hz = candidateFreq_Hz;
               highFreqBinIdx = b;
               highFreqFrameIdx = f;
               foundBin = true;
             }
-            break; 
+            
+            foundInThisFrame = true;
+            break; // Found max freq in this frame, move to next frame
           }
+        }
+
+        // [2025 NEW] Connectivity / Break Logic
+        // 如果當前 Frame 沒有找到任何大於閾值的信號，增加斷層計數
+        if (!foundInThisFrame) {
+            consecutiveSilenceFrames++;
+            // 如果連續斷層超過允許值，視為信號中斷 (Disconnected)，停止繼續向前搜索
+            // 這能有效防止撿取到 Frame 0-5 附近的隨機噪音
+            if (consecutiveSilenceFrames > MAX_ALLOWED_GAP_FRAMES) {
+                // console.log(`[Trace Break] Signal lost at frame ${f}, stopping backward scan.`);
+                break; 
+            }
+        } else {
+            // 如果找到信號，重置斷層計數 (代表信號是連續的)
+            consecutiveSilenceFrames = 0;
         }
       }
 
