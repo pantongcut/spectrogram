@@ -1249,20 +1249,12 @@ function updateTooltipValues(sel, left, top, width, height) {
 
     const freqRange = maxFrequency - minFrequency;
 
-    // 定義 Padding 參數
-    // [修正] 移除 PAD_TIME_S，因為 BatCallDetector 已經在 detectCalls 階段
-    // 對 startTime_s 和 endTime_s 應用了 5ms 的 padding。
-    const PAD_FREQ_KHZ = 10; 
-
     calls.forEach(call => {
       // 1. 直接使用 call 的時間 (已含 Detector 的 Padding)，僅做視圖邊界限制
       const startTime = Math.max(0, call.startTime_s);
       const endTime = Math.min(getDuration(), call.endTime_s);
-      
-      // 頻率部分保留視覺上的 Padding (上下各留 10kHz 空間，避免框框貼死信號)
-      // 如果希望框框精確貼合偵測到的頻率邊緣，也可以將 PAD_FREQ_KHZ 設為 0
-      const flow = Math.max(minFrequency, call.lowFreq_kHz - PAD_FREQ_KHZ);
-      const fhigh = Math.min(maxFrequency, call.highFreq_kHz + PAD_FREQ_KHZ);
+      const flow = Math.max(minFrequency, call.lowFreq_kHz);
+      const fhigh = Math.min(maxFrequency, call.highFreq_kHz);
 
       // 2. 計算垂直座標 (像素，因為高度不隨 Zoom 改變)
       const top = (1 - (fhigh - minFrequency) / freqRange) * spectrogramHeight;
