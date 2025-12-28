@@ -1807,9 +1807,16 @@ export class BatCallDetector {
             );
             
             const zoneKey = Math.floor(currentHighFreq_kHz / 10) * 10;
-            const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
-            logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
             
+            // Get raw noise floor
+            let specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
+            
+            // Prevent noise floor from dropping below -115dB (too sensitive in silence)
+            specificNoiseFloor_dB = Math.max(specificNoiseFloor_dB, -115);
+            
+            // Log for debug (optional)
+            logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
+
             if (currentHighFreqPower_dB > specificNoiseFloor_dB) {
               logRow['Judgment'] = 'Jump > 4kHz (Signal > Noise) -> Continue';
             } else {
@@ -1824,7 +1831,7 @@ export class BatCallDetector {
                   break;
                 }
               }
-              summaryLog.push(logRow); // Add final row before breaking
+              summaryLog.push(logRow); 
               break; // HARD STOP
             }
           }
@@ -1915,9 +1922,13 @@ export class BatCallDetector {
             validMeasurements[i].highFreqFrameIdx // End at current High Freq Frame
           );
           
-          const currentPower_dB = validMeasurements[i].highFreqPower_dB;
           const zoneKey = Math.floor(currFreq_kHz / 10) * 10;
-          const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
+          let specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
+
+          // [2025 OPTIMIZATION] Apply Ceiling -115dB
+          specificNoiseFloor_dB = Math.max(specificNoiseFloor_dB, -115);
+
+          const currentPower_dB = validMeasurements[i].highFreqPower_dB;
           
           if (currentPower_dB !== null && currentPower_dB <= specificNoiseFloor_dB) {
             // console.log(`    [ANOMALY] ${currFreq_kHz.toFixed(1)}kHz Power ${currentPower_dB.toFixed(1)}dB <= ZoneFloor ${specificNoiseFloor_dB.toFixed(1)}dB`);
