@@ -1560,8 +1560,9 @@ export class BatCallDetector {
   }
 
   /**
-   * [2025 NEW] Calculate Noise Floor per 10kHz Frequency Zone
-   * Uses Histogram Analysis to find the "Mode" (most frequent dB value) per zone.
+   * [2025 OPTIMIZED] Calculate Noise Floor per 10kHz Frequency Zone
+   * Fix: High frequency silence (<-100dB) is now clamped and included in stats 
+   * instead of being ignored, ensuring noise floor doesn't drift up to signal level.
    * * @param {Array} spectrogram - Power matrix [time][freq]
    * @param {Float32Array} freqBins - Frequency bin values in Hz
    * @param {number} startFrame - Analysis start frame index
@@ -1572,22 +1573,29 @@ export class BatCallDetector {
     const zoneFloors = {};
     const zoneHistograms = {}; // Key: "10", "20" -> Array of dB values
     
+    // 定義系統最低底噪 (Hard floor)
+    // 任何低於此值的信號都被視為絕對靜音/底噪，並納入統計
+    // 這確保了高頻區的"安靜" Bin 能夠將 Mode 拉回正確的低水平
+    const MIN_NOISE_FLOOR_DB = -115.0;
+    
     // 1. Initialize Histograms
-    // 10kHz zones: 0-10, 10-20, 20-30, etc.
     const getZoneKey = (freqHz) => Math.floor(freqHz / 10000) * 10;
     
     // 2. Collect dB values into zones
-    // Only analyze the relevant time scope (Restricted Scope)
     for (let f = startFrame; f <= endFrame; f++) {
       if (f >= spectrogram.length) break;
       const frame = spectrogram[f];
       
       for (let b = 0; b < frame.length; b++) {
         const freqHz = freqBins[b];
-        const powerDb = frame[b];
+        let powerDb = frame[b];
         
-        // Ignore extremely low values (silence/padding) to avoid skewing mode
-        if (powerDb < -100) continue;
+        // [FIX] 不再過濾掉 <-100 的值 (if powerDb < -100 continue)
+        // 而是將其 Clamp 到最低底噪值並納入統計。
+        // 這樣如果高頻區大部分是靜音，Histogram 的 Mode 就會正確落在 -115dB
+        if (powerDb < MIN_NOISE_FLOOR_DB) {
+           powerDb = MIN_NOISE_FLOOR_DB;
+        }
         
         const zoneKey = getZoneKey(freqHz);
         
@@ -1598,36 +1606,40 @@ export class BatCallDetector {
       }
     }
     
-    // 3. Calculate Mode (Most Frequent Value) for each zone
-    // Using a binning approach (0.5 dB resolution)
-    const BIN_SIZE = 0.5; 
+    // 3. Calculate Mode (Most Frequent Value)
+    const BIN_SIZE = 1.0; // 稍微增大 Bin Size 以獲得更平滑的統計 (0.5 -> 1.0)
     
     Object.keys(zoneHistograms).forEach(key => {
       const values = zoneHistograms[key];
       if (values.length === 0) {
-        zoneFloors[key] = -100; // Fallback default
+        zoneFloors[key] = MIN_NOISE_FLOOR_DB; 
         return;
       }
       
-      // Create frequency map for histogram
       const histogram = {};
       let maxCount = 0;
-      let modeBin = -100;
+      let modeBin = MIN_NOISE_FLOOR_DB;
       
+      // 優化：只需一次遍歷
       for (const val of values) {
-        // Bin the dB value (e.g., -60.3 -> -60.5 or -60.0)
+        // Round to nearest integer bin for stability
         const bin = Math.floor(val / BIN_SIZE) * BIN_SIZE;
-        histogram[bin] = (histogram[bin] || 0) + 1;
         
-        if (histogram[bin] > maxCount) {
-          maxCount = histogram[bin];
+        const count = (histogram[bin] || 0) + 1;
+        histogram[bin] = count;
+        
+        if (count > maxCount) {
+          maxCount = count;
           modeBin = bin;
+        } else if (count === maxCount) {
+          // 如果出現次數相同，取較小的值（保守估計底噪）
+          if (bin < modeBin) {
+            modeBin = bin;
+          }
         }
       }
-      
-      // The Mode represents the center of the noise floor distribution.
-      // This makes it a "Robust" floor for comparison.
-      zoneFloors[key] = modeBin - 1.0;
+
+      zoneFloors[key] = modeBin;
     });
     
     return zoneFloors;
