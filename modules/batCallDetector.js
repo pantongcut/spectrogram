@@ -1824,7 +1824,7 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 4. JUMP PROTECTION (> 2.5 kHz) with DYNAMIC ZONAL NOISE FLOOR CHECK
+      // 4. JUMP PROTECTION (> 1.5 kHz) with DYNAMIC ZONAL NOISE FLOOR CHECK
       // ============================================================
       if (foundBin && highFreq_Hz !== null) {
         const currentHighFreq_kHz = highFreq_Hz / 1000;
@@ -1846,7 +1846,7 @@ export class BatCallDetector {
           logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
           logRow['Signal (dB)'] = currentHighFreqPower_dB.toFixed(2);
 
-          if (jumpDiff > 2.5) {
+          if (jumpDiff > 1.5) {
             // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current highFreqFrameIdx
             const currentZoneFloors = this.calculateZonalNoiseFloors(
               spectrogram,
