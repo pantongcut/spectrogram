@@ -1027,6 +1027,10 @@ function createBtnGroup(sel, isShortSelection = false) {
         lockedHorizontal = null;
         lockedVertical = null;
         
+        // 標記 Popup 是否處理了這次更新
+        let popupHandled = false;
+
+        // 路徑一：如果 Popup 打開，讓 Popup 負責計算
         if (sel.powerSpectrumPopup && sel.powerSpectrumPopup.isOpen()) {
           const updatePromise = sel.powerSpectrumPopup.update({
             startTime: sel.data.startTime,
@@ -1038,6 +1042,7 @@ function createBtnGroup(sel, isShortSelection = false) {
           if (updatePromise && typeof updatePromise.then === 'function') {
             updatePromise.catch(() => {});
           }
+          popupHandled = true; // 標記為已處理
         }
         
         lastPowerSpectrumUpdateTime = 0;
@@ -1050,14 +1055,20 @@ function createBtnGroup(sel, isShortSelection = false) {
         const timeExp = getTimeExpansionMode();
         const judgeDurationMs = timeExp ? (durationMs / 10) : durationMs;
         
-        if (judgeDurationMs < 100) {
+        // 路徑二：只有當 Popup 沒打開 (popupHandled === false) 時，才執行背景計算
+        if (judgeDurationMs < 100 && !popupHandled) { 
           if (sel.data.batCall) delete sel.data.batCall;
           calculateBatCallParams(sel).catch(err => {
             console.error('Resize 後計算參數失敗:', err);
           });
         } else {
-          if (sel.data.batCall) delete sel.data.batCall;
-          if (sel.data.peakFreq) delete sel.data.peakFreq;
+          // 如果 Popup 已經接手處理，或是時間太長不計算，我們只更新 UI 顯示（避免舊數據殘留）
+          // 注意：如果 popupHandled = true，這裡暫時不刪除 batCall，
+          // 等待 Popup 的事件回調來覆蓋它，這樣視覺上比較平滑
+          if (!popupHandled) {
+             if (sel.data.batCall) delete sel.data.batCall;
+             if (sel.data.peakFreq) delete sel.data.peakFreq;
+          }
           updateTooltipValues(sel, 0, 0, 0, 0);
         }
       };
