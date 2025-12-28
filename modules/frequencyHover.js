@@ -1253,39 +1253,43 @@ function createBtnGroup(sel, isShortSelection = false) {
     const freqRange = maxFrequency - minFrequency;
 
     calls.forEach(call => {
-      // 1. 直接使用 call 的時間 (已含 Detector 的 Padding)，僅做視圖邊界限制
-      const startTime = Math.max(0, call.startTime_s);
-      const endTime = Math.min(getDuration(), call.endTime_s);
+
+      let signalStartTime = call.startFreqTime_s;
+      let signalEndTime = call.endFreqTime_s;
+
+      // Fallback: 防呆，如果精確時間為 null，使用切片時間
+      if (signalStartTime === null || signalStartTime === undefined) {
+          signalStartTime = call.startTime_s;
+      }
+      if (signalEndTime === null || signalEndTime === undefined) {
+          signalEndTime = call.endTime_s;
+      }
+
+      const startTime = Math.max(0, signalStartTime);
+      const endTime = Math.min(getDuration(), signalEndTime);
       const flow = Math.max(minFrequency, call.lowFreq_kHz);
       const fhigh = Math.min(maxFrequency, call.highFreq_kHz);
 
-      // 2. 計算垂直座標 (像素，因為高度不隨 Zoom 改變)
+      // 2. 計算垂直座標...
       const top = (1 - (fhigh - minFrequency) / freqRange) * spectrogramHeight;
       const height = ((fhigh - flow) / freqRange) * spectrogramHeight;
 
-      // 3. 創建 DOM 元素
       const selectionRect = document.createElement('div');
       selectionRect.className = 'selection-rect';
-      // 初始位置會由 updateSelections 設定為百分比，這裡先加入容器
       container.appendChild(selectionRect);
 
-      // 4. 創建 Selection 對象
-      // Bandwidth 和 Duration 這裡僅用於初始對象構建，實際顯示值會由 updateTooltipValues 讀取 call 對象
       const Bandwidth = fhigh - flow;
       const Duration = endTime - startTime;
 
-      // 這裡 left, width 傳 0 也行，因為 createTooltip 會呼叫 updateSelections 重算
       const selObj = createTooltip(
         0, top, 0, height, 
         fhigh, flow, Bandwidth, Duration, 
         selectionRect, startTime, endTime,
-        call // <--- [重要] 這裡必須傳入 call 作為 existingBatCall
+        call 
       );
 
-      // 5. (可選) 注入原始偵測數據
       selObj.data.peakFreq = call.peakFreq_kHz;
 
-      // 6. 預設隱藏 Tooltip
       if (selObj.tooltip) {
         updateTooltipValues(selObj, 0, 0, 0, 0);
         selObj.tooltip.style.display = 'none';
