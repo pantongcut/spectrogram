@@ -703,6 +703,7 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
     container.appendChild(tooltip);
     
     // Initial State: Show dashes
+    const dispStart = '-';
     const dispFhigh = '-';
     const dispFlow = '-';
     const dispBandwidth = '-';
