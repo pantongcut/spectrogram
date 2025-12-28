@@ -2800,7 +2800,6 @@ export class BatCallDetector {
         // Flag to skip Step 2 re-calculation
         skipStep2HighFrequency = true;
         
-        console.log(`[AUTO MODE DIRECT ASSIGNMENT] High Freq: ${safeHighFreq_kHz.toFixed(2)} kHz @ Frame ${safeHighFreqFrameIdx} - Skipping Step 2`);
       }
     }
     
@@ -3005,19 +3004,10 @@ export class BatCallDetector {
     // (見 STEP 3 的結尾)
     
     // STEP 2: Calculate HIGH FREQUENCY from entire spectrogram
-    // 
-    // 2025 修正：High Frequency 應該掃描整個 spectrogram 以找到最高頻率
-    // 不只限於第一幀，因為最高頻率可能出現在任何幀中
-    // 
-    // Professional standard: threshold at adjustable dB below peak
-    // This is the HIGHEST frequency in the entire call (not just first frame)
-    // Search from HIGH to LOW frequency (reverse bin order)
-    // Track both frequency value AND the frame it appears in
-    // 
     // 2025 NEW: Skip this block if Auto Mode already found and assigned highFreq
     // ============================================================
     // Declare variables outside the block so they're always available
-    let highFreq_Hz = 0;  // 2025: Init to 0 to properly find max
+    let highFreq_Hz = 0; 
     let highFreqBinIdx = 0;
     let highFreqFrameIdx = -1; // 2025: Use -1 to indicate not found yet
     
