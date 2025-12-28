@@ -3032,103 +3032,102 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // STEP 2.5: Calculate START FREQUENCY (獨立於 High Frequency)
+    // STEP 2.5: Calculate START FREQUENCY (Back-tracking Signal Tracer)
     // 
-    // 2025 關鍵修正：
-    // Start Frequency 是真正的 "First frame of call signal (frame 0)"
-    // 總是從第一幀掃描得出，但其值由規則 (a)/(b) 決定
-    // 
-    // 方法：
-    // 在 AUTO MODE 和 NON-AUTO MODE 中，都使用 -24dB 閾值計算 Start Frequency
-    // (a) 若 -24dB 閾值的頻率 < Peak Frequency：使用該值為 Start Frequency
-    // (b) 若 -24dB 閾值的頻率 >= Peak Frequency：Start Frequency = High Frequency
-    // 
-    // 時間點說明：
-    // Start Frequency 總是在第一幀（frame 0），時間 = 0 ms
-    // 但 Start Frequency 的值可能等於 High Frequency（規則 b）
+    // 2025 UPGRADE: Instead of blindly scanning Frame 0, we trace 
+    // backwards from the High Frequency point. This ensures the 
+    // Start Frequency is physically connected to the main call, 
+    // ignoring isolated noise in padding areas.
     // ============================================================
-    const firstFramePower = spectrogram[0];
-    let startFreq_Hz = null;
-    let startFreq_kHz = null;
-    let startFreqBinIdx = 0;  // 2025: Track independent bin index for Start Frequency
-    let startFreqFrameIdx = 0;  // 2025: Start Frequency is always in frame 0
     
-    // 使用 -24dB 閾值計算 Start Frequency（無論是否 Auto Mode）
-    const threshold_24dB = peakPower_dB - 24;
-    
-    // 2025: 低頻 Noise 保護閾值
-    const LOW_FREQ_NOISE_THRESHOLD_kHz = 40;  // kHz - 低於此頻率的 bin 在某些情況下應被忽略
-    const HIGH_PEAK_THRESHOLD_kHz = 60;       // kHz - Peak >= 此值時啟動低頻保護
-    const peakFreqInKHz = peakFreq_Hz / 1000; // 將 Peak 頻率轉換為 kHz
-    const shouldIgnoreLowFreqNoise = peakFreqInKHz >= HIGH_PEAK_THRESHOLD_kHz;
-    
-    // 從低到高掃描，找最低頻率（規則 a）
-    for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
-      if (firstFramePower[binIdx] > threshold_24dB) {
-        const testStartFreq_Hz = freqBins[binIdx];
-        const testStartFreq_kHz = testStartFreq_Hz / 1000;
+    // 1. Determine Threshold
+    // Use the actual threshold used for High Freq detection to maintain consistency
+    // If not available (e.g. legacy), fall back to config
+    const startFreqThreshold_dB = (call.highFreqThreshold_dB_used !== null) 
+        ? peakPower_dB + call.highFreqThreshold_dB_used 
+        : peakPower_dB + this.config.highFreqThreshold_dB;
 
-        // Apply Highpass Filter Protection
-        // If Highpass Filter is enabled, ignore frequencies below the cutoff
-        // This prevents the detector from picking up filtered-out noise as Start Frequency
-        if (this.config.enableHighpassFilter && testStartFreq_kHz < this.config.highpassFilterFreq_kHz) {
-          continue; // Skip frequencies cut off by the highpass filter
-        }
+    // 2. Initialize tracking variables starting from High Frequency point
+    // We assume High Freq is part of the call, so it's our "Anchor"
+    let currentTrackBinIdx = highFreqBinIdx; 
+    let validStartFreq_Hz = highFreq_Hz;
+    let validStartBinIdx = highFreqBinIdx;
+    let validStartFrameIdx = highFreqFrameIdx;
 
-        // 應用低頻 Noise 保護機制
-        // 若 Peak ≥ 60 kHz，忽略 40 kHz 或以下的候選值
-        if (shouldIgnoreLowFreqNoise && testStartFreq_kHz <= LOW_FREQ_NOISE_THRESHOLD_kHz) {
-          continue;
-        }
+    // 3. Define Connectivity Constraints
+    // Max jump allowed between frames (e.g., 2 kHz) to prevent jumping to noise
+    const maxJumpHz = 2000; 
+    const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
+    const numBins = freqBins.length;
 
-        // 檢查是否低於 Peak Frequency（規則 a）
-        if (testStartFreq_kHz < peakFreqInKHz) {
-          // 滿足規則 (a)：使用此值為 Start Frequency
-          startFreq_Hz = testStartFreq_Hz;
-          startFreq_kHz = testStartFreq_kHz;
-          startFreqBinIdx = binIdx;  // 2025: Store independent bin index for Start Frequency
-          
-          // 嘗試線性插值以獲得更高精度
-          if (binIdx > 0) {
-            const thisPower = firstFramePower[binIdx];
-            const prevPower = firstFramePower[binIdx - 1];
+    // 4. Backward Scan: Trace from High Freq Frame down to Frame 0
+    // We stop if signal breaks or jumps too far
+    if (highFreqFrameIdx > 0) {
+        for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
+            const framePower = spectrogram[f];
             
-            if (prevPower < threshold_24dB && thisPower > threshold_24dB) {
-              const powerRatio = (thisPower - threshold_24dB) / (thisPower - prevPower);
-              const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
-              startFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
-              startFreq_kHz = startFreq_Hz / 1000;
+            // Define search window around previous frequency bin
+            const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
+            const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
+            
+            let bestBin = -1;
+            let bestPower = -Infinity;
+
+            // Find max power bin within the connectivity window
+            for (let b = searchMinBin; b <= searchMaxBin; b++) {
+                if (framePower[b] > bestPower) {
+                    bestPower = framePower[b];
+                    bestBin = b;
+                }
             }
-          }
-          break;
+
+            // Check if the best connected signal is strong enough
+            if (bestPower > startFreqThreshold_dB) {
+                // Connection found! Update tracking
+                currentTrackBinIdx = bestBin;
+                
+                // Update "valid start" candidates
+                validStartBinIdx = bestBin;
+                validStartFrameIdx = f;
+                validStartFreq_Hz = freqBins[bestBin];
+                
+                // Optional: Linear Interpolation for higher precision
+                // (Only if not at edges)
+                if (bestBin > 0 && bestBin < numBins - 1) {
+                   const prevP = framePower[bestBin - 1];
+                   const nextP = framePower[bestBin + 1];
+                   // Simple refinement if neighbors exist and this is a peak
+                   if (bestPower > prevP && bestPower > nextP) {
+                       // Linear interpolation between bins
+                       const powerRatio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
+                       const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
+                       validStartFreq_Hz = freqBins[bestBin] + (powerRatio * freqDiff * (prevP < nextP ? 1 : -1));
+                   }
+                }
+            } else {
+                // Signal Lost (Gap) - Stop tracing
+                // The last valid frame (f+1) was the true start
+                break;
+            }
         }
-      }
     }
-    
-    // 如果規則 (a) 不滿足（-24dB 頻率 >= Peak Frequency），使用規則 (b)
-    if (startFreq_Hz === null) {
-      // Start Frequency = High Frequency（規則 b）
-      // Note: 此時 Start Frequency 的值等於 High Frequency 的值
-      // 但 Start Frequency 的幀索引固定為 0（frame 0）
-      startFreq_Hz = highFreq_Hz;
-      startFreq_kHz = highFreq_Hz / 1000;
-      startFreqBinIdx = highFreqBinIdx;  // 2025: Use High Frequency's bin index
-    }
-    
-    // 存儲 Start Frequency 及其信息
+
+    // 5. Assign Final Result
+    // Start Frequency is the earliest frame where we maintained connection
+    const startFreq_kHz = validStartFreq_Hz / 1000;
     call.startFreq_kHz = startFreq_kHz;
-    call.startFreqTime_s = timeFrames[0];  // Time of first frame (frame 0)
-    call.startFreqBinIdx = startFreqBinIdx;  // 2025: Store independent bin index
-    call.startFreqFrameIdx = startFreqFrameIdx;  // 2025: Always frame 0
+    call.startFreqBinIdx = validStartBinIdx;
+    call.startFreqFrameIdx = validStartFrameIdx;
     
-    // ============================================================
-    // NEW (2025): Calculate start frequency time in milliseconds
-    // startFreq_ms = absolute time of start frequency (always at first frame = 0 ms)
-    // Unit: ms (milliseconds), relative to selection area start
-    // 
-    // ============================================================
-    const firstFrameTime_ms = 0;  // First frame is at time 0 relative to selection area start
-    call.startFreq_ms = firstFrameTime_ms;  // Start frequency time is always at frame 0
+    // Critical: Update Time based on the actual start frame, NOT just Frame 0
+    // This fixes duration calculations if padding contained silence
+    if (validStartFrameIdx < timeFrames.length) {
+        call.startFreqTime_s = timeFrames[validStartFrameIdx];
+        
+        // Update ms time relative to selection start
+        const firstFrameTime_s = timeFrames[0];
+        call.startFreq_ms = (call.startFreqTime_s - firstFrameTime_s) * 1000;
+    }
     
     // ============================================================
     // STEP 3: Calculate LOW FREQUENCY from last frame
