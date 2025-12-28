@@ -996,7 +996,7 @@ export class BatCallDetector {
       // [FIX] 加入 Padding 以保留叫聲微弱的頭尾
       // 建議加入 5ms 的 Padding，讓 Auto Threshold 機制有空間發揮
       // ============================================================
-      const padding_ms = 5; // 預留 5ms 緩衝區
+      const padding_ms = 8; // 預留 8ms 緩衝區
       // 計算 1 個 Frame 代表多少秒
       const timePerFrame = timeFrames[1] - timeFrames[0];
       // 計算需要擴張多少個 Frame
@@ -3334,7 +3334,6 @@ export class BatCallDetector {
       startFreq_Hz = highFreq_Hz;
       startFreq_kHz = highFreq_Hz / 1000;
       startFreqBinIdx = highFreqBinIdx;  // 2025: Use High Frequency's bin index
-      // 但時間點仍然是 0 ms（第一幀）
     }
     
     // 存儲 Start Frequency 及其信息
@@ -3348,8 +3347,6 @@ export class BatCallDetector {
     // startFreq_ms = absolute time of start frequency (always at first frame = 0 ms)
     // Unit: ms (milliseconds), relative to selection area start
     // 
-    // NOTE: Start Frequency is ALWAYS at frame 0 by definition
-    // (Start Frequency is the "First frame of call signal")
     // ============================================================
     const firstFrameTime_ms = 0;  // First frame is at time 0 relative to selection area start
     call.startFreq_ms = firstFrameTime_ms;  // Start frequency time is always at frame 0
