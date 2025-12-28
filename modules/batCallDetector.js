@@ -3139,9 +3139,9 @@ export class BatCallDetector {
     // Priority 1: Check if it is a CF Call (Detected in Auto-Threshold Loop)
     if (isCFCallDetected) {
         // CASE A: CF Call Species
-        // Action: FORCE tracing, but use a stricter standard threshold (-30dB)
+        // Action: FORCE tracing, but use a stricter standard threshold (-35dB)
         performStartFreqTracing = true;
-        startFreqThreshold_dB = peakPower_dB - 30;
+        startFreqThreshold_dB = peakPower_dB - 35;
     } else {
         // CASE B: FM / Non-CF Call
         // Action: Apply standard weak-signal protection checks
