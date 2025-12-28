@@ -3103,7 +3103,6 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // ============================================================
     // STEP 2.5: Calculate START FREQUENCY (Optimized 2025)
     // ============================================================
     
@@ -3128,24 +3127,20 @@ export class BatCallDetector {
     // [Logic Flow]
     // Priority 1: Check if it is a CF Call (Detected in Auto-Threshold Loop)
     if (isCFCallDetected) {
-        // CASE A: CF Call Species
-        // Action: FORCE tracing, but use a stricter standard threshold (-35dB)
         performStartFreqTracing = true;
         startFreqThreshold_dB = peakPower_dB - 35;
     } else {
         // CASE B: FM / Non-CF Call
-        // Action: Apply standard weak-signal protection checks
-        
-        // Check 1: Relative Weakness (< Peak - 30dB)
         if (highFreqPointPower_dB < (peakPower_dB - 30)) {
             performStartFreqTracing = false;
         }
-
-        // Check 2: Absolute Weakness (< -80dB)
         if (highFreqPointPower_dB < -80) {
             performStartFreqTracing = false;
         }
     }
+
+    // [2025 NEW] Summary Log for Start Freq Tracing
+    const traceLog = [];
 
     // 3. Perform Back-tracking Trace (Only if performStartFreqTracing is TRUE)
     if (performStartFreqTracing) {
@@ -3156,10 +3151,22 @@ export class BatCallDetector {
       const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
       const numBins = freqBins.length;
 
+      // Log initial point (High Freq)
+      if (highFreqFrameIdx < timeFrames.length) {
+         traceLog.push({
+             'Frame': highFreqFrameIdx,
+             'Time (s)': timeFrames[highFreqFrameIdx].toFixed(4),
+             'Freq (kHz)': (highFreq_Hz / 1000).toFixed(2),
+             'Power (dB)': highFreqPointPower_dB.toFixed(1),
+             'Status': 'Start Point (High Freq)'
+         });
+      }
+
       // Backward Scan: Trace from High Freq Frame down to Frame 0
       if (highFreqFrameIdx > 0) {
           for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
               const framePower = spectrogram[f];
+              const frameTime = timeFrames[f]; // Get Time for this frame
               
               // Define search window around previous frequency bin
               const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
@@ -3175,6 +3182,9 @@ export class BatCallDetector {
                       bestBin = b;
                   }
               }
+              
+              let traceFreq_kHz = (bestBin >= 0) ? (freqBins[bestBin] / 1000) : 0;
+              let status = 'Scanning';
 
               // Check if the best connected signal is strong enough
               if (bestPower > startFreqThreshold_dB) {
@@ -3194,10 +3204,26 @@ export class BatCallDetector {
                         const powerRatio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
                         const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
                         validStartFreq_Hz = freqBins[bestBin] + (powerRatio * freqDiff * (prevP < nextP ? 1 : -1));
+                        traceFreq_kHz = validStartFreq_Hz / 1000;
                     }
                   }
+                  
+                  status = 'Linked';
               } else {
                   // Signal Lost (Gap) - Stop tracing
+                  status = 'Gap/Stop';
+              }
+              
+              // Add row to log
+              traceLog.push({
+                  'Frame': f,
+                  'Time (s)': frameTime.toFixed(4),
+                  'Freq (kHz)': traceFreq_kHz.toFixed(2),
+                  'Power (dB)': bestPower.toFixed(1),
+                  'Status': status
+              });
+
+              if (status === 'Gap/Stop') {
                   break;
               }
           }
@@ -3214,6 +3240,17 @@ export class BatCallDetector {
         call.startFreqTime_s = timeFrames[validStartFrameIdx];
         const firstFrameTime_s = timeFrames[0];
         call.startFreq_ms = (call.startFreqTime_s - firstFrameTime_s) * 1000;
+    }
+
+    // [2025 NEW] Output the Summary Table
+    if (traceLog.length > 0) {
+        // 獲取最終選定的頻率值用於顯示
+        const finalFreq = call.startFreq_kHz;
+        const freqText = finalFreq !== null ? ` | Final: ${finalFreq.toFixed(2)} kHz @ ${(call.startFreqTime_s).toFixed(4)}s` : '';
+        
+        console.groupCollapsed(`[Start Freq] Trace Summary (Threshold: ${startFreqThreshold_dB.toFixed(1)} dB${freqText})`);
+        console.table(traceLog);
+        console.groupEnd();
     }
 
     
