@@ -711,7 +711,7 @@ export class BatCallDetector {
           const call = new BatCall();
 
           // Padding Logic (Same as detectCalls)
-          const pad_ms = 8;
+          const pad_ms = 5;
           const timePerFrame = timeFrames[1] - timeFrames[0];
           const paddingFrames = Math.ceil((pad_ms / 1000) / timePerFrame);
           
@@ -1108,14 +1108,12 @@ export class BatCallDetector {
         if (snrResult.snr_dB !== null && isFinite(snrResult.snr_dB)) {
           call.snr_dB = snrResult.snr_dB;
           call.snrMechanism = snrResult.mechanism;
-          // ... (保留原本的 log 邏輯)
         } else {
           const spectralSNR_dB = call.peakPower_dB - robustNoiseFloor_dB;
           call.snr_dB = spectralSNR_dB;
           call.snrMechanism = 'RMS-based (2025) - Calculation failed fallback';
         }
       } catch (error) {
-        // ... (保留錯誤處理)
         const spectralSNR_dB = call.peakPower_dB - robustNoiseFloor_dB;
         call.snr_dB = spectralSNR_dB;
       }
