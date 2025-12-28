@@ -624,7 +624,7 @@ export class BatCallDetector {
       // If HPF needed, we must re-process audio and re-generate spectrogram
       // This ensures measurements are clean
       if (autoCutoff > 0) {
-          // console.log(`[Auto HPF] ROI ${i}: Peak ${roiPeakFreq_kHz.toFixed(1)}kHz -> Applying HPF @ ${autoCutoff}kHz`);
+          console.log(`[Auto HPF] ROI ${i}: Peak ${roiPeakFreq_kHz.toFixed(1)}kHz -> Applying HPF @ ${autoCutoff}kHz`);
           segmentAudio = this.applyHighpassFilter(segmentAudio, autoCutoff * 1000, sampleRate);
           this.config.enableHighpassFilter = true;
           this.config.highpassFilterFreq_kHz = autoCutoff;
