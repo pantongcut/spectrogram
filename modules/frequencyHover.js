@@ -1250,13 +1250,17 @@ function updateTooltipValues(sel, left, top, width, height) {
     const freqRange = maxFrequency - minFrequency;
 
     // 定義 Padding 參數
+    // [修正] 移除 PAD_TIME_S，因為 BatCallDetector 已經在 detectCalls 階段
+    // 對 startTime_s 和 endTime_s 應用了 5ms 的 padding。
     const PAD_FREQ_KHZ = 10; 
-    const PAD_TIME_S = 0.005; 
 
     calls.forEach(call => {
-      // 1. 應用 Padding 並強制限制在視圖範圍內
-      const startTime = Math.max(0, call.startTime_s - PAD_TIME_S);
-      const endTime = Math.min(getDuration(), call.endTime_s + PAD_TIME_S);
+      // 1. 直接使用 call 的時間 (已含 Detector 的 Padding)，僅做視圖邊界限制
+      const startTime = Math.max(0, call.startTime_s);
+      const endTime = Math.min(getDuration(), call.endTime_s);
+      
+      // 頻率部分保留視覺上的 Padding (上下各留 10kHz 空間，避免框框貼死信號)
+      // 如果希望框框精確貼合偵測到的頻率邊緣，也可以將 PAD_FREQ_KHZ 設為 0
       const flow = Math.max(minFrequency, call.lowFreq_kHz - PAD_FREQ_KHZ);
       const fhigh = Math.min(maxFrequency, call.highFreq_kHz + PAD_FREQ_KHZ);
 
@@ -1271,6 +1275,7 @@ function updateTooltipValues(sel, left, top, width, height) {
       container.appendChild(selectionRect);
 
       // 4. 創建 Selection 對象
+      // Bandwidth 和 Duration 這裡僅用於初始對象構建，實際顯示值會由 updateTooltipValues 讀取 call 對象
       const Bandwidth = fhigh - flow;
       const Duration = endTime - startTime;
 
@@ -1291,7 +1296,7 @@ function updateTooltipValues(sel, left, top, width, height) {
         selObj.tooltip.style.display = 'none';
       }
       
-      console.log(`[FrequencyHover] Created padded selection: Time ${startTime.toFixed(3)}-${endTime.toFixed(3)}s, Freq ${fhigh.toFixed(1)}-${flow.toFixed(1)}kHz`);
+      console.log(`[FrequencyHover] Created auto selection: Time ${startTime.toFixed(3)}-${endTime.toFixed(3)}s`);
     });
   }
 
