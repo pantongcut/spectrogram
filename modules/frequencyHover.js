@@ -969,6 +969,8 @@ function createBtnGroup(sel, isShortSelection = false) {
       lockedVertical = onTop ? 'top' : onBottom ? 'bottom' : null;
 
       if (!lockedHorizontal && !lockedVertical) return;
+
+      rect.classList.remove('auto-created');
   
       resizing = true;
       isResizing = true;
@@ -1275,7 +1277,7 @@ function createBtnGroup(sel, isShortSelection = false) {
       const height = ((fhigh - flow) / freqRange) * spectrogramHeight;
 
       const selectionRect = document.createElement('div');
-      selectionRect.className = 'selection-rect';
+      selectionRect.className = 'selection-rect auto-created';
       container.appendChild(selectionRect);
 
       const Bandwidth = fhigh - flow;
