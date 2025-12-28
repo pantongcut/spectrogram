@@ -1767,11 +1767,17 @@ export class BatCallDetector {
           consecutiveStableCount = 0;
       }
 
-      // Log Row Preparation (Simplified)
+      // ============================================================
+      // Log Row Preparation
+      // ============================================================
       let logRow = {
           'Thr (dB)': testThreshold_dB,
           'Freq (kHz)': highFreq_Hz !== null ? (highFreq_Hz / 1000).toFixed(2) : '-',
-          'Judgment': 'OK'
+          'Ref (kHz)': '-',      // Placeholder to reserve order
+          'Diff (kHz)': '-',     // Placeholder to reserve order
+          'Signal (dB)': '-',    // Placeholder to reserve order
+          'Noise (dB)': '-',     // Placeholder to reserve order
+          'Judgment': 'OK'       // Last column
       };
       
       // ============================================================
@@ -1996,7 +2002,11 @@ export class BatCallDetector {
     
     // Output the summary table
     if (summaryLog.length > 0) {
-        console.groupCollapsed(`[High Freq] Scan Summary (Selected: ${optimalThreshold} dB)`);
+        // 獲取最終選定的頻率值用於顯示
+        const finalFreq = optimalMeasurement ? optimalMeasurement.highFreq_kHz : null;
+        const freqText = finalFreq !== null ? ` | ${finalFreq.toFixed(2)} kHz` : '';
+
+        console.groupCollapsed(`[High Freq] Scan Summary (Selected: ${optimalThreshold} dB${freqText})`);
         console.table(summaryLog);
         console.groupEnd();
     }
@@ -2452,7 +2462,11 @@ export class BatCallDetector {
     
     // Output the summary table
     if (summaryLog.length > 0) {
-        console.groupCollapsed(`[Low Freq] Scan Summary (Selected: ${optimalThreshold} dB)`);
+        // 獲取最終選定的頻率值用於顯示
+        const finalFreq = optimalMeasurement ? optimalMeasurement.lowFreq_kHz : null;
+        const freqText = finalFreq !== null ? ` | ${finalFreq.toFixed(2)} kHz` : '';
+        
+        console.groupCollapsed(`[Low Freq] Scan Summary (Selected: ${optimalThreshold} dB${freqText})`);
         console.table(summaryLog);
         console.groupEnd();
     }
