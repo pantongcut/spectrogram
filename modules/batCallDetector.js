@@ -1560,8 +1560,12 @@ export class BatCallDetector {
   }
 
   /**
-   * [2025 NEW] Calculate Noise Floor per 10kHz Frequency Zone
+   * [2025 OPTIMIZED] Calculate Noise Floor per 10kHz Frequency Zone
    * Uses Histogram Analysis to find the "Mode" (most frequent dB value) per zone.
+   * Instead of ignoring bins < -100dB, we clamp them to -115dB.
+   * This ensures that "silence" is correctly weighted in the histogram.
+   * Without this, high-frequency zones (which are mostly silent) would calculate 
+   * the "Mode" based only on the few signal bins present, resulting in an artificially high noise floor.
    * * @param {Array} spectrogram - Power matrix [time][freq]
    * @param {Float32Array} freqBins - Frequency bin values in Hz
    * @param {number} startFrame - Analysis start frame index
@@ -1584,10 +1588,11 @@ export class BatCallDetector {
       
       for (let b = 0; b < frame.length; b++) {
         const freqHz = freqBins[b];
-        const powerDb = frame[b];
+        let powerDb = frame[b];
         
-        // Ignore extremely low values (silence/padding) to avoid skewing mode
-        if (powerDb < -100) continue;
+        if (powerDb < -100) {
+             powerDb = -115;
+        }
         
         const zoneKey = getZoneKey(freqHz);
         
@@ -1605,14 +1610,14 @@ export class BatCallDetector {
     Object.keys(zoneHistograms).forEach(key => {
       const values = zoneHistograms[key];
       if (values.length === 0) {
-        zoneFloors[key] = -100; // Fallback default
+        zoneFloors[key] = -115; // Fallback default (aligned with new silence floor)
         return;
       }
       
       // Create frequency map for histogram
       const histogram = {};
       let maxCount = 0;
-      let modeBin = -100;
+      let modeBin = -115; // Default start at floor
       
       for (const val of values) {
         // Bin the dB value (e.g., -60.3 -> -60.5 or -60.0)
