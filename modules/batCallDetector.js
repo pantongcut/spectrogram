@@ -1616,7 +1616,8 @@ export class BatCallDetector {
       highFreqFrameIdx: 0,
       startFreq_Hz: null,
       startFreq_kHz: null,
-      warning: false
+      warning: false,
+      isCFStablePattern: false // NEW Return field
     };
 
     // ============================================================
@@ -1628,25 +1629,18 @@ export class BatCallDetector {
     // Initial search limit: from 0 to peakFrameIdx
     let currentSearchLimitFrame = Math.min(peakFrameIdx, spectrogram.length - 1);
     
-    // ============================================================
-    // 1. [UPDATED] Calculate Zonal Robust Noise Floors
-    // Scope: DYNAMIC - Frame 0 to Current High Freq Frame
-    // Method: Frequency Histogram Mode per 10kHz band
-    // Note: Noise Floor is now calculated DYNAMICALLY within the threshold loop
-    //       (moved to Jump Protection section below)
-    // ============================================================
-    // Removed pre-calculation. See Jump Protection section in loop.
-
-    // console.log('[findOptimalHighFrequencyThreshold] Zonal Noise Analysis Completed (Scope: Start->Peak)');
-
     const stablePeakPower_dB = callPeakPower_dB;
     
-    // ============================================================
-    // Initialize Hard Stop Flag and Optimal Variables
-    // ============================================================
     let hitNoiseFloor = false;
     let optimalThreshold = -12;
     let optimalMeasurement = null;
+    
+    // ============================================================
+    // CF Detection Variables
+    // ============================================================
+    let consecutiveStableCount = 0;
+    let isCFStablePattern = false;
+    let lastMeasuredFreq_kHz = null;
     
     // Test thresholds: -12 to -70 dB, step 1.0 dB
     const thresholdRange = [];
@@ -1655,8 +1649,6 @@ export class BatCallDetector {
     }
     
     const measurements = [];
-    
-    // [2025] Summary Table Data Collection
     const summaryLog = [];
 
     // Track the highFreqFrameIdx for narrowing searches
@@ -1750,14 +1742,35 @@ export class BatCallDetector {
         highFreqFrameIdx = 0;
       }
 
-      // Prepare log row
+      // ============================================================
+      // [2025 NEW] CF Call Species Detection Logic
+      // ============================================================
+      if (foundBin && highFreq_Hz !== null) {
+          const currentFreq_kHz = highFreq_Hz / 1000;
+          
+          if (lastMeasuredFreq_kHz !== null) {
+              const diff = Math.abs(currentFreq_kHz - lastMeasuredFreq_kHz);
+              // Check stability (<= 30Hz difference)
+              if (diff <= 0.03) {
+                  consecutiveStableCount++;
+              } else {
+                  consecutiveStableCount = 0; // Reset if unstable
+              }
+              
+              // If we have 10 consecutive stable measurements, flag as CF Call
+              if (consecutiveStableCount >= 10) {
+                  isCFStablePattern = true;
+              }
+          }
+          lastMeasuredFreq_kHz = currentFreq_kHz;
+      } else {
+          consecutiveStableCount = 0;
+      }
+
+      // Log Row Preparation (Simplified)
       let logRow = {
           'Thr (dB)': testThreshold_dB,
           'Freq (kHz)': highFreq_Hz !== null ? (highFreq_Hz / 1000).toFixed(2) : '-',
-          'Ref (kHz)': referenceFreq_kHz !== null ? referenceFreq_kHz.toFixed(2) : '-',
-          'Diff (kHz)': '-',
-          'Signal (dB)': '-',
-          'Noise (dB)': '-',
           'Judgment': 'OK'
       };
       
@@ -2064,7 +2077,8 @@ export class BatCallDetector {
       startFreq_Hz: returnStartFreq_Hz,
       startFreq_kHz: returnStartFreq_kHz,
       finalSearchLimitFrame: finalSearchLimitFrame,
-      warning: hasWarning
+      warning: hasWarning,
+      isCFStablePattern: isCFStablePattern // <--- NEW FIELD
     };
   }
 
@@ -2589,18 +2603,16 @@ export class BatCallDetector {
     }
 
     // ============================================================
-    // AUTO MODE: If highFreqThreshold_dB_isAuto is enabled,
-    // automatically find optimal threshold using STABLE call.peakPower_dB
-    // (NOT the floating globalPeakPower_dB from entire spectrogram)
+    // STEP 2: AUTO MODE & High Frequency Setup
     // ============================================================
-    // 2025: Declare these variables in outer scope so they can be used in STEP 2
     let safeHighFreq_kHz = null;
     let safeHighFreq_Hz = null;
     let safeHighFreqBinIdx = undefined;
     let safeHighFreqFrameIdx = 0;
-    let finalSearchLimitFrameFromAuto = 0;  // 2025 v2: 保存 auto mode 返回的搜尋範圍限制
-    let skipStep2HighFrequency = false;     // 2025 NEW: Flag to skip Step 2 if Auto Mode succeeds
-    
+    let finalSearchLimitFrameFromAuto = 0;
+    let skipStep2HighFrequency = false;
+    let isCFCallDetected = false; // 2025 NEW: Flag for CF Call
+
     if (this.config.highFreqThreshold_dB_isAuto === true) {
       const result = this.findOptimalHighFrequencyThreshold(
         spectrogram,
@@ -2611,19 +2623,20 @@ export class BatCallDetector {
         peakFrameIdx   // Pass peak frame index to only check frames before peak
       );
       
-      // ============================================================
-      // 新規則 2025：High Frequency 防呆機制
-      // 找出第一個 >= Peak Frequency 的有效 High Frequency
-      // ============================================================
-      // 如果返回的 High Frequency < Peak Frequency，視為異常
-      // 需要向上遍歷 thresholdRange 找到第一個 >= Peak Frequency 的值
+      // Capture CF Detection Result
+      isCFCallDetected = result.isCFStablePattern; 
+      if (isCFCallDetected) {
+          console.log('[Detector] CF Call Species Pattern Detected (Stable High Freq)');
+      }
+
       safeHighFreq_kHz = result.highFreq_kHz;
       safeHighFreq_Hz = result.highFreq_Hz;
       safeHighFreqBinIdx = result.highFreqBinIdx;  // 2025: Initialize from findOptimalHighFrequencyThreshold
       safeHighFreqFrameIdx = result.highFreqFrameIdx;  // 2025 v2: 取得幀索引
       finalSearchLimitFrameFromAuto = result.finalSearchLimitFrame;  // 2025 v2: 取得搜尋範圍限制
       let usedThreshold = result.threshold;
-      
+
+      // ... [Insert existing "Safe High Freq vs Peak Freq" check here] ...
       // 如果最優閾值的 High Frequency 低於 Peak Frequency，執行防呆檢查
       if (result.highFreq_kHz !== null && result.highFreq_kHz < (peakFreq_Hz / 1000)) {
         // 需要找到第一個 >= Peak Frequency 的 High Frequency
@@ -3032,48 +3045,52 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // STEP 2.5: Calculate START FREQUENCY (Back-tracking Signal Tracer)
-    // 
-    // 2025 UPGRADE: Instead of blindly scanning Frame 0, we trace 
-    // backwards from the High Frequency point.
+    // ============================================================
+    // STEP 2.5: Calculate START FREQUENCY (Optimized 2025)
     // ============================================================
     
     // 1. Initialize result variables with High Frequency (Default fallback)
-    // We assume High Freq is part of the call, so it's our starting "Anchor"
     let validStartFreq_Hz = highFreq_Hz;
     let validStartBinIdx = highFreqBinIdx;
     let validStartFrameIdx = highFreqFrameIdx;
 
-    // 2. [2025 OPTIMIZATION] Check if we should skip tracing
-    // Retrieve the actual power at the High Frequency point
+    // 2. Determine Threshold & Decision to Trace
+    let performStartFreqTracing = true;
+    let startFreqThreshold_dB = (call.highFreqThreshold_dB_used !== null) 
+        ? peakPower_dB + call.highFreqThreshold_dB_used 
+        : peakPower_dB + this.config.highFreqThreshold_dB;
+
+    // Get power at the High Frequency point for validation
     let highFreqPointPower_dB = -Infinity;
     if (highFreqFrameIdx >= 0 && highFreqFrameIdx < spectrogram.length && 
         highFreqBinIdx >= 0 && highFreqBinIdx < spectrogram[highFreqFrameIdx].length) {
       highFreqPointPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
     }
 
-    let performStartFreqTracing = true;
+    // [Logic Flow]
+    // Priority 1: Check if it is a CF Call (Detected in Auto-Threshold Loop)
+    if (isCFCallDetected) {
+        // CASE A: CF Call Species
+        // Action: FORCE tracing, but use a stricter standard threshold (-24dB)
+        performStartFreqTracing = true;
+        startFreqThreshold_dB = peakPower_dB - 24;
+    } else {
+        // CASE B: FM / Non-CF Call
+        // Action: Apply standard weak-signal protection checks
+        
+        // Check 1: Relative Weakness (< Peak - 30dB)
+        if (highFreqPointPower_dB < (peakPower_dB - 30)) {
+            performStartFreqTracing = false;
+        }
 
-    // Condition 1: If High Freq energy is weak relative to Peak (< -30dB below peak)
-    // likely a faint tail, don't trace back to avoid noise.
-    if (highFreqPointPower_dB < (peakPower_dB - 30)) {
-      performStartFreqTracing = false;
-      // console.log(`[StartFreq] Skip Trace: HighFreq Power (${highFreqPointPower_dB.toFixed(1)}) < Peak-30dB`);
+        // Check 2: Absolute Weakness (< -80dB)
+        if (highFreqPointPower_dB < -80) {
+            performStartFreqTracing = false;
+        }
     }
 
-    // Condition 2: If High Freq energy is absolutely weak (< -80dB)
-    if (highFreqPointPower_dB < -80) {
-      performStartFreqTracing = false;
-      // console.log(`[StartFreq] Skip Trace: HighFreq Power (${highFreqPointPower_dB.toFixed(1)}) < -80dB`);
-    }
-
-    // 3. Perform Back-tracking Trace (Only if checks passed)
+    // 3. Perform Back-tracking Trace (Only if performStartFreqTracing is TRUE)
     if (performStartFreqTracing) {
-      // Determine Threshold
-      const startFreqThreshold_dB = (call.highFreqThreshold_dB_used !== null) 
-          ? peakPower_dB + call.highFreqThreshold_dB_used 
-          : peakPower_dB + this.config.highFreqThreshold_dB;
-
       let currentTrackBinIdx = highFreqBinIdx; 
       
       // Define Connectivity Constraints
@@ -3135,14 +3152,12 @@ export class BatCallDetector {
     call.startFreqBinIdx = validStartBinIdx;
     call.startFreqFrameIdx = validStartFrameIdx;
     
-    // Critical: Update Time based on the actual start frame
     if (validStartFrameIdx < timeFrames.length) {
         call.startFreqTime_s = timeFrames[validStartFrameIdx];
-        
-        // Update ms time relative to selection start
         const firstFrameTime_s = timeFrames[0];
         call.startFreq_ms = (call.startFreqTime_s - firstFrameTime_s) * 1000;
     }
+
     
     // ============================================================
     // STEP 3: Calculate LOW FREQUENCY from last frame
