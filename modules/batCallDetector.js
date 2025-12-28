@@ -711,7 +711,7 @@ export class BatCallDetector {
           const call = new BatCall();
 
           // Padding Logic (Same as detectCalls)
-          const pad_ms = 5;
+          const pad_ms = 8;
           const timePerFrame = timeFrames[1] - timeFrames[0];
           const paddingFrames = Math.ceil((pad_ms / 1000) / timePerFrame);
           
