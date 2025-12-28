@@ -3035,92 +3035,107 @@ export class BatCallDetector {
     // STEP 2.5: Calculate START FREQUENCY (Back-tracking Signal Tracer)
     // 
     // 2025 UPGRADE: Instead of blindly scanning Frame 0, we trace 
-    // backwards from the High Frequency point. This ensures the 
-    // Start Frequency is physically connected to the main call, 
-    // ignoring isolated noise in padding areas.
+    // backwards from the High Frequency point.
     // ============================================================
     
-    // 1. Determine Threshold
-    // Use the actual threshold used for High Freq detection to maintain consistency
-    // If not available (e.g. legacy), fall back to config
-    const startFreqThreshold_dB = (call.highFreqThreshold_dB_used !== null) 
-        ? peakPower_dB + call.highFreqThreshold_dB_used 
-        : peakPower_dB + this.config.highFreqThreshold_dB;
-
-    // 2. Initialize tracking variables starting from High Frequency point
-    // We assume High Freq is part of the call, so it's our "Anchor"
-    let currentTrackBinIdx = highFreqBinIdx; 
+    // 1. Initialize result variables with High Frequency (Default fallback)
+    // We assume High Freq is part of the call, so it's our starting "Anchor"
     let validStartFreq_Hz = highFreq_Hz;
     let validStartBinIdx = highFreqBinIdx;
     let validStartFrameIdx = highFreqFrameIdx;
 
-    // 3. Define Connectivity Constraints
-    // Max jump allowed between frames (e.g., 2 kHz) to prevent jumping to noise
-    const maxJumpHz = 2000; 
-    const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
-    const numBins = freqBins.length;
-
-    // 4. Backward Scan: Trace from High Freq Frame down to Frame 0
-    // We stop if signal breaks or jumps too far
-    if (highFreqFrameIdx > 0) {
-        for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
-            const framePower = spectrogram[f];
-            
-            // Define search window around previous frequency bin
-            const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
-            const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
-            
-            let bestBin = -1;
-            let bestPower = -Infinity;
-
-            // Find max power bin within the connectivity window
-            for (let b = searchMinBin; b <= searchMaxBin; b++) {
-                if (framePower[b] > bestPower) {
-                    bestPower = framePower[b];
-                    bestBin = b;
-                }
-            }
-
-            // Check if the best connected signal is strong enough
-            if (bestPower > startFreqThreshold_dB) {
-                // Connection found! Update tracking
-                currentTrackBinIdx = bestBin;
-                
-                // Update "valid start" candidates
-                validStartBinIdx = bestBin;
-                validStartFrameIdx = f;
-                validStartFreq_Hz = freqBins[bestBin];
-                
-                // Optional: Linear Interpolation for higher precision
-                // (Only if not at edges)
-                if (bestBin > 0 && bestBin < numBins - 1) {
-                   const prevP = framePower[bestBin - 1];
-                   const nextP = framePower[bestBin + 1];
-                   // Simple refinement if neighbors exist and this is a peak
-                   if (bestPower > prevP && bestPower > nextP) {
-                       // Linear interpolation between bins
-                       const powerRatio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
-                       const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
-                       validStartFreq_Hz = freqBins[bestBin] + (powerRatio * freqDiff * (prevP < nextP ? 1 : -1));
-                   }
-                }
-            } else {
-                // Signal Lost (Gap) - Stop tracing
-                // The last valid frame (f+1) was the true start
-                break;
-            }
-        }
+    // 2. [2025 OPTIMIZATION] Check if we should skip tracing
+    // Retrieve the actual power at the High Frequency point
+    let highFreqPointPower_dB = -Infinity;
+    if (highFreqFrameIdx >= 0 && highFreqFrameIdx < spectrogram.length && 
+        highFreqBinIdx >= 0 && highFreqBinIdx < spectrogram[highFreqFrameIdx].length) {
+      highFreqPointPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
     }
 
-    // 5. Assign Final Result
-    // Start Frequency is the earliest frame where we maintained connection
+    let performStartFreqTracing = true;
+
+    // Condition 1: If High Freq energy is weak relative to Peak (< -30dB below peak)
+    // likely a faint tail, don't trace back to avoid noise.
+    if (highFreqPointPower_dB < (peakPower_dB - 30)) {
+      performStartFreqTracing = false;
+      // console.log(`[StartFreq] Skip Trace: HighFreq Power (${highFreqPointPower_dB.toFixed(1)}) < Peak-30dB`);
+    }
+
+    // Condition 2: If High Freq energy is absolutely weak (< -80dB)
+    if (highFreqPointPower_dB < -80) {
+      performStartFreqTracing = false;
+      // console.log(`[StartFreq] Skip Trace: HighFreq Power (${highFreqPointPower_dB.toFixed(1)}) < -80dB`);
+    }
+
+    // 3. Perform Back-tracking Trace (Only if checks passed)
+    if (performStartFreqTracing) {
+      // Determine Threshold
+      const startFreqThreshold_dB = (call.highFreqThreshold_dB_used !== null) 
+          ? peakPower_dB + call.highFreqThreshold_dB_used 
+          : peakPower_dB + this.config.highFreqThreshold_dB;
+
+      let currentTrackBinIdx = highFreqBinIdx; 
+      
+      // Define Connectivity Constraints
+      const maxJumpHz = 2000; 
+      const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
+      const numBins = freqBins.length;
+
+      // Backward Scan: Trace from High Freq Frame down to Frame 0
+      if (highFreqFrameIdx > 0) {
+          for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
+              const framePower = spectrogram[f];
+              
+              // Define search window around previous frequency bin
+              const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
+              const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
+              
+              let bestBin = -1;
+              let bestPower = -Infinity;
+
+              // Find max power bin within the connectivity window
+              for (let b = searchMinBin; b <= searchMaxBin; b++) {
+                  if (framePower[b] > bestPower) {
+                      bestPower = framePower[b];
+                      bestBin = b;
+                  }
+              }
+
+              // Check if the best connected signal is strong enough
+              if (bestPower > startFreqThreshold_dB) {
+                  // Connection found! Update tracking
+                  currentTrackBinIdx = bestBin;
+                  
+                  // Update "valid start" candidates
+                  validStartBinIdx = bestBin;
+                  validStartFrameIdx = f;
+                  validStartFreq_Hz = freqBins[bestBin];
+                  
+                  // Optional: Linear Interpolation for higher precision
+                  if (bestBin > 0 && bestBin < numBins - 1) {
+                    const prevP = framePower[bestBin - 1];
+                    const nextP = framePower[bestBin + 1];
+                    if (bestPower > prevP && bestPower > nextP) {
+                        const powerRatio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
+                        const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
+                        validStartFreq_Hz = freqBins[bestBin] + (powerRatio * freqDiff * (prevP < nextP ? 1 : -1));
+                    }
+                  }
+              } else {
+                  // Signal Lost (Gap) - Stop tracing
+                  break;
+              }
+          }
+      }
+    }
+
+    // 4. Assign Final Result
     const startFreq_kHz = validStartFreq_Hz / 1000;
     call.startFreq_kHz = startFreq_kHz;
     call.startFreqBinIdx = validStartBinIdx;
     call.startFreqFrameIdx = validStartFrameIdx;
     
-    // Critical: Update Time based on the actual start frame, NOT just Frame 0
-    // This fixes duration calculations if padding contained silence
+    // Critical: Update Time based on the actual start frame
     if (validStartFrameIdx < timeFrames.length) {
         call.startFreqTime_s = timeFrames[validStartFrameIdx];
         
