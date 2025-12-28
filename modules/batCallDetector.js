@@ -1562,7 +1562,7 @@ export class BatCallDetector {
   /**
    * [2025 OPTIMIZED] Calculate Noise Floor per 10kHz Frequency Zone
    * Optimization: Handles high-frequency zones where most background is < -100dB.
-   * Logic: If > 70% of bins are "silent" (< -100dB), apply a -5dB offset to the mode
+   * Logic: If > 70% of bins are "silent" (< -100dB), apply a -4dB offset to the mode
    * to prevent the noise floor from locking onto signal tails.
    * * @param {Array} spectrogram - Power matrix [time][freq]
    * @param {Float32Array} freqBins - Frequency bin values in Hz
@@ -1652,7 +1652,7 @@ export class BatCallDetector {
           // High Silence Zone: Mode is likely tracking signal. Drop it.
           // Example: Mode found at -85dB (signal tail), but 80% is -110dB.
           // Set floor to -105dB.
-          zoneFloors[key] = modeBin - 5.0;
+          zoneFloors[key] = modeBin - 4.0;
           // console.log(`[Zone ${key}kHz] High Silence (${(silenceRatio*100).toFixed(1)}%). Mode: ${modeBin} -> Floor: ${zoneFloors[key]}`);
       } else {
           // Normal Zone: Mode represents the dense noise floor.
@@ -2385,8 +2385,8 @@ export class BatCallDetector {
             logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
             logRow['Signal (dB)'] = currentLowFreqPower_dB.toFixed(2);
 
-            // Standard Anomaly Check (> 2.0 kHz)
-            if (jumpDiff > 2.0) {
+            // Standard Anomaly Check (> 1.5 kHz)
+            if (jumpDiff > 1.5) {
                 // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current activeEndFrameIdx
                 const currentZoneFloors = this.calculateZonalNoiseFloors(
                   spectrogram,
