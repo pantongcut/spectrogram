@@ -1781,33 +1781,7 @@ export class BatCallDetector {
         }
       }
 
-      // ============================================================
-      // 3. CALCULATE START FREQUENCY (Frame 0)
-      // ============================================================
       let startFreq_Hz = null;
-      if (foundBin) {
-        for (let binIdx = 0; binIdx < firstFramePower.length; binIdx++) {
-          if (firstFramePower[binIdx] > highFreqThreshold_dB) {
-            startFreq_Hz = freqBins[binIdx];
-            if (binIdx > 0) {
-              const thisPower = firstFramePower[binIdx];
-              const prevPower = firstFramePower[binIdx - 1];
-              if (prevPower < highFreqThreshold_dB && thisPower > highFreqThreshold_dB) {
-                const powerRatio = (thisPower - highFreqThreshold_dB) / (thisPower - prevPower);
-                const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
-                startFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
-              }
-            }
-            break;
-          }
-        }
-      }
-      
-      if (!foundBin) {
-        highFreq_Hz = null;
-        startFreq_Hz = null;
-        highFreqFrameIdx = 0;
-      }
 
       // ============================================================
       // [2025 NEW] CF Call Species Detection Logic
@@ -1921,8 +1895,8 @@ export class BatCallDetector {
         highFreqBinIdx: highFreqBinIdx,
         highFreqFrameIdx: highFreqFrameIdx,
         highFreqPower_dB: foundBin && highFreqFrameIdx < spectrogram.length ? spectrogram[highFreqFrameIdx][highFreqBinIdx] : null,
-        startFreq_Hz: startFreq_Hz,
-        startFreq_kHz: startFreq_Hz !== null ? startFreq_Hz / 1000 : null,
+        startFreq_Hz: null,
+        startFreq_kHz: null,
         foundBin: foundBin
       });
       
