@@ -2281,41 +2281,51 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 2. Gap-Bridging Backward Scan (Reverse: Limit -> Start)
-      // [2025 OPTIMIZED] Scan from Limit back to Anchor (Overwrite Logic)
+      // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
       // ============================================================
-      
-      // 初始化：如果此輪沒找到任何延伸，就停留在原地
       let activeEndFrameIdx = currentSearchStartFrame; 
       
-      // 2. 反向迴圈：由最遠 (Limit) -> 最近 (Start + 1)
-      for (let f = searchEndFrame; f > currentSearchStartFrame; f--) {
-        
+      let consecutiveSilenceFrames = 0;
+      const MAX_ALLOWED_GAP_FRAMES = 1; // 允許的最大斷層幀數
+
+      // Time Restriction: Continue forward scan from where we left off
+      for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
-        let lowestFreqInThisFrame = null; 
+        let lowestFreqInThisFrame = null; // [NEW] 用於記錄該 Frame 的最低頻率
         
-        // Scan bins to find signal
+        // Apply frequency restriction: only check up to currentSearchMaxBinIdx
+        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx) to find lowest freq
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
-            lowestFreqInThisFrame = freqBins[b];
-            break; 
+            lowestFreqInThisFrame = freqBins[b]; // [NEW] 記錄找到的第一個(最低)頻率
+            break; // 找到該 Frame 的最低點後，不需再往高頻找
           }
         }
         
         if (frameHasSignal) {
-          // [Anti-Rebounce Check] 
-          // 確保找到的不是 Rebounce (頻率異常升高的尾巴)
+          activeEndFrameIdx = f; 
+          consecutiveSilenceFrames = 0;
+          
+          // ============================================================
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
+              
+              // 如果找到比參考值更低的頻率 (例如 Ref=41k, Found=40k)
+              // 立即停止掃描，鎖定在 Frame 100，放棄後面的 Frame 102 (38k)
               if (lowestFreqInThisFrame < referenceFreq_Hz) {
-                  continue; // 頻率不合理，忽略此 Frame
+                  // console.log(`[LowFreq Lock] Locked at Frame ${f} (${(lowestFreqInThisFrame/1000).toFixed(2)} kHz < ${referenceFreq_kHz.toFixed(2)} kHz)`);
+                  break; // 觸發鎖定，停止 Forward Scan
               }
           }
 
-          activeEndFrameIdx = f; 
-          
+        } else {
+          // Increment gap counter and check limit
+          consecutiveSilenceFrames++;
+          if (consecutiveSilenceFrames > MAX_ALLOWED_GAP_FRAMES) {
+            break; // Stop scanning forward if gap is too large
+          }
         }
       }
       
