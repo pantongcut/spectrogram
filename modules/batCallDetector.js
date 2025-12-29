@@ -2281,86 +2281,61 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 2. Gap-Bridging Forward Scan
-      // [2025 FIXED] Search for NEXT LOWER frequency (Skip Neutral/Bad)
+      // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
+      // [2025 OPTIMIZED] Dynamic Gap & Strict Proximity for High Thresholds
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
       let consecutiveSilenceFrames = 0;
-      
-      // 動態斷層容忍度
-      // 高閾值 (>= -25dB): 0 (嚴格，不允許跳過任何 Bad Frame)
-      // 低閾值 (< -25dB): 2 (允許跳過 2 個 Bad/Neutral Frames 去找更低的)
+
+      // 1. 動態斷層容忍度 (低閾值允許小斷層)
       const currentMaxGap = (testThreshold_dB >= -25) ? 0 : 2;
 
+      // Time Restriction: Continue forward scan from where we left off
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
         
-        // [Strict Proximity] 高閾值下的距離限制
-        if (testThreshold_dB >= -10) {
-            // 如果已經嘗試跳過 1 個 Frame 尋找更低頻但失敗，強制停止
-            if ((f - currentSearchStartFrame) > 1) break;
+        // [NEW] 2. Strict Proximity Rule (強制逐幀延伸)
+        // 你的需求：強制 -1dB 時只 Test Peak Freq frame + 1
+        // 邏輯：在高閾值 (>= -2dB) 下，限制最大掃描距離為 1 幀。
+        // 這迫使算法必須隨著閾值降低，一幀一幀地往後「爬」，而不能直接跳到遠處。
+        if (testThreshold_dB >= -2) {
+            const distanceFromStart = f - currentSearchStartFrame;
+            if (distanceFromStart > 1) {
+                // console.log(`[Proximity Stop] Threshold ${testThreshold_dB}dB limited to +1 frame.`);
+                break; 
+            }
         }
 
         const frame = spectrogram[f];
         let frameHasSignal = false;
         let lowestFreqInThisFrame = null; 
         
-        // Find lowest freq in this frame (Scan from 0 upwards)
+        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx)
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
             lowestFreqInThisFrame = freqBins[b];
-            break; // 找到該 Frame 的最低點，停止 Bin 掃描 (符合 "最先出現的 bin")
+            break; 
           }
         }
         
-        let isGoodExtension = false;
-
         if (frameHasSignal) {
+          activeEndFrameIdx = f; 
+          consecutiveSilenceFrames = 0; // Reset gap counter
+          
+          // [Anti-Rebounce Continuity Lock] (保持不變)
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
-              // 容許 10Hz 誤差
-              
-              if (lowestFreqInThisFrame < (referenceFreq_Hz - 10)) {
-                  // Case A: 頻率變低 (Good) -> 這是我們要的!
-                  isGoodExtension = true;
-              } 
-              else {
-                  // Case B: 頻率持平 (Neutral) 或 變高 (Bad) -> 視同無效
-                  // 這裡不做任何事，讓它掉入下方的 else 區塊 (增加 Gap 計數)
-                  isGoodExtension = false;
-                  // console.log(`[Skip] Frame ${f} Freq ${lowestFreqInThisFrame} >= Ref ${referenceFreq_Hz}`);
+              if (lowestFreqInThisFrame < referenceFreq_Hz) {
+                  break; 
               }
-          } else {
-              // 如果沒有參考值 (第一次運行)，只要有信號就算有效
-              // 但為了符合你的 "只test Peak + 1" 原則，如果是第一步就直接接受
-              isGoodExtension = true; 
           }
-        }
 
-        // ============================================================
-        // 決策邏輯
-        // ============================================================
-        if (isGoodExtension) {
-            // 找到更低的頻率了！
-            activeEndFrameIdx = f;
-            consecutiveSilenceFrames = 0;
-            
-            // [鎖定] 既然找到了 "最先出現且頻率更低" 的 Frame，
-            // 我們就鎖定這裡，不再繼續往後找 (防止之後出現更低但其實是 noise 的東西)
-            // 除非這是 Loop 的起點 (currentSearchStartFrame)，那就要讓它至少走一步
-            if (f > currentSearchStartFrame) {
-                break; 
-            }
         } else {
-            // 無信號 OR 信號頻率不對 (Neutral/Bad)
-            // 視同 Gap，繼續往後找 (Search Next Frame)
-            consecutiveSilenceFrames++;
-            
-            // 檢查是否超過容忍極限
-            // 如果是高閾值 (-1dB)，MaxGap=0，遇到第一個 Neutral/Bad 就會 Break。
-            if (consecutiveSilenceFrames > currentMaxGap) {
-                break; 
-            }
+          // Check gap limit
+          consecutiveSilenceFrames++;
+          if (consecutiveSilenceFrames > currentMaxGap) {
+            break; 
+          }
         }
       }
       
