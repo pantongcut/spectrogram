@@ -2295,9 +2295,9 @@ export class BatCallDetector {
         
         // [NEW] 2. Strict Proximity Rule (強制逐幀延伸)
         // 你的需求：強制 -1dB 時只 Test Peak Freq frame + 1
-        // 邏輯：在高閾值 (>= -2dB) 下，限制最大掃描距離為 1 幀。
+        // 邏輯：在高閾值 (>= -10dB) 下，限制最大掃描距離為 1 幀。
         // 這迫使算法必須隨著閾值降低，一幀一幀地往後「爬」，而不能直接跳到遠處。
-        if (testThreshold_dB >= -2) {
+        if (testThreshold_dB >= -10) {
             const distanceFromStart = f - currentSearchStartFrame;
             if (distanceFromStart > 1) {
                 // console.log(`[Proximity Stop] Threshold ${testThreshold_dB}dB limited to +1 frame.`);
