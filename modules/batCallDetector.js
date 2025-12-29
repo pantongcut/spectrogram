@@ -2281,36 +2281,49 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 2. Gap-Bridging Forward Scan (Time Restriction)
+      // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
-
-      // Gap Detection Variables
-      let consecutiveSilenceFrames = 0;
-      const MAX_ALLOWED_GAP_FRAMES = 1;
       
+      let consecutiveSilenceFrames = 0;
+      const MAX_ALLOWED_GAP_FRAMES = 1; // 允許的最大斷層幀數
+
       // Time Restriction: Continue forward scan from where we left off
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
+        let lowestFreqInThisFrame = null; // [NEW] 用於記錄該 Frame 的最低頻率
         
         // Apply frequency restriction: only check up to currentSearchMaxBinIdx
-        // This prevents unnecessary scanning of high-frequency regions that are ruled out
+        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx) to find lowest freq
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
-            break;
+            lowestFreqInThisFrame = freqBins[b]; // [NEW] 記錄找到的第一個(最低)頻率
+            break; // 找到該 Frame 的最低點後，不需再往高頻找
           }
         }
         
         if (frameHasSignal) {
           activeEndFrameIdx = f; 
-          consecutiveSilenceFrames = 0; // [NEW] Reset gap counter on signal
+          consecutiveSilenceFrames = 0;
+          
+          // ============================================================
+          if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
+              const referenceFreq_Hz = referenceFreq_kHz * 1000;
+              
+              // 如果找到比參考值更低的頻率 (例如 Ref=41k, Found=40k)
+              // 立即停止掃描，鎖定在 Frame 100，放棄後面的 Frame 102 (38k)
+              if (lowestFreqInThisFrame < referenceFreq_Hz) {
+                  // console.log(`[LowFreq Lock] Locked at Frame ${f} (${(lowestFreqInThisFrame/1000).toFixed(2)} kHz < ${referenceFreq_kHz.toFixed(2)} kHz)`);
+                  break; // 觸發鎖定，停止 Forward Scan
+              }
+          }
+
         } else {
-          // [NEW] Increment gap counter and check limit
+          // Increment gap counter and check limit
           consecutiveSilenceFrames++;
           if (consecutiveSilenceFrames > MAX_ALLOWED_GAP_FRAMES) {
-            // console.log(`[LowFreq Scan] Gap Stop at frame ${f} (Threshold: ${testThreshold_dB}dB)`);
             break; // Stop scanning forward if gap is too large
           }
         }
