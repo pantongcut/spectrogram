@@ -2286,7 +2286,11 @@ export class BatCallDetector {
       let activeEndFrameIdx = currentSearchStartFrame; 
       
       let consecutiveSilenceFrames = 0;
-      const MAX_ALLOWED_GAP_FRAMES = 1; // 允許的最大斷層幀數
+
+      // 1. 在高閾值 (>-25dB) 時，我們要求絕對連續性 (Gap=0)。
+      //    這強迫掃描必須緊貼著 Peak，一旦斷開就停止，防止跳到 Frame 113 這種回音。
+      // 2. 在低閾值 (<-25dB) 時，允許少量斷層 (Gap=2) 以橋接信號尾部。
+      const currentMaxGap = (testThreshold_dB >= -25) ? 0 : 2;
 
       // Time Restriction: Continue forward scan from where we left off
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
@@ -2294,8 +2298,7 @@ export class BatCallDetector {
         let frameHasSignal = false;
         let lowestFreqInThisFrame = null; // [NEW] 用於記錄該 Frame 的最低頻率
         
-        // Apply frequency restriction: only check up to currentSearchMaxBinIdx
-        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx) to find lowest freq
+        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx)
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
