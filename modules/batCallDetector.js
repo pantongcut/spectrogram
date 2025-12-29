@@ -2500,6 +2500,7 @@ export class BatCallDetector {
         lowFreq_kHz: lowFreq_Hz !== null ? lowFreq_Hz / 1000 : null,
         endFreq_Hz: endFreq_Hz,
         endFreq_kHz: endFreq_Hz !== null ? endFreq_Hz / 1000 : null,
+        endFrameIdx: activeEndFrameIdx, // [NEW] 記錄該閾值下的結束幀
         foundBin: foundBin
       });
 
@@ -2655,6 +2656,8 @@ export class BatCallDetector {
       lowFreq_kHz: returnLowFreq_kHz,
       endFreq_Hz: returnEndFreq_Hz,
       endFreq_kHz: returnEndFreq_kHz,
+      // [NEW] 回傳最佳測量的結束幀，如果沒有則退回原點
+      lowFreqFrameIdx: optimalMeasurement ? optimalMeasurement.endFrameIdx : validPeakFrameIdx, 
       warning: hasWarning
     };
   }
@@ -3597,6 +3600,32 @@ export class BatCallDetector {
       // 重要：更新 call.endFreq_kHz 為 auto mode 計算的值
       // Auto mode: End Frequency = Auto-calculated Low Frequency
       call.endFreq_kHz = endFreq_kHz;
+
+      // ============================================================
+      // [2025 FIX] Sync Time & Duration with Auto-Detected End Frame
+      // ============================================================
+      if (result.lowFreqFrameIdx !== undefined && result.lowFreqFrameIdx !== null) {
+          // 1. 更新結束幀索引
+          const newAutoEndFrameIdx = result.lowFreqFrameIdx;
+          call.endFrameIdx_forLowFreq = newAutoEndFrameIdx;
+          call.lowFreqFrameIdx = newAutoEndFrameIdx;
+
+          // 2. 更新絕對時間 (End Time)
+          if (newAutoEndFrameIdx < timeFrames.length) {
+              call.endFreqTime_s = timeFrames[newAutoEndFrameIdx];
+          }
+
+          // 3. 更新相對時間 (ms)
+          const firstFrameTime = timeFrames[0];
+          const newEndTime_ms = (call.endFreqTime_s - firstFrameTime) * 1000;
+          call.lowFreq_ms = newEndTime_ms;
+          call.endFreq_ms = newEndTime_ms;
+
+          // 4. 重新計算 Duration (End Time - Start Time)
+          if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
+              call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
+          }
+      }
     }
     
     // ============================================================
