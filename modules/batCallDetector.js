@@ -628,7 +628,7 @@ export class BatCallDetector {
       // This ensures measurements are clean
       if (autoCutoff > 0) {
           const peakTime_ms = timeFrames[maxFrameIdx] * 1000;
-          
+
           console.log(
             `%c[Auto HPF] ROI ${i}: Peak ${roiPeakFreq_kHz.toFixed(1)}kHz ${peakTime_ms.toFixed(1)}ms (Frame ${maxFrameIdx}) -> Applying HPF @ ${autoCutoff}kHz`, 
             'color: #ff9f43; font-weight: bold; font-size: 12px;'
@@ -1701,6 +1701,10 @@ export class BatCallDetector {
 
     // Track the highFreqFrameIdx for narrowing searches
     let lastValidHighFreqFrameIdx = currentSearchLimitFrame;
+    
+    // [NEW 2025] Initialize frequency search lower limit (Frequency space convergence)
+    // Starts at 0, but will increase as we find higher frequencies
+    let currentSearchMinBinIdx = 0;
 
     for (const testThreshold_dB of thresholdRange) {
       const highFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
@@ -1731,8 +1735,11 @@ export class BatCallDetector {
         const framePower = spectrogram[f];
         let foundInThisFrame = false;
 
-        // Scan from High to Low Frequency (Reverse order within frame)
-        for (let b = numBins - 1; b >= 0; b--) {
+        // [MODIFIED 2025] Scan from High to Low Frequency with frequency space restriction
+        // Original: for (let b = numBins - 1; b >= 0; b--)
+        // Optimized: for (let b = numBins - 1; b >= currentSearchMinBinIdx; b--)
+        // This prevents re-scanning lower frequency bins that were already ruled out
+        for (let b = numBins - 1; b >= currentSearchMinBinIdx; b--) {
           if (framePower[b] > highFreqThreshold_dB) {
             
             let candidateFreq_Hz = freqBins[b];
@@ -1920,10 +1927,27 @@ export class BatCallDetector {
         foundBin: foundBin
       });
       
-      // Narrowing Search Range
-      if (foundBin && highFreqFrameIdx >= 0 && highFreqFrameIdx < currentSearchLimitFrame) {
-        currentSearchLimitFrame = highFreqFrameIdx;
-        lastValidHighFreqFrameIdx = highFreqFrameIdx;
+      // [MODIFIED 2025] Narrowing Search Range - Double Convergence (Time + Frequency)
+      // ============================================================
+      if (foundBin && highFreqFrameIdx >= 0) {
+        
+        // 1. Time Restriction (Existing): Narrow down time search range (only search earlier frames)
+        if (highFreqFrameIdx < currentSearchLimitFrame) {
+          currentSearchLimitFrame = highFreqFrameIdx;
+          lastValidHighFreqFrameIdx = highFreqFrameIdx;
+        }
+
+        // 2. [NEW 2025] Frequency Restriction: Narrow down frequency search range (only search higher frequencies)
+        // Logic: High Frequency is defined as the maximum value found.
+        // If at -12dB we found frequency at Bin 100, then at -13dB (wider threshold),
+        // the High Frequency CANNOT be lower than Bin 100.
+        // We only need to check if there's a higher frequency signal (Bin > 100).
+        if (highFreqBinIdx > currentSearchMinBinIdx) {
+            // For sub-bin interpolation accuracy, we keep the found bin as the minimum.
+            // This prevents wasting cycles scanning low-frequency regions that are guaranteed
+            // to be lower than our current maximum.
+            currentSearchMinBinIdx = highFreqBinIdx;
+        }
       }
       
       if (hitNoiseFloor) break;
