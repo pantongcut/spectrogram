@@ -2738,9 +2738,7 @@ export class BatCallDetector {
     call.peakPower_dB = peakPower_dB;
     
     // ============================================================
-    // NEW (2025): Calculate peak frequency time in milliseconds
-    // peakFreqTime_ms = absolute time of peak frequency frame within selection area
-    // Unit: ms (milliseconds), relative to selection area start
+    // Calculate peak frequency time in milliseconds
     // ============================================================
     if (peakFrameIdx < timeFrames.length) {
       // Convert from seconds to milliseconds, using first frame as reference point (0 ms)
@@ -2748,6 +2746,11 @@ export class BatCallDetector {
       const firstFrameTimeInSeconds = timeFrames[0];
       const relativeTime_ms = (peakTimeInSeconds - firstFrameTimeInSeconds) * 1000;
       call.peakFreqTime_ms = relativeTime_ms;  // Time relative to selection area start
+
+      console.log(
+        `%c[Peak Freq] ${call.peakFreq_kHz.toFixed(2)}kHz  ${call.peakFreqTime_ms.toFixed(1)}ms  Frame ${peakFrameIdx}`,
+        'color: #00d2d3; font-weight: bold;'
+      );
     }
     
     // ============================================================
