@@ -2288,11 +2288,8 @@ export class BatCallDetector {
       // 初始化：如果此輪沒找到任何延伸，就停留在原地
       let activeEndFrameIdx = currentSearchStartFrame; 
       
-      // 1. 確定掃描邊界：最多只看 +3 Frame
-      const loopLimitFrame = Math.min(searchEndFrame, currentSearchStartFrame + 3);
-
       // 2. 反向迴圈：由最遠 (Limit) -> 最近 (Start + 1)
-      for (let f = loopLimitFrame; f > currentSearchStartFrame; f--) {
+      for (let f = searchEndFrame; f > currentSearchStartFrame; f--) {
         
         const frame = spectrogram[f];
         let frameHasSignal = false;
