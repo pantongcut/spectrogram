@@ -2282,19 +2282,29 @@ export class BatCallDetector {
       
       // ============================================================
       // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
-      // [2025 OPTIMIZED] Dynamic Gap Tolerance for Anti-Rebounce
+      // [2025 OPTIMIZED] Dynamic Gap & Strict Proximity for High Thresholds
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
       let consecutiveSilenceFrames = 0;
 
-      // [NEW] 動態斷層容忍度
-      // 1. 在高閾值 (>-25dB) 時，我們要求絕對連續性 (Gap=0)。
-      //    這強迫掃描必須緊貼著 Peak，一旦斷開就停止，防止跳到 Frame 113 這種回音。
-      // 2. 在低閾值 (<-25dB) 時，允許少量斷層 (Gap=2) 以橋接信號尾部。
+      // 1. 動態斷層容忍度 (低閾值允許小斷層)
       const currentMaxGap = (testThreshold_dB >= -25) ? 0 : 2;
 
       // Time Restriction: Continue forward scan from where we left off
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
+        
+        // [NEW] 2. Strict Proximity Rule (強制逐幀延伸)
+        // 你的需求：強制 -1dB 時只 Test Peak Freq frame + 1
+        // 邏輯：在高閾值 (>= -2dB) 下，限制最大掃描距離為 1 幀。
+        // 這迫使算法必須隨著閾值降低，一幀一幀地往後「爬」，而不能直接跳到遠處。
+        if (testThreshold_dB >= -2) {
+            const distanceFromStart = f - currentSearchStartFrame;
+            if (distanceFromStart > 1) {
+                // console.log(`[Proximity Stop] Threshold ${testThreshold_dB}dB limited to +1 frame.`);
+                break; 
+            }
+        }
+
         const frame = spectrogram[f];
         let frameHasSignal = false;
         let lowestFreqInThisFrame = null; 
@@ -2312,22 +2322,19 @@ export class BatCallDetector {
           activeEndFrameIdx = f; 
           consecutiveSilenceFrames = 0; // Reset gap counter
           
-          // [Anti-Rebounce Continuity Lock] ... (保持原有的頻率下降鎖定邏輯)
+          // [Anti-Rebounce Continuity Lock] (保持不變)
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
-              // 如果頻率反而更低 (正常 FM 下降)，視為有效，不做動作
-              // 如果頻率升高，這裡可以考慮是否要鎖定 (視需求而定，目前只需鎖定更低以防跳跃)
               if (lowestFreqInThisFrame < referenceFreq_Hz) {
-                  break; // Found extension with lower freq, stop scanning this frame
+                  break; 
               }
           }
 
         } else {
-          // [MODIFIED] 使用動態的 currentMaxGap
+          // Check gap limit
           consecutiveSilenceFrames++;
           if (consecutiveSilenceFrames > currentMaxGap) {
-            // console.log(`[Gap Stop] Threshold ${testThreshold_dB}dB stopped at frame ${f} (MaxGap: ${currentMaxGap})`);
-            break; // Stop scanning forward
+            break; 
           }
         }
       }
