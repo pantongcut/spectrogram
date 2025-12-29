@@ -2346,31 +2346,51 @@ export class BatCallDetector {
       
       // ============================================================
       // 3. Measure Low Frequency at the found End Frame
+      // [2025 OPTIMIZED] Select Max Energy Bin (Main Signal) instead of Edge
       // ============================================================
       let currentLowFreqPower_dB = -Infinity;
-      let foundBinIdx = -1; // Track Bin Index for convergence update
+      let foundBinIdx = -1; 
 
       if (activeEndFrameIdx !== -1) {
         const targetFramePower = spectrogram[activeEndFrameIdx];
         
-        // Find lowest freq (Low -> High) with frequency restriction
-        // Optimized: for (let binIdx = 0; binIdx <= currentSearchMaxBinIdx; binIdx++)
+        // [MODIFIED] 不再是找到第一個就 break，而是掃描範圍內找出能量最強的 Bin (Main Signal)
+        let maxBinVal = -Infinity;
+        let bestBin = -1;
 
+        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx)
         for (let binIdx = 0; binIdx <= currentSearchMaxBinIdx; binIdx++) {
           if (targetFramePower[binIdx] > lowFreqThreshold_dB) {
             
-            let candidateFreq_Hz = freqBins[binIdx];
+            // 找到主信號 (Max Energy)
+            if (targetFramePower[binIdx] > maxBinVal) {
+                maxBinVal = targetFramePower[binIdx];
+                bestBin = binIdx;
+            }
+          }
+        }
+
+        // 如果找到了符合條件的最強 Bin
+        if (bestBin !== -1) {
+            let candidateFreq_Hz = freqBins[bestBin];
             
-            // Linear Interpolation
-            if (binIdx > 0) {
-              const thisPower = targetFramePower[binIdx];
-              const prevPower = targetFramePower[binIdx - 1];
-              
-              if (prevPower < lowFreqThreshold_dB && thisPower > lowFreqThreshold_dB) {
-                const powerRatio = (thisPower - lowFreqThreshold_dB) / (thisPower - prevPower);
-                const freqDiff = freqBins[binIdx] - freqBins[binIdx - 1];
-                candidateFreq_Hz = freqBins[binIdx] - powerRatio * freqDiff;
-              }
+            // [MODIFIED] 改用拋物線插值 (Parabolic Interpolation) 修正峰值頻率
+            // 因為我們現在選的是 Peak，而不是 Edge，所以原本的閾值線性插值不適用
+            if (bestBin > 0 && bestBin < targetFramePower.length - 1) {
+                const pL = targetFramePower[bestBin - 1];
+                const pC = targetFramePower[bestBin];
+                const pR = targetFramePower[bestBin + 1];
+                
+                // Parabolic Vertex Formula
+                const denominator = 2 * (pL - 2 * pC + pR);
+                if (Math.abs(denominator) > 1e-10) {
+                    const delta = (pL - pR) / (2 * denominator); // Correction offset
+                    // 限制偏移量在 +/- 0.5 bin 內，避免錯誤
+                    if (delta >= -0.5 && delta <= 0.5) {
+                        const binWidth = freqBins[1] - freqBins[0];
+                        candidateFreq_Hz = freqBins[bestBin] + (delta * binWidth);
+                    }
+                }
             }
 
             const candidateFreq_kHz = candidateFreq_Hz / 1000;
@@ -2378,20 +2398,22 @@ export class BatCallDetector {
             // ============================================================
             // Sub-harmonic Rejection Logic (Hard Stop)
             // ============================================================
+            let rejectMeasurement = false;
+            
             if (referenceFreq_kHz !== null) {
                 const diff = candidateFreq_kHz - referenceFreq_kHz;
                 
                 // > 15kHz Jump Protection
                 if (Math.abs(diff) > 15.0) {
-                    // console.log(`[LowFreq Jump Rejected] Hard Stop at ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
                     
                     logRow['Freq (kHz)'] = candidateFreq_kHz.toFixed(2);
                     logRow['Diff (kHz)'] = Math.abs(diff).toFixed(2);
                     logRow['Judgment'] = 'Hard Stop > 15kHz (Sub-harmonic)';
                     
                     hitNoiseFloor = true;
+                    rejectMeasurement = true;
                     
-                    // [CRITICAL FIX] Fallback to last valid measurement
+                    // Fallback to last valid measurement
                     for (let j = measurements.length - 1; j >= 0; j--) {
                         if (measurements[j].foundBin && measurements[j].lowFreq_kHz !== null) {
                             optimalMeasurement = measurements[j];
@@ -2399,18 +2421,16 @@ export class BatCallDetector {
                             break;
                         }
                     }
-                    // Break out of bin loop (and will break threshold loop below)
-                    break; 
                 }
             }
 
-            // Valid Low Frequency Found
-            lowFreq_Hz = candidateFreq_Hz;
-            foundBin = true;
-            foundBinIdx = binIdx; // [NEW 2025] Track Bin Index for convergence update
-            currentLowFreqPower_dB = targetFramePower[binIdx];
-            break; 
-          }
+            if (!rejectMeasurement) {
+                // Valid Low Frequency Found (Main Signal)
+                lowFreq_Hz = candidateFreq_Hz;
+                foundBin = true;
+                foundBinIdx = bestBin; // Track Bin Index for convergence update
+                currentLowFreqPower_dB = maxBinVal;
+            }
         }
       }
       
