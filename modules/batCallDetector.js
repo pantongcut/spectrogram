@@ -1653,12 +1653,12 @@ export class BatCallDetector {
    * * 2025 ENHANCED ALGORITHM v3 (Zonal Noise Floor):
    * 1. Start with widest range (Frame 0 to Peak Frame)
    * 2. Calculate Zonal Noise Floors (10kHz bands) for this specific time range
-   * 3. Test threshold (-12 -> -70 dB), detect highFreq position
+   * 3. Test threshold (-1 -> -70 dB), detect highFreq position
    * 4. Apply Jump Protection using Zonal Noise Floors
    */
   findOptimalHighFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
-      threshold: -12,
+      threshold: -1,
       highFreq_Hz: null,
       highFreq_kHz: null,
       highFreqFrameIdx: 0,
@@ -1680,7 +1680,7 @@ export class BatCallDetector {
     const stablePeakPower_dB = callPeakPower_dB;
     
     let hitNoiseFloor = false;
-    let optimalThreshold = -12;
+    let optimalThreshold = -1;
     let optimalMeasurement = null;
     
     // ============================================================
@@ -1690,9 +1690,9 @@ export class BatCallDetector {
     let isCFStablePattern = false;
     let lastMeasuredFreq_kHz = null;
     
-    // Test thresholds: -12 to -70 dB, step 1.0 dB
+    // Test thresholds: -1 to -70 dB, step 1.0 dB
     const thresholdRange = [];
-    for (let threshold = -12; threshold >= -70; threshold -= 1.0) {
+    for (let threshold = -1; threshold >= -70; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
     
@@ -1939,7 +1939,7 @@ export class BatCallDetector {
 
         // 2. [NEW 2025] Frequency Restriction: Narrow down frequency search range (only search higher frequencies)
         // Logic: High Frequency is defined as the maximum value found.
-        // If at -12dB we found frequency at Bin 100, then at -13dB (wider threshold),
+        // If at -1dB we found frequency at Bin 100, then at -13dB (wider threshold),
         // the High Frequency CANNOT be lower than Bin 100.
         // We only need to check if there's a higher frequency signal (Bin > 100).
         if (highFreqBinIdx > currentSearchMinBinIdx) {
@@ -2237,11 +2237,11 @@ export class BatCallDetector {
 
     // ============================================================
     // [UPDATED] Test Thresholds Configuration
-    // Range: -12dB down to -70dB
+    // Range: -1dB down to -70dB
     // Step: 1.0 dB
     // ============================================================
     const thresholdRange = [];
-    for (let threshold = -12; threshold >= -70; threshold -= 1.0) {
+    for (let threshold = -1; threshold >= -70; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
     
@@ -2608,7 +2608,7 @@ export class BatCallDetector {
     }
     
     // Final Safety Limits
-    const finalThreshold = Math.max(Math.min(optimalThreshold, -12), -70);
+    const finalThreshold = Math.max(Math.min(optimalThreshold, -1), -70);
     const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
     const hasWarning = finalThreshold <= -70;
     
