@@ -2282,16 +2282,13 @@ export class BatCallDetector {
       
       // ============================================================
       // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
-      // [2025 OPTIMIZED] Dynamic Gap & Strict Proximity for High Thresholds
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
       let consecutiveSilenceFrames = 0;
 
-      // 1. 動態斷層容忍度 (低閾值允許小斷層)
-      const currentMaxGap = (testThreshold_dB >= -25) ? 0 : 2;
+      const currentMaxGap = 0 ;
 
-      // [MODIFIED 2025] 限制每次 Test 的 Frame Range 最多延伸 3 個 Frame
-      // 原本是 f <= searchEndFrame (一直掃到底)，現在限制為 currentSearchStartFrame + 3
+      // 限制每次 Test 的 Frame Range 最多延伸 3 個 Frame
       const loopLimitFrame = Math.min(searchEndFrame, currentSearchStartFrame + 3);
 
       // Time Restriction: Continue forward scan from where we left off
