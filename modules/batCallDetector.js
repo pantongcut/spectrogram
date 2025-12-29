@@ -2281,35 +2281,24 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
+      // 2. Gap-Bridging Backward Scan (Reverse: Limit -> Start)
+      // [2025 OPTIMIZED] Scan from Limit back to Anchor (Overwrite Logic)
       // ============================================================
+      
+      // 初始化：如果此輪沒找到任何延伸，就停留在原地
       let activeEndFrameIdx = currentSearchStartFrame; 
-      let consecutiveSilenceFrames = 0;
-
-      const currentMaxGap = 0 ;
-
-      // 限制每次 Test 的 Frame Range 最多延伸 3 個 Frame
+      
+      // 1. 確定掃描邊界：最多只看 +3 Frame
       const loopLimitFrame = Math.min(searchEndFrame, currentSearchStartFrame + 3);
 
-      // Time Restriction: Continue forward scan from where we left off
-      // [MODIFIED] Loop condition changed from `f <= searchEndFrame` to `f <= loopLimitFrame`
-      for (let f = currentSearchStartFrame; f <= loopLimitFrame; f++) {
+      // 2. 反向迴圈：由最遠 (Limit) -> 最近 (Start + 1)
+      for (let f = loopLimitFrame; f > currentSearchStartFrame; f--) {
         
-        // [NEW] 2. Strict Proximity Rule (強制逐幀延伸)
-        // 邏輯：在高閾值 (>= -2dB) 下，限制最大掃描距離為 1 幀。
-        if (testThreshold_dB >= -2) {
-            const distanceFromStart = f - currentSearchStartFrame;
-            if (distanceFromStart > 1) {
-                // console.log(`[Proximity Stop] Threshold ${testThreshold_dB}dB limited to +1 frame.`);
-                break; 
-            }
-        }
-
         const frame = spectrogram[f];
         let frameHasSignal = false;
         let lowestFreqInThisFrame = null; 
         
-        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx)
+        // Scan bins to find signal
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
@@ -2319,23 +2308,17 @@ export class BatCallDetector {
         }
         
         if (frameHasSignal) {
-          activeEndFrameIdx = f; 
-          consecutiveSilenceFrames = 0; // Reset gap counter
-          
-          // [Anti-Rebounce Continuity Lock]
+          // [Anti-Rebounce Check] 
+          // 確保找到的不是 Rebounce (頻率異常升高的尾巴)
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
               if (lowestFreqInThisFrame < referenceFreq_Hz) {
-                  break; 
+                  continue; // 頻率不合理，忽略此 Frame
               }
           }
 
-        } else {
-          // Check gap limit
-          consecutiveSilenceFrames++;
-          if (consecutiveSilenceFrames > currentMaxGap) {
-            break; 
-          }
+          activeEndFrameIdx = f; 
+          
         }
       }
       
