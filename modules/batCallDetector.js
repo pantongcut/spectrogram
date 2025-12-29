@@ -2281,34 +2281,27 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 2. Gap-Bridging Backward Scan (Reverse: Limit -> Start)
-      // [2025 OPTIMIZED] Scan from furthest candidate back to anchor
+      // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
-      // 移除 consecutiveSilenceFrames，改用計算 gapSize
-      
-      // 1. 動態斷層容忍度 (低閾值允許小斷層)
-      const currentMaxGap = (testThreshold_dB >= -25) ? 0 : 2;
+      let consecutiveSilenceFrames = 0;
 
-      // 限制最遠只看 +3 Frame
+      const currentMaxGap = 0 ;
+
+      // 限制每次 Test 的 Frame Range 最多延伸 3 個 Frame
       const loopLimitFrame = Math.min(searchEndFrame, currentSearchStartFrame + 3);
 
-      // [MODIFIED] 反向迴圈：從最遠的 Frame 往回掃描到 Start
-      for (let f = loopLimitFrame; f >= currentSearchStartFrame; f--) {
+      // Time Restriction: Continue forward scan from where we left off
+      // [MODIFIED] Loop condition changed from `f <= searchEndFrame` to `f <= loopLimitFrame`
+      for (let f = currentSearchStartFrame; f <= loopLimitFrame; f++) {
         
-        // [Logic] 先計算與起點的距離 (Gap Check)
-        // 如果這個 Frame 即使有訊號，但距離起點太遠（超過 Gap 容忍度），就不需要計算了
-        const gapSize = f - currentSearchStartFrame - 1;
-        if (gapSize > currentMaxGap) {
-            continue; // 這個 Frame 太遠了，跳過，找近一點的
-        }
-
-        // [Logic] Strict Proximity Rule (高閾值強制逐幀)
-        // 如果閾值很高，我們不允許任何跳躍，必須是 +1 (即 gapSize 必須 < 0? 其實是 distance <= 1)
+        // [NEW] 2. Strict Proximity Rule (強制逐幀延伸)
+        // 邏輯：在高閾值 (>= -2dB) 下，限制最大掃描距離為 1 幀。
         if (testThreshold_dB >= -2) {
             const distanceFromStart = f - currentSearchStartFrame;
             if (distanceFromStart > 1) {
-                continue; // 太遠，跳過
+                // console.log(`[Proximity Stop] Threshold ${testThreshold_dB}dB limited to +1 frame.`);
+                break; 
             }
         }
 
@@ -2316,7 +2309,7 @@ export class BatCallDetector {
         let frameHasSignal = false;
         let lowestFreqInThisFrame = null; 
         
-        // Scan bins to find signal
+        // Scan from Low Bin (0) to High (currentSearchMaxBinIdx)
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
@@ -2326,22 +2319,23 @@ export class BatCallDetector {
         }
         
         if (frameHasSignal) {
-          // [Anti-Rebounce Check]
-          // 檢查頻率是否合理 (沒有因為 Rebounce 而變高)
+          activeEndFrameIdx = f; 
+          consecutiveSilenceFrames = 0; // Reset gap counter
+          
+          // [Anti-Rebounce Continuity Lock]
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
               if (lowestFreqInThisFrame < referenceFreq_Hz) {
-                  // 頻率異常（可能是 Rebounce），視為無效 Frame
-                  continue; 
+                  break; 
               }
           }
 
-          // [SUCCESS] 找到了！
-          // 因為我們是從後往前找，這一定是符合條件中「最遠」的一幀
-          activeEndFrameIdx = f; 
-          
-          // 既然找到了最遠的，前面的就不用看了（假設訊號中間是連續的或 Gap 是被允許的）
-          break; 
+        } else {
+          // Check gap limit
+          consecutiveSilenceFrames++;
+          if (consecutiveSilenceFrames > currentMaxGap) {
+            break; 
+          }
         }
       }
       
