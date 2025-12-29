@@ -2220,14 +2220,8 @@ export class BatCallDetector {
     let currentSearchLimitFrame = Math.min(peakFrameIdx, spectrogram.length - 1);
     
     // ============================================================
-    // 1. [UPDATED] Calculate Zonal Robust Noise Floors
-    // Scope: DYNAMIC - Frame 0 to Current Low Freq Frame
-    // Method: Frequency Histogram Mode per 10kHz band
-    // Note: Noise Floor is now calculated DYNAMICALLY within the threshold loop
-    //       (moved to Jump Protection section below)
+    // 1. Calculate Zonal Robust Noise Floors
     // ============================================================
-    // Removed pre-calculation. See Jump Protection section in loop.
-
     // ============================================================
     // Initialize Variables
     // ============================================================
@@ -2236,6 +2230,10 @@ export class BatCallDetector {
     let optimalMeasurement = null;
 
     let currentSearchStartFrame = validPeakFrameIdx;
+    
+    // [NEW 2025] Initialize frequency search upper limit (Frequency space convergence - Top-Down Ceiling)
+    // Low Frequency logic: Can only get lower, so we progressively lower this ceiling
+    let currentSearchMaxBinIdx = numBins - 1;
 
     // ============================================================
     // [UPDATED] Test Thresholds Configuration
@@ -2268,9 +2266,6 @@ export class BatCallDetector {
         }
       }
 
-      // Initialize log row - [UPDATED] with Frame/Time logging
-      // Calculate time (ms), relative to Frame 0
-      // Note: Low Freq is measured at activeEndFrameIdx (will be set after forward scan)
       let time_ms = '-';
       let frameStr = '-';
       
@@ -2279,7 +2274,6 @@ export class BatCallDetector {
           'Frame': frameStr,           // [NEW] Frame Index (will be updated after forward scan)
           'Time (ms)': time_ms,        // [NEW] Relative Time (will be updated after forward scan)
           'Freq (kHz)': '-',
-          // 'Ref (kHz)': Removed      // [REMOVED]
           'Diff (kHz)': '-',
           'Signal (dB)': '-',
           'Noise (dB)': '-',
@@ -2287,15 +2281,18 @@ export class BatCallDetector {
       };
       
       // ============================================================
-      // 2. Gap-Bridging Forward Scan
+      // 2. Gap-Bridging Forward Scan (Time Restriction)
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
       
+      // Time Restriction: Continue forward scan from where we left off
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
         
-        for (let b = 0; b < numBins; b++) {
+        // Apply frequency restriction: only check up to currentSearchMaxBinIdx
+        // This prevents unnecessary scanning of high-frequency regions that are ruled out
+        for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
             break;
@@ -2312,13 +2309,16 @@ export class BatCallDetector {
       // ============================================================
       // 3. Measure Low Frequency at the found End Frame
       // ============================================================
-      let currentLowFreqPower_dB = -Infinity; 
+      let currentLowFreqPower_dB = -Infinity;
+      let foundBinIdx = -1; // Track Bin Index for convergence update
 
       if (activeEndFrameIdx !== -1) {
         const targetFramePower = spectrogram[activeEndFrameIdx];
         
-        // Find lowest freq (Low -> High)
-        for (let binIdx = 0; binIdx < targetFramePower.length; binIdx++) {
+        // Find lowest freq (Low -> High) with frequency restriction
+        // Optimized: for (let binIdx = 0; binIdx <= currentSearchMaxBinIdx; binIdx++)
+
+        for (let binIdx = 0; binIdx <= currentSearchMaxBinIdx; binIdx++) {
           if (targetFramePower[binIdx] > lowFreqThreshold_dB) {
             
             let candidateFreq_Hz = freqBins[binIdx];
@@ -2369,6 +2369,7 @@ export class BatCallDetector {
             // Valid Low Frequency Found
             lowFreq_Hz = candidateFreq_Hz;
             foundBin = true;
+            foundBinIdx = binIdx; // [NEW 2025] Track Bin Index for convergence update
             currentLowFreqPower_dB = targetFramePower[binIdx];
             break; 
           }
@@ -2476,6 +2477,14 @@ export class BatCallDetector {
         endFreq_kHz: endFreq_Hz !== null ? endFreq_Hz / 1000 : null,
         foundBin: foundBin
       });
+
+      // [MODIFIED 2025] Loop tail: Update frequency search range (Top-Down Ceiling Lock)
+      // ============================================================
+      if (foundBin && foundBinIdx !== -1) {
+          if (foundBinIdx < currentSearchMaxBinIdx) {
+              currentSearchMaxBinIdx = foundBinIdx;
+          }
+      }
       
       if (hitNoiseFloor) break;
     }
