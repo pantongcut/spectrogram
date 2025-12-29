@@ -2282,11 +2282,12 @@ export class BatCallDetector {
       
       // ============================================================
       // 2. Gap-Bridging Forward Scan (Time Restriction + Continuity Lock)
+      // [2025 OPTIMIZED] Dynamic Gap Tolerance for Anti-Rebounce
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
-      
       let consecutiveSilenceFrames = 0;
 
+      // [NEW] 動態斷層容忍度
       // 1. 在高閾值 (>-25dB) 時，我們要求絕對連續性 (Gap=0)。
       //    這強迫掃描必須緊貼著 Peak，一旦斷開就停止，防止跳到 Frame 113 這種回音。
       // 2. 在低閾值 (<-25dB) 時，允許少量斷層 (Gap=2) 以橋接信號尾部。
@@ -2296,38 +2297,37 @@ export class BatCallDetector {
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
         const frame = spectrogram[f];
         let frameHasSignal = false;
-        let lowestFreqInThisFrame = null; // [NEW] 用於記錄該 Frame 的最低頻率
+        let lowestFreqInThisFrame = null; 
         
         // Scan from Low Bin (0) to High (currentSearchMaxBinIdx)
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
-            lowestFreqInThisFrame = freqBins[b]; // [NEW] 記錄找到的第一個(最低)頻率
-            break; // 找到該 Frame 的最低點後，不需再往高頻找
+            lowestFreqInThisFrame = freqBins[b];
+            break; 
           }
         }
         
         if (frameHasSignal) {
           activeEndFrameIdx = f; 
-          consecutiveSilenceFrames = 0;
+          consecutiveSilenceFrames = 0; // Reset gap counter
           
-          // ============================================================
+          // [Anti-Rebounce Continuity Lock] ... (保持原有的頻率下降鎖定邏輯)
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
-              
-              // 如果找到比參考值更低的頻率 (例如 Ref=41k, Found=40k)
-              // 立即停止掃描，鎖定在 Frame 100，放棄後面的 Frame 102 (38k)
+              // 如果頻率反而更低 (正常 FM 下降)，視為有效，不做動作
+              // 如果頻率升高，這裡可以考慮是否要鎖定 (視需求而定，目前只需鎖定更低以防跳跃)
               if (lowestFreqInThisFrame < referenceFreq_Hz) {
-                  // console.log(`[LowFreq Lock] Locked at Frame ${f} (${(lowestFreqInThisFrame/1000).toFixed(2)} kHz < ${referenceFreq_kHz.toFixed(2)} kHz)`);
-                  break; // 觸發鎖定，停止 Forward Scan
+                  break; // Found extension with lower freq, stop scanning this frame
               }
           }
 
         } else {
-          // Increment gap counter and check limit
+          // [MODIFIED] 使用動態的 currentMaxGap
           consecutiveSilenceFrames++;
-          if (consecutiveSilenceFrames > MAX_ALLOWED_GAP_FRAMES) {
-            break; // Stop scanning forward if gap is too large
+          if (consecutiveSilenceFrames > currentMaxGap) {
+            // console.log(`[Gap Stop] Threshold ${testThreshold_dB}dB stopped at frame ${f} (MaxGap: ${currentMaxGap})`);
+            break; // Stop scanning forward
           }
         }
       }
