@@ -2282,14 +2282,21 @@ export class BatCallDetector {
       
       // ============================================================
       // 2. Gap-Bridging Forward Scan
-      // [2025 FIXED] Bi-directional Frequency Lock (Strict Anti-Rebounce)
+      // [2025 FIXED] Search for NEXT LOWER frequency (Skip Neutral/Bad)
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
       let consecutiveSilenceFrames = 0;
+      
+      // 動態斷層容忍度
+      // 高閾值 (>= -25dB): 0 (嚴格，不允許跳過任何 Bad Frame)
+      // 低閾值 (< -25dB): 2 (允許跳過 2 個 Bad/Neutral Frames 去找更低的)
       const currentMaxGap = (testThreshold_dB >= -25) ? 0 : 2;
 
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
+        
+        // [Strict Proximity] 高閾值下的距離限制
         if (testThreshold_dB >= -10) {
+            // 如果已經嘗試跳過 1 個 Frame 尋找更低頻但失敗，強制停止
             if ((f - currentSearchStartFrame) > 1) break;
         }
 
@@ -2297,62 +2304,63 @@ export class BatCallDetector {
         let frameHasSignal = false;
         let lowestFreqInThisFrame = null; 
         
-        // Find lowest freq in this frame
+        // Find lowest freq in this frame (Scan from 0 upwards)
         for (let b = 0; b <= currentSearchMaxBinIdx; b++) {
           if (frame[b] > lowFreqThreshold_dB) {
             frameHasSignal = true;
             lowestFreqInThisFrame = freqBins[b];
-            break; 
+            break; // 找到該 Frame 的最低點，停止 Bin 掃描 (符合 "最先出現的 bin")
           }
         }
         
-        if (frameHasSignal) {         
-          let isFrequencyValid = true;
-          let shouldStopScanning = false;
+        let isGoodExtension = false;
 
+        if (frameHasSignal) {
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
-              // 容許誤差 (例如 1 個 Bin 約 250Hz-500Hz)，避免數位抖動誤判
-              // 但如果明顯高於參考值 (例如 > 500Hz)，則視為反彈
-              const tolerance_Hz = 200; 
-
-              if (lowestFreqInThisFrame > (referenceFreq_Hz + tolerance_Hz)) {
-                  // Case A: 頻率變高 (Rebounce/Hook) -> BAD
-                  // 不更新 activeEndFrameIdx
-                  isFrequencyValid = false; 
-                  shouldStopScanning = true; // 立即停止，保留上一次的好結果
-                  console.log(`[Rebounce Block] Frame ${f} Freq ${lowestFreqInThisFrame} > Ref ${referenceFreq_Hz}`);
+              // 容許 10Hz 誤差
+              
+              if (lowestFreqInThisFrame < (referenceFreq_Hz - 10)) {
+                  // Case A: 頻率變低 (Good) -> 這是我們要的!
+                  isGoodExtension = true;
               } 
-              else if (lowestFreqInThisFrame < referenceFreq_Hz) {
-                  // Case B: 頻率變低 (Extension) -> GOOD
-                  // 更新 activeEndFrameIdx
-                  // 並觸發你的 "鎖定機制" (找到更低就停，步步為營)
-                  isFrequencyValid = true;
-                  shouldStopScanning = true; 
-              }
               else {
-                  // Case C: 頻率持平 (Flat) -> NEUTRAL
-                  // 更新 activeEndFrameIdx，繼續往後找看有沒有更低的
-                  isFrequencyValid = true;
-                  shouldStopScanning = false;
+                  // Case B: 頻率持平 (Neutral) 或 變高 (Bad) -> 視同無效
+                  // 這裡不做任何事，讓它掉入下方的 else 區塊 (增加 Gap 計數)
+                  isGoodExtension = false;
+                  // console.log(`[Skip] Frame ${f} Freq ${lowestFreqInThisFrame} >= Ref ${referenceFreq_Hz}`);
               }
+          } else {
+              // 如果沒有參考值 (第一次運行)，只要有信號就算有效
+              // 但為了符合你的 "只test Peak + 1" 原則，如果是第一步就直接接受
+              isGoodExtension = true; 
           }
+        }
 
-          if (isFrequencyValid) {
-              activeEndFrameIdx = f; // 只有合法的頻率才延伸 Call 的結束點
-              consecutiveSilenceFrames = 0;
-          }
-
-          if (shouldStopScanning) {
-              break; // 觸發鎖定或阻擋
-          }
-
+        // ============================================================
+        // 決策邏輯
+        // ============================================================
+        if (isGoodExtension) {
+            // 找到更低的頻率了！
+            activeEndFrameIdx = f;
+            consecutiveSilenceFrames = 0;
+            
+            // [鎖定] 既然找到了 "最先出現且頻率更低" 的 Frame，
+            // 我們就鎖定這裡，不再繼續往後找 (防止之後出現更低但其實是 noise 的東西)
+            // 除非這是 Loop 的起點 (currentSearchStartFrame)，那就要讓它至少走一步
+            if (f > currentSearchStartFrame) {
+                break; 
+            }
         } else {
-          // Gap processing
-          consecutiveSilenceFrames++;
-          if (consecutiveSilenceFrames > currentMaxGap) {
-            break; 
-          }
+            // 無信號 OR 信號頻率不對 (Neutral/Bad)
+            // 視同 Gap，繼續往後找 (Search Next Frame)
+            consecutiveSilenceFrames++;
+            
+            // 檢查是否超過容忍極限
+            // 如果是高閾值 (-1dB)，MaxGap=0，遇到第一個 Neutral/Bad 就會 Break。
+            if (consecutiveSilenceFrames > currentMaxGap) {
+                break; 
+            }
         }
       }
       
