@@ -2290,13 +2290,16 @@ export class BatCallDetector {
       // 1. 動態斷層容忍度 (低閾值允許小斷層)
       const currentMaxGap = (testThreshold_dB >= -25) ? 0 : 2;
 
+      // [MODIFIED 2025] 限制每次 Test 的 Frame Range 最多延伸 3 個 Frame
+      // 原本是 f <= searchEndFrame (一直掃到底)，現在限制為 currentSearchStartFrame + 3
+      const loopLimitFrame = Math.min(searchEndFrame, currentSearchStartFrame + 3);
+
       // Time Restriction: Continue forward scan from where we left off
-      for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
+      // [MODIFIED] Loop condition changed from `f <= searchEndFrame` to `f <= loopLimitFrame`
+      for (let f = currentSearchStartFrame; f <= loopLimitFrame; f++) {
         
         // [NEW] 2. Strict Proximity Rule (強制逐幀延伸)
-        // 你的需求：強制 -1dB 時只 Test Peak Freq frame + 1
         // 邏輯：在高閾值 (>= -2dB) 下，限制最大掃描距離為 1 幀。
-        // 這迫使算法必須隨著閾值降低，一幀一幀地往後「爬」，而不能直接跳到遠處。
         if (testThreshold_dB >= -2) {
             const distanceFromStart = f - currentSearchStartFrame;
             if (distanceFromStart > 1) {
@@ -2322,7 +2325,7 @@ export class BatCallDetector {
           activeEndFrameIdx = f; 
           consecutiveSilenceFrames = 0; // Reset gap counter
           
-          // [Anti-Rebounce Continuity Lock] (保持不變)
+          // [Anti-Rebounce Continuity Lock]
           if (referenceFreq_kHz !== null && lowestFreqInThisFrame !== null) {
               const referenceFreq_Hz = referenceFreq_kHz * 1000;
               if (lowestFreqInThisFrame < referenceFreq_Hz) {
