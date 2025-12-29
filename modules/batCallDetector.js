@@ -1651,7 +1651,7 @@ export class BatCallDetector {
    * 3. Test threshold (-12 -> -70 dB), detect highFreq position
    * 4. Apply Jump Protection using Zonal Noise Floors
    */
-  findOptimalHighFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
+  findOptimalHighFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
     if (spectrogram.length === 0) return {
       threshold: -12,
       highFreq_Hz: null,
@@ -1811,16 +1811,29 @@ export class BatCallDetector {
       }
 
       // ============================================================
-      // Log Row Preparation
+      // Log Row Preparation - [UPDATED] with Frame/Time logging
       // ============================================================
+      
+      // Calculate time (ms), relative to Frame 0
+      let time_ms = '-';
+      let frameStr = '-';
+      if (foundBin && timeFrames && timeFrames.length > 0) {
+          const startTime = timeFrames[0];
+          const currentTime = timeFrames[highFreqFrameIdx];
+          time_ms = ((currentTime - startTime) * 1000).toFixed(1);
+          frameStr = highFreqFrameIdx.toString();
+      }
+      
       let logRow = {
           'Thr (dB)': testThreshold_dB,
+          'Frame': frameStr,           // [NEW] Frame Index
+          'Time (ms)': time_ms,        // [NEW] Relative Time
           'Freq (kHz)': highFreq_Hz !== null ? (highFreq_Hz / 1000).toFixed(2) : '-',
-          'Ref (kHz)': '-',      // Placeholder to reserve order
-          'Diff (kHz)': '-',     // Placeholder to reserve order
-          'Signal (dB)': '-',    // Placeholder to reserve order
-          'Noise (dB)': '-',     // Placeholder to reserve order
-          'Judgment': 'OK'       // Last column
+          // 'Ref (kHz)': Removed      // [REMOVED]
+          'Diff (kHz)': '-',           // Placeholder to reserve order
+          'Signal (dB)': '-',          // Placeholder to reserve order
+          'Noise (dB)': '-',           // Placeholder to reserve order
+          'Judgment': 'OK'             // Last column
       };
       
       // ============================================================
@@ -1842,7 +1855,7 @@ export class BatCallDetector {
         if (lastValidFreq_kHz !== null) {
           const jumpDiff = Math.abs(currentHighFreq_kHz - lastValidFreq_kHz);
           
-          logRow['Ref (kHz)'] = lastValidFreq_kHz.toFixed(2);
+          // [REMOVED in 2025] logRow['Ref (kHz)'] = lastValidFreq_kHz.toFixed(2);  // Reference column removed
           logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
           logRow['Signal (dB)'] = currentHighFreqPower_dB.toFixed(2);
 
@@ -2154,7 +2167,7 @@ export class BatCallDetector {
    * 3. Hard Stop Logic with Fallback
    * 4. Sub-harmonic Rejection (> 15kHz jump protection)
    */
-  findOptimalLowFrequencyThreshold(spectrogram, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null) {
+  findOptimalLowFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null) {
     if (spectrogram.length === 0) return {
       threshold: -24, // Default fallback
       lowFreq_Hz: null,
@@ -2226,11 +2239,18 @@ export class BatCallDetector {
         }
       }
 
-      // Initialize log row
+      // Initialize log row - [UPDATED] with Frame/Time logging
+      // Calculate time (ms), relative to Frame 0
+      // Note: Low Freq is measured at activeEndFrameIdx (will be set after forward scan)
+      let time_ms = '-';
+      let frameStr = '-';
+      
       let logRow = {
           'Thr (dB)': testThreshold_dB,
+          'Frame': frameStr,           // [NEW] Frame Index (will be updated after forward scan)
+          'Time (ms)': time_ms,        // [NEW] Relative Time (will be updated after forward scan)
           'Freq (kHz)': '-',
-          'Ref (kHz)': referenceFreq_kHz !== null ? referenceFreq_kHz.toFixed(2) : '-',
+          // 'Ref (kHz)': Removed      // [REMOVED]
           'Diff (kHz)': '-',
           'Signal (dB)': '-',
           'Noise (dB)': '-',
@@ -2329,6 +2349,16 @@ export class BatCallDetector {
       // Update Log Row with found frequency
       if (foundBin && lowFreq_Hz !== null) {
           logRow['Freq (kHz)'] = (lowFreq_Hz / 1000).toFixed(2);
+      }
+      
+      // [NEW] Update Log Row with Frame/Time information
+      // Calculate time (ms), relative to Frame 0
+      // Note: Low Freq measurement point is at activeEndFrameIdx
+      if (foundBin && timeFrames && timeFrames.length > 0 && activeEndFrameIdx !== undefined && activeEndFrameIdx !== null) {
+          const startTime = timeFrames[0];
+          const currentTime = timeFrames[activeEndFrameIdx];
+          logRow['Time (ms)'] = ((currentTime - startTime) * 1000).toFixed(1);
+          logRow['Frame'] = activeEndFrameIdx.toString();
       }
       
       // 如果內部觸發了 hitNoiseFloor (Hard Stop)，直接跳出 Threshold 循環
@@ -2684,6 +2714,7 @@ export class BatCallDetector {
     if (this.config.highFreqThreshold_dB_isAuto === true) {
       const result = this.findOptimalHighFrequencyThreshold(
         spectrogram,
+        timeFrames,
         freqBins,
         flowKHz,
         fhighKHz,
@@ -3376,6 +3407,7 @@ export class BatCallDetector {
     if (this.config.lowFreqThreshold_dB_isAuto === true) {
       const result = this.findOptimalLowFrequencyThreshold(
         spectrogram,
+        timeFrames,
         freqBins,
         flowKHz,
         fhighKHz,
