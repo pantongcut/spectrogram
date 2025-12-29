@@ -1032,7 +1032,7 @@ export class BatCallDetector {
       // [保留此邏輯] 加入 Padding 以保留叫聲微弱的頭尾
       // 這是解決 Start Freq = High Freq 的關鍵！
       // ============================================================
-      const padding_ms = 5; // 你可以調整這裡
+      const padding_ms = 3; // 你可以調整這裡
       const timePerFrame = timeFrames[1] - timeFrames[0];
       const paddingFrames = Math.ceil((padding_ms / 1000) / timePerFrame);
       
