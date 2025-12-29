@@ -2284,6 +2284,10 @@ export class BatCallDetector {
       // 2. Gap-Bridging Forward Scan (Time Restriction)
       // ============================================================
       let activeEndFrameIdx = currentSearchStartFrame; 
+
+      // Gap Detection Variables
+      let consecutiveSilenceFrames = 0;
+      const MAX_ALLOWED_GAP_FRAMES = 1;
       
       // Time Restriction: Continue forward scan from where we left off
       for (let f = currentSearchStartFrame; f <= searchEndFrame; f++) {
@@ -2301,7 +2305,15 @@ export class BatCallDetector {
         
         if (frameHasSignal) {
           activeEndFrameIdx = f; 
-        } 
+          consecutiveSilenceFrames = 0; // [NEW] Reset gap counter on signal
+        } else {
+          // [NEW] Increment gap counter and check limit
+          consecutiveSilenceFrames++;
+          if (consecutiveSilenceFrames > MAX_ALLOWED_GAP_FRAMES) {
+            // console.log(`[LowFreq Scan] Gap Stop at frame ${f} (Threshold: ${testThreshold_dB}dB)`);
+            break; // Stop scanning forward if gap is too large
+          }
+        }
       }
       
       currentSearchStartFrame = activeEndFrameIdx;
