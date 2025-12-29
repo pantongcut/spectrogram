@@ -608,12 +608,15 @@ export class BatCallDetector {
       // Check global peak of this ROI to decide if HPF is needed
       let maxPower = -Infinity;
       let maxBinIdx = 0;
+      let maxFrameIdx = 0;
+
       for (let f = 0; f < powerMatrix.length; f++) {
           const frame = powerMatrix[f];
           for (let b = 0; b < frame.length; b++) {
               if (frame[b] > maxPower) {
                   maxPower = frame[b];
                   maxBinIdx = b;
+                  maxFrameIdx = f;
               }
           }
       }
@@ -624,8 +627,10 @@ export class BatCallDetector {
       // If HPF needed, we must re-process audio and re-generate spectrogram
       // This ensures measurements are clean
       if (autoCutoff > 0) {
+          const peakTime_ms = timeFrames[maxFrameIdx] * 1000;
+          
           console.log(
-            `%c[Auto HPF] ROI ${i}: Peak ${roiPeakFreq_kHz.toFixed(1)}kHz -> Applying HPF @ ${autoCutoff}kHz`, 
+            `%c[Auto HPF] ROI ${i}: Peak ${roiPeakFreq_kHz.toFixed(1)}kHz ${peakTime_ms.toFixed(1)}ms (Frame ${maxFrameIdx}) -> Applying HPF @ ${autoCutoff}kHz`, 
             'color: #ff9f43; font-weight: bold; font-size: 12px;'
           );
           segmentAudio = this.applyHighpassFilter(segmentAudio, autoCutoff * 1000, sampleRate);
