@@ -634,7 +634,8 @@ if (toggleSmoothSwitch) {
   });
 }
 
-async function applySampleRate(rate, reloadFile = true) {
+// [MODIFIED] 增加 shouldRender 参数，允许更新状态但不触发重绘
+async function applySampleRate(rate, reloadFile = true, shouldRender = true) {
   const prevRate = currentSampleRate;
   currentSampleRate = rate;
   const maxFreq = currentSampleRate / 2000;
@@ -673,30 +674,38 @@ async function applySampleRate(rate, reloadFile = true) {
       }
     }
   }
-  freqHoverControl?.hideHover();
-  replacePlugin(
-    getEffectiveColorMap(),
-    spectrogramHeight,
-    currentFreqMin,
-    currentFreqMax,
-    getOverlapPercent(),
-    () => {
-      duration = getWavesurfer().getDuration();
-      if (getWavesurfer().getDecodedData()) {
-          zoomControl.applyZoom();
-      }
-      renderAxes();
-      freqHoverControl?.refreshHover();
-      autoIdControl?.updateMarkers();
-      updateSpectrogramSettingsText();
-      restoreImageEnhancement(); // ✅ Restore Brightness/Contrast/Gain
-    },
-    undefined, // fftSamples (use default)
-    undefined, // windowFunc (use default)
-    isPeakModeActive(), // peakMode (use default)
-    getPeakThreshold(), // peakThreshold (use default)
-    handleColorMapChange // onColorMapChanged callback
-  );
+
+  // [MODIFIED] 只有当 shouldRender 为 true 时才调用 replacePlugin
+  // 在文件加载过程中，我们设为 false，让 decode 事件来处理唯一的渲染
+  if (shouldRender) {
+    freqHoverControl?.hideHover();
+    replacePlugin(
+      getEffectiveColorMap(),
+      spectrogramHeight,
+      currentFreqMin,
+      currentFreqMax,
+      getOverlapPercent(),
+      () => {
+        duration = getWavesurfer().getDuration();
+        if (getWavesurfer().getDecodedData()) {
+            zoomControl.applyZoom();
+        }
+        renderAxes();
+        freqHoverControl?.refreshHover();
+        autoIdControl?.updateMarkers();
+        updateSpectrogramSettingsText();
+        restoreImageEnhancement(); // ✅ Restore Brightness/Contrast/Gain
+      },
+      undefined, // fftSamples (use default)
+      undefined, // windowFunc (use default)
+      isPeakModeActive(), // peakMode (use default)
+      getPeakThreshold(), // peakThreshold (use default)
+      handleColorMapChange // onColorMapChanged callback
+    );
+  } else {
+    // 即使不渲染，也要更新文字显示，确保 UI 状态正确
+    updateSpectrogramSettingsText();
+  }
 }
 
 async function handleSampleRate(rate) {
@@ -715,11 +724,13 @@ await applySampleRate(rate);
 }
 
 async function autoSetSampleRate(rate, skipReload = false) {
-if (selectedSampleRate === 'auto' && rate) {
-await applySampleRate(rate, !skipReload);
-} else if (selectedSampleRate === 'auto') {
-updateSpectrogramSettingsText();
-}
+  if (selectedSampleRate === 'auto' && rate) {
+    // [MODIFIED] 传入 false 作为第三个参数 (shouldRender)
+    // 这样只会更新 currentSampleRate 变量，真正的渲染交给 wavesurfer 的 decode 事件
+    await applySampleRate(rate, !skipReload, false);
+  } else if (selectedSampleRate === 'auto') {
+    updateSpectrogramSettingsText();
+  }
 }
 
 const renderAxes = () => {
