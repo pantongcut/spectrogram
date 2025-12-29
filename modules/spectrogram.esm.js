@@ -545,6 +545,12 @@ class h extends s {
         this.drawColorMapBar()
     }
 destroy() {
+        // [FIX] 清除 requestAnimationFrame
+        if (this._renderRafId) {
+            cancelAnimationFrame(this._renderRafId);
+            this._renderRafId = null;
+        }
+        
         // Clear all filter bank caches BEFORE clearing engine reference
         this._filterBankCache = {};
         this._filterBankCacheByKey = {};
@@ -966,40 +972,48 @@ destroy() {
         }, this.wrapper),
         this.spectrCc = this.canvas.getContext("2d")
     }
-    async render() {
-        var t;
-        
-        // [FIX] Queue renders instead of skipping - set flag to indicate pending render
-        if (this._isRendering) {
-            this._pendingRender = true;
-            return;
+    render() {
+        // 1. 如果已經有排程的渲染，取消它 (防抖動)
+        if (this._renderRafId) {
+            cancelAnimationFrame(this._renderRafId);
         }
-        
-        this._isRendering = true;
-        this._pendingRender = false;
-        
-        try {
-            if (this.frequenciesDataUrl)
-                this.loadFrequenciesData(this.frequenciesDataUrl);
-            else {
-                const e = null === (t = this.wavesurfer) || void 0 === t ? void 0 : t.getDecodedData();
-                if (e) {
-                    const frequencies = await this.getFrequencies(e);
-                    // [FIX] Only draw if frequencies is valid (not null/undefined/empty)
-                    if (frequencies && Array.isArray(frequencies) && frequencies.length > 0) {
-                        this.drawSpectrogram(frequencies);
+
+        // 2. 排程新的渲染
+        this._renderRafId = requestAnimationFrame(async () => {
+            this._renderRafId = null;
+
+            // 3. 簡單鎖定：如果正在執行異步計算，則標記需要再次渲染並返回
+            if (this._isComputing) {
+                this._needsRerender = true;
+                return;
+            }
+
+            this._isComputing = true;
+
+            try {
+                if (this.frequenciesDataUrl) {
+                    this.loadFrequenciesData(this.frequenciesDataUrl);
+                } else {
+                    const e = this.wavesurfer?.getDecodedData();
+                    if (e) {
+                        const frequencies = await this.getFrequencies(e);
+                        if (frequencies && Array.isArray(frequencies) && frequencies.length > 0) {
+                            this.drawSpectrogram(frequencies);
+                        }
                     }
                 }
+            } catch (err) {
+                console.warn('[Spectrogram] Render failed:', err);
+            } finally {
+                this._isComputing = false;
+                
+                // 4. 如果在計算過程中又有新的請求，立即再次執行
+                if (this._needsRerender) {
+                    this._needsRerender = false;
+                    this.render();
+                }
             }
-        } finally {
-            this._isRendering = false;
-            // [FIX] If a render was requested while we were busy, do it now
-            if (this._pendingRender) {
-                this._pendingRender = false;
-                // Use setTimeout to avoid stack overflow
-                setTimeout(() => this.render(), 0);
-            }
-        }
+        });
     }
 
     // [NEW] 設置平滑渲染模式

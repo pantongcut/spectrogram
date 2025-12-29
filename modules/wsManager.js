@@ -168,8 +168,11 @@ export function replacePlugin(
         }
 
         // 3. 檢查 Overlap
+        // [MODIFIED] 增加檢查：如果 targetNoverlap 有值，且與當前不同，才更新
         if (targetNoverlap !== null && targetNoverlap !== plugin.noverlap) {
-            console.log(`[wsManager] Overlap Changed: ${plugin.noverlap} -> ${targetNoverlap}`);
+            // 如果這是初始創建後的第一次調整，且不需要重建，通常不需要 log 這麼大聲
+            // console.log(`[wsManager] Overlap Changed: ${plugin.noverlap} -> ${targetNoverlap}`);
+            
             plugin.noverlap = targetNoverlap;
             plugin.options.noverlap = targetNoverlap;
             shouldRender = true;

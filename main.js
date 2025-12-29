@@ -1019,7 +1019,9 @@ getWavesurfer().on('ready', () => {
     progressLineElem.style.display = 'none';
     updateProgressLine(0);
 
-    getPlugin()?.render();
+    // [DELETED] 移除這行，因為 decode 事件已經處理了渲染
+    // getPlugin()?.render();
+    
     requestAnimationFrame(() => {
       renderAxes();
       freqHoverControl?.refreshHover();
