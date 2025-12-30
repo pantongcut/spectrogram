@@ -3036,11 +3036,8 @@ export class BatCallDetector {
                 logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
 
                 if (jumpDiff > ANOMALY_JUMP_KHZ) {
-                    // [Anomaly Detected] Check against Zonal Noise Floor
-                    // Need significant margin to justify a large jump
-                    const snrMargin = isCFCallDetected ? 3.0 : 6.0; 
-                    
-                    if (foundPower > (foundZoneFloor + snrMargin)) {
+                                        
+                    if (foundPower > foundZoneFloor) {
                         logRow['Judgment'] = 'Jump (Sig > Noise) -> Continue';
                     } else {
                         logRow['Judgment'] = 'Jump (Hit Noise) -> STOP';
