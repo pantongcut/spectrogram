@@ -724,8 +724,7 @@ export class BatCallDetector {
           let safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
 
           // ============================================================
-          // [FIX] 這裡也要加入 Oscillogram Refinement 邏輯！
-          // 注意：這裡傳入的是 segmentAudio (ROI 的音訊片段)
+          // Oscillogram Refinement
           // ============================================================
           try {
               // 1. 計算 ROI 內的 Sample Index (相對位置)
@@ -1540,11 +1539,11 @@ export class BatCallDetector {
     }
 
     // 2. 參數設定
-    const windowSizeMs = 0.25; 
+    const windowSizeMs = 0.2; 
     const windowSize = Math.floor(sampleRate * (windowSizeMs / 1000));
     // 建議：如果是為了測試，可以先將閾值調敏感一點，例如 1.0dB，確認機制有運作
     const rebounceThreshold_dB = 2.0; 
-    const sustainedDuration_ms = 1; 
+    const sustainedDuration_ms = 0.8; 
     const sustainedSamples = Math.floor(sampleRate * (sustainedDuration_ms / 1000));
 
     // 3. 計算 RMS Envelope
