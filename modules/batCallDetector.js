@@ -4072,6 +4072,8 @@ export class BatCallDetector {
     // Low Frequency is from LAST frame (also respects anti-rebounce)
     // Both are measured within the same protected boundaries
     // ============================================================
+    const startFreq_kHz = call.startFreq_kHz; 
+
     if (startFreq_kHz !== null && startFreq_kHz < lowFreq_kHz) {
       lowFreq_kHz = startFreq_kHz;
       
