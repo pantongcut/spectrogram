@@ -2887,6 +2887,238 @@ export class BatCallDetector {
   }
 
   /**
+   * [2025 NEW] Find Optimal Start Frequency Threshold (Boundary Detection)
+   * Logic:
+   * 1. Test thresholds from -1dB down to -70dB (Backward Trace).
+   * 2. For each threshold, trace backwards from High Freq Point to find the start.
+   * 3. Detect "Jumps" (Anomalies) in the detected Start Frequency.
+   * 4. Use Zonal Noise Floor to validate if the Jump is signal or noise.
+   */
+  findOptimalStartFrequencyThreshold(spectrogram, timeFrames, freqBins, highFreqFrameIdx, highFreqBinIdx, peakPower_dB, isCFCallDetected) {
+    if (highFreqFrameIdx <= 0 || spectrogram.length === 0) {
+        return { threshold: -24, startFreq_kHz: null, startFreqBinIdx: 0, startFrameIdx: 0 };
+    }
+
+    const stablePeakPower_dB = peakPower_dB;
+    
+    // ============================================================
+    // 1. Pre-calculate Zonal Noise Floors (Region: 0 to HighFreqFrame)
+    // ============================================================
+    const startZoneFloors = this.calculateZonalNoiseFloors(
+      spectrogram,
+      freqBins,
+      0,
+      highFreqFrameIdx
+    );
+
+    // ============================================================
+    // 2. Initialize Logic & Parameters
+    // ============================================================
+    const thresholdRange = [];
+    for (let t = -1; t >= -70; t -= 1.0) {
+        thresholdRange.push(t);
+    }
+
+    const measurements = [];
+    const summaryLog = [];
+    let hitNoiseFloor = false;
+    let optimalMeasurement = null;
+    let optimalThreshold = -24;
+
+    // Jumping constraints
+    // FM calls can have steep slopes at start, so we allow larger frequency jumps between thresholds
+    // But if it jumps TOO far (e.g. > 3kHz) instantly between 1dB step, it's suspicious.
+    const ANOMALY_JUMP_KHZ = isCFCallDetected ? 1.0 : 3.0; 
+
+    // Trace constraints (Per Frame Narrowing)
+    const traceMaxJumpHz = isCFCallDetected ? 1000 : 2500;
+    const traceMaxJumpBins = Math.ceil(traceMaxJumpHz / (freqBins[1] - freqBins[0]));
+    const numBins = freqBins.length;
+
+    // ============================================================
+    // 3. Threshold Loop (-1dB -> -70dB)
+    // ============================================================
+    for (const testThreshold_dB of thresholdRange) {
+        const currentThreshold = stablePeakPower_dB + testThreshold_dB;
+        
+        let foundStartBin = -1;
+        let foundStartFrame = -1;
+        let foundStartFreq_Hz = null;
+        let foundStatus = 'Fail';
+        let foundZoneFloor = -100;
+        let foundPower = -Infinity;
+
+        // --- Backward Tracing Logic (Inner Loop) ---
+        // Start from High Freq Point
+        let currentTrackBinIdx = highFreqBinIdx;
+        let activeStartBin = highFreqBinIdx;
+        let activeStartFrame = highFreqFrameIdx;
+        let consecutiveGapFrames = 0;
+        const MAX_GAP_FRAMES = 1;
+        
+        // Scan Backwards
+        for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
+            const framePower = spectrogram[f];
+            
+            // Narrowing Search Area
+            const searchMinBin = Math.max(0, currentTrackBinIdx - traceMaxJumpBins);
+            const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + traceMaxJumpBins);
+            
+            let bestBin = -1;
+            let bestPower = -Infinity;
+
+            for (let b = searchMinBin; b <= searchMaxBin; b++) {
+                if (framePower[b] > bestPower) {
+                    bestPower = framePower[b];
+                    bestBin = b;
+                }
+            }
+            
+            // Check Connectivity vs Threshold
+            if (bestBin >= 0 && bestPower > currentThreshold) {
+                currentTrackBinIdx = bestBin;
+                activeStartBin = bestBin;
+                activeStartFrame = f;
+                consecutiveGapFrames = 0;
+            } else {
+                consecutiveGapFrames++;
+            }
+
+            if (consecutiveGapFrames > MAX_GAP_FRAMES) {
+                break; // Trace broken
+            }
+        }
+        // --- End Tracing ---
+
+        // Record Result for this Threshold
+        if (activeStartFrame < highFreqFrameIdx) {
+            foundStartBin = activeStartBin;
+            foundStartFrame = activeStartFrame;
+            foundStartFreq_Hz = freqBins[activeStartBin];
+            foundPower = spectrogram[activeStartFrame][activeStartBin];
+            
+            // Get Noise Floor for this specific start point
+            const zoneKey = Math.floor((foundStartFreq_Hz / 1000) / 10) * 10;
+            const rawFloor = startZoneFloors[zoneKey] !== undefined ? startZoneFloors[zoneKey] : -100;
+            foundZoneFloor = Math.max(rawFloor, -115);
+            
+            foundStatus = 'OK';
+        }
+
+        // Prepare Log Row
+        let logRow = {
+            'Thr (dB)': testThreshold_dB,
+            'Frame': foundStartFrame,
+            'Freq (kHz)': foundStartFreq_Hz !== null ? (foundStartFreq_Hz/1000).toFixed(2) : '-',
+            'Diff (kHz)': '-',
+            'Signal (dB)': foundPower !== -Infinity ? foundPower.toFixed(1) : '-',
+            'Noise (dB)': foundZoneFloor.toFixed(1),
+            'Judgment': foundStatus
+        };
+
+        // ============================================================
+        // 4. JUMP PROTECTION & ZONAL NOISE CHECK
+        // ============================================================
+        if (foundStatus === 'OK' && foundStartFreq_Hz !== null) {
+            const currentStartFreq_kHz = foundStartFreq_Hz / 1000;
+            
+            // Find last valid measurement
+            let lastValidFreq_kHz = null;
+            for (let i = measurements.length - 1; i >= 0; i--) {
+                if (measurements[i].status === 'OK') {
+                    lastValidFreq_kHz = measurements[i].freq_kHz;
+                    break;
+                }
+            }
+
+            if (lastValidFreq_kHz !== null) {
+                const jumpDiff = Math.abs(currentStartFreq_kHz - lastValidFreq_kHz);
+                logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
+
+                if (jumpDiff > ANOMALY_JUMP_KHZ) {
+                    // [Anomaly Detected] Check against Zonal Noise Floor
+                    // Need significant margin to justify a large jump
+                    const snrMargin = isCFCallDetected ? 3.0 : 6.0; 
+                    
+                    if (foundPower > (foundZoneFloor + snrMargin)) {
+                        logRow['Judgment'] = 'Jump (Sig > Noise) -> Continue';
+                    } else {
+                        logRow['Judgment'] = 'Jump (Hit Noise) -> STOP';
+                        hitNoiseFloor = true;
+                        
+                        // Fallback to last valid
+                        for (let j = measurements.length - 1; j >= 0; j--) {
+                            if (measurements[j].status === 'OK') {
+                                optimalMeasurement = measurements[j];
+                                optimalThreshold = measurements[j].threshold;
+                                break;
+                            }
+                        }
+                        summaryLog.push(logRow);
+                        break; // HARD STOP
+                    }
+                }
+            }
+        }
+        
+        summaryLog.push(logRow);
+        
+        measurements.push({
+            threshold: testThreshold_dB,
+            freq_kHz: foundStartFreq_Hz !== null ? foundStartFreq_Hz / 1000 : null,
+            binIdx: foundStartBin,
+            frameIdx: foundStartFrame,
+            status: foundStatus
+        });
+
+        if (hitNoiseFloor) break;
+    } // End Threshold Loop
+
+    // ============================================================
+    // 5. Select Final Result
+    // ============================================================
+    // If no hard stop, check for anomalies/best result (similar to HighFreq logic)
+    if (!hitNoiseFloor && measurements.length > 0) {
+        // Simple selection: Last valid measurement
+        // (Since we scan downwards, the last valid one is the most sensitive 
+        // that didn't hit noise or anomaly)
+        for (let j = measurements.length - 1; j >= 0; j--) {
+             if (measurements[j].status === 'OK') {
+                 optimalMeasurement = measurements[j];
+                 optimalThreshold = measurements[j].threshold;
+                 break;
+             }
+        }
+    }
+
+    // Default fallback if everything failed
+    if (!optimalMeasurement) {
+         optimalMeasurement = { 
+             freq_kHz: highFreqBinIdx >=0 ? freqBins[highFreqBinIdx]/1000 : null, 
+             binIdx: highFreqBinIdx, 
+             frameIdx: highFreqFrameIdx 
+         };
+         optimalThreshold = -24;
+    }
+
+    // [Console Log]
+    if (summaryLog.length > 0) {
+        const finalFreq = optimalMeasurement.freq_kHz;
+        const freqText = finalFreq !== null ? ` | Final: ${finalFreq.toFixed(2)} kHz` : '';
+        console.groupCollapsed(`[Start Freq] Optimal Scan (Selected: ${optimalThreshold} dB${freqText})`);
+        console.table(summaryLog);
+        console.groupEnd();
+    }
+
+    return {
+        threshold: optimalThreshold,
+        startFreq_kHz: optimalMeasurement.freq_kHz,
+        startFreqBinIdx: optimalMeasurement.binIdx,
+        startFrameIdx: optimalMeasurement.frameIdx
+    };
+  }
+
+  /**
    * Phase 2: Measure precise
    * Based on Avisoft SASLab Pro, SonoBat, Kaleidoscope Pro, and BatSound standards
    * 
@@ -3427,23 +3659,25 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // STEP 2.5: Calculate START FREQUENCY (Debug Version)
+    // ============================================================
+    // STEP 2.5: Calculate START FREQUENCY (Optimal Boundary Detection)
     // ============================================================
     
-    let validStartFreq_Hz = highFreq_Hz;
-    let validStartBinIdx = highFreqBinIdx;
-    let validStartFrameIdx = highFreqFrameIdx;
+    // Default Fallback
+    call.startFreq_kHz = call.highFreq_kHz;
+    call.startFreqBinIdx = highFreqBinIdx;
+    call.startFreqFrameIdx = highFreqFrameIdx;
+    call.startFreqTime_s = timeFrames[highFreqFrameIdx];
 
     let performStartFreqTracing = true;
     
+    // Logic: Skip if signal is too weak (same as before)
+    // Get power at High Freq point
     let highFreqPointPower_dB = -Infinity;
     if (highFreqFrameIdx >= 0 && highFreqFrameIdx < spectrogram.length && 
         highFreqBinIdx >= 0 && highFreqBinIdx < spectrogram[highFreqFrameIdx].length) {
-      highFreqPointPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
+        highFreqPointPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
     }
-
-    const maxJumpHz = isCFCallDetected ? 1000 : 2500; 
-    const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
     
     if (!isCFCallDetected) {
         if (highFreqPointPower_dB < (peakPower_dB - 30) || highFreqPointPower_dB < -80) {
@@ -3451,138 +3685,56 @@ export class BatCallDetector {
         }
     }
 
-    const traceLog = [];
+    if (performStartFreqTracing) {
+        // [2025 CALL NEW FUNCTION]
+        const result = this.findOptimalStartFrequencyThreshold(
+            spectrogram,
+            timeFrames,
+            freqBins,
+            highFreqFrameIdx,
+            highFreqBinIdx,
+            peakPower_dB,
+            isCFCallDetected
+        );
 
-    if (performStartFreqTracing && highFreqFrameIdx > 0) {
-      
-      const startZoneFloors = this.calculateZonalNoiseFloors(
-        spectrogram,
-        freqBins,
-        0,
-        highFreqFrameIdx
-      );
-      
-      // [DEBUG] 印出目前計算出的分區底噪表，檢查是否有資料
-      // console.log('[StartFreq] Zone Floors Map:', startZoneFloors);
+        if (result.startFreq_kHz !== null) {
+            // Apply Sub-bin Interpolation for higher precision
+            // Note: The optimal finder returns the Bin Center freq. 
+            // We can re-apply the interpolation logic here on the found bin for final polish.
+            let finalStartFreq_Hz = result.startFreq_kHz * 1000;
+            const sBin = result.startFreqBinIdx;
+            const sFrame = result.startFrameIdx;
+            
+            if (sFrame >= 0 && sFrame < spectrogram.length && sBin > 0 && sBin < freqBins.length - 1) {
+                 const fPower = spectrogram[sFrame];
+                 const pC = fPower[sBin];
+                 const pL = fPower[sBin - 1];
+                 const pR = fPower[sBin + 1];
+                 // Use the threshold from result for interpolation base
+                 const thresholdVal = peakPower_dB + result.threshold; 
+                 
+                 // Simple Quadratic or Linear refinement
+                 if (pC > pL && pC > pR && pC > thresholdVal) {
+                      const freqDiff = freqBins[1] - freqBins[0];
+                      const shift = (pR - pL) / (2 * (2 * pC - pR - pL));
+                      finalStartFreq_Hz += shift * freqDiff;
+                 }
+            }
 
-      let currentTrackBinIdx = highFreqBinIdx; 
-      const numBins = freqBins.length;
-      let consecutiveGapFrames = 0;
-      const MAX_GAP_FRAMES = 1;
-
-      traceLog.push({
-         'Frame': highFreqFrameIdx,
-         'Time (s)': timeFrames[highFreqFrameIdx].toFixed(4),
-         'Freq (kHz)': (highFreq_Hz / 1000).toFixed(2),
-         'Power (dB)': highFreqPointPower_dB.toFixed(1),
-         'Floor (dB)': '-',
-         'Status': 'Start Point'
-      });
-
-      for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
-          const framePower = spectrogram[f];
-          const frameTime = timeFrames[f];
-          
-          const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
-          const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
-          
-          let bestBin = -1;
-          let bestPower = -Infinity;
-
-          for (let b = searchMinBin; b <= searchMaxBin; b++) {
-              if (framePower[b] > bestPower) {
-                  bestPower = framePower[b];
-                  bestBin = b;
-              }
-          }
-          
-          let traceFreq_kHz = (bestBin >= 0) ? (freqBins[bestBin] / 1000) : 0;
-          let status = 'Scanning';
-          
-          // [FIXED] Fallback 改為 -999 以區分是否為 Lookup 失敗
-          let zoneFloor_dB = -999; 
-
-          if (bestBin >= 0) {
-              const zoneKey = Math.floor(traceFreq_kHz / 10) * 10;
-              
-              // [DEBUG LOGIC] 確保 Key 轉為字串進行查找 (JS 物件 Key 都是字串)
-              // 並區分 "沒找到 Key" (-999) 和 "值真的是 -100"
-              if (startZoneFloors[zoneKey] !== undefined) {
-                  let rawFloor = startZoneFloors[zoneKey];
-                  // 這裡限制最小底噪，如果覺得 -100 太高，可以放寬到 -120
-                  zoneFloor_dB = Math.max(rawFloor, -120); 
-              } else {
-                  // 如果 console 出現這個 log，代表 Key 計算有誤
-                  // console.warn(`[StartFreq] Missing Key: ${zoneKey} for Freq: ${traceFreq_kHz.toFixed(2)}kHz`);
-                  zoneFloor_dB = -999; 
-              }
-              
-              const snrMargin = isCFCallDetected ? 3.0 : 6.0;
-
-              // 如果 zoneFloor_dB 是 -999 (Lookup 失敗)，這裡條件就不會通過
-              if (zoneFloor_dB > -200 && bestPower > (zoneFloor_dB + snrMargin)) {
-                  currentTrackBinIdx = bestBin;
-                  consecutiveGapFrames = 0; 
-                  
-                  validStartBinIdx = bestBin;
-                  validStartFrameIdx = f;
-                  validStartFreq_Hz = freqBins[bestBin];
-                  
-                  if (bestBin > 0 && bestBin < numBins - 1) {
-                    const prevP = framePower[bestBin - 1];
-                    const nextP = framePower[bestBin + 1];
-                    const localThreshold = zoneFloor_dB + snrMargin; 
-                    
-                    if (bestPower > prevP && bestPower > nextP && bestPower > localThreshold) {
-                         const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
-                         const shift = (nextP - prevP) / (2 * (2 * bestPower - nextP - prevP)); 
-                         validStartFreq_Hz = freqBins[bestBin] + (shift * freqDiff);
-                         traceFreq_kHz = validStartFreq_Hz / 1000;
-                    }
-                  }
-                  
-                  status = 'Linked';
-              } else {
-                  status = 'Below Noise';
-                  consecutiveGapFrames++;
-              }
-          } else {
-              status = 'No Bin';
-              consecutiveGapFrames++;
-          }
-          
-          traceLog.push({
-              'Frame': f,
-              'Time (s)': frameTime.toFixed(4),
-              'Freq (kHz)': traceFreq_kHz.toFixed(2),
-              'Power (dB)': bestPower.toFixed(1),
-              'Floor (dB)': zoneFloor_dB.toFixed(1), // 查看 Log 是否顯示 -999
-              'Status': status
-          });
-
-          if (consecutiveGapFrames > MAX_GAP_FRAMES) {
-              break;
-          }
-      }
+            call.startFreq_kHz = finalStartFreq_Hz / 1000;
+            call.startFreqBinIdx = result.startFreqBinIdx;
+            call.startFreqFrameIdx = result.startFrameIdx;
+            
+            // 2025: Save the threshold used for Start Frequency
+            call.startFreqThreshold_dB_used = result.threshold; 
+        }
     }
 
-    const startFreq_kHz = validStartFreq_Hz / 1000;
-    call.startFreq_kHz = startFreq_kHz;
-    call.startFreqBinIdx = validStartBinIdx;
-    call.startFreqFrameIdx = validStartFrameIdx;
-    
-    if (validStartFrameIdx < timeFrames.length) {
-        call.startFreqTime_s = timeFrames[validStartFrameIdx];
+    // Calculate Start Time (based on the optimal frame found)
+    if (call.startFreqFrameIdx < timeFrames.length) {
+        call.startFreqTime_s = timeFrames[call.startFreqFrameIdx];
         const firstFrameTime_s = timeFrames[0];
         call.startFreq_ms = (call.startFreqTime_s - firstFrameTime_s) * 1000;
-    }
-
-    if (traceLog.length > 0) {
-        const finalFreq = call.startFreq_kHz;
-        const freqText = finalFreq !== null ? ` | Final: ${finalFreq.toFixed(2)} kHz @ ${(call.startFreqTime_s).toFixed(4)}s` : '';
-        console.groupCollapsed(`[Start Freq] Trace Summary (Zonal Noise Based${freqText})`);
-        console.table(traceLog);
-        console.groupEnd();
     }
 
     
