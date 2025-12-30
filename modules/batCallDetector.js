@@ -732,8 +732,7 @@ export class BatCallDetector {
               const endSample = Math.floor(timeFrames[safeEndFrame] * sampleRate);
               
               // 2. 執行時域精修 (使用 segmentAudio)
-              // 注意：this.refineEndUsingOscillogram 必須已經定義在 class 內
-              const refinedEndSample = this.refineEndUsingOscillogram(segmentAudio, sampleRate, startSample, endSample);
+              const refinedEndSample = this.refineBoundsUsingOscillogram(segmentAudio, sampleRate, startSample, endSample);
               
               // 3. 檢查是否有變化
               if (refinedEndSample < endSample) {
