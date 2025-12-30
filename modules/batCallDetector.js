@@ -2040,6 +2040,7 @@ export class BatCallDetector {
       
       // ============================================================
       // 4. JUMP PROTECTION (> 1.5 kHz) with DYNAMIC ZONAL NOISE FLOOR CHECK
+      // [2025 MODIFIED] Added CF-Specific Logic (> 1.0 kHz Break)
       // ============================================================
       if (foundBin && highFreq_Hz !== null) {
         const currentHighFreq_kHz = highFreq_Hz / 1000;
@@ -2057,11 +2058,35 @@ export class BatCallDetector {
         if (lastValidFreq_kHz !== null) {
           const jumpDiff = Math.abs(currentHighFreq_kHz - lastValidFreq_kHz);
           
-          // [REMOVED in 2025] logRow['Ref (kHz)'] = lastValidFreq_kHz.toFixed(2);  // Reference column removed
           logRow['Diff (kHz)'] = jumpDiff.toFixed(2);
           logRow['Signal (dB)'] = currentHighFreqPower_dB.toFixed(2);
 
-          if (jumpDiff > 1.5) {
+          // ============================================================
+          // [2025 NEW] CF Call Specific Protection
+          // 若已確認為 CF Stable Pattern，且頻率跳動 > 1.0 kHz -> 強制停止
+          // ============================================================
+          if (isCFStablePattern && jumpDiff > 1.0) {
+              logRow['Judgment'] = 'CF STOP (>1.0kHz)';
+              
+              hitNoiseFloor = true;
+              
+              // Revert to last valid measurement
+              for (let j = measurements.length - 1; j >= 0; j--) {
+                if (measurements[j].foundBin && measurements[j].highFreq_kHz !== null) {
+                  optimalMeasurement = measurements[j];
+                  optimalThreshold = measurements[j].threshold;
+                  break;
+                }
+              }
+              summaryLog.push(logRow); 
+              break; // HARD STOP for CF Call
+          }
+
+          // ============================================================
+          // Standard Protection (> 1.5 kHz) check noise floor
+          // 只有在非 CF 模式，或差異未觸發 CF Break 時執行
+          // ============================================================
+          else if (jumpDiff > 1.5) {
             // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current highFreqFrameIdx
             const currentZoneFloors = this.calculateZonalNoiseFloors(
               spectrogram,
