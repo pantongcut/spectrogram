@@ -1541,7 +1541,6 @@ export class BatCallDetector {
     // 2. 參數設定
     const windowSizeMs = 0.2; 
     const windowSize = Math.floor(sampleRate * (windowSizeMs / 1000));
-    // 建議：如果是為了測試，可以先將閾值調敏感一點，例如 1.0dB，確認機制有運作
     const rebounceThreshold_dB = 1.5; 
     const sustainedDuration_ms = 0.8; 
     const sustainedSamples = Math.floor(sampleRate * (sustainedDuration_ms / 1000));
@@ -1571,10 +1570,6 @@ export class BatCallDetector {
 
     if (envelope.length === 0) return endSample;
 
-    if (DEBUG) {
-        console.log(`[Oscillogram] Range: ${safeStart}-${safeEnd} | Peak: ${peakRms.toFixed(1)}dB @ idx ${peakIndex} | Total env points: ${envelope.length}`);
-    }
-
     // 4. 掃描邏輯
     let minDbSoFar = peakRms;
     let minDbIndex = peakIndex;
@@ -1598,6 +1593,20 @@ export class BatCallDetector {
       // C. 反彈 (Rebounce) 檢查
       const diff = currentDb - minDbSoFar;
       if (diff > rebounceThreshold_dB) {
+        
+        // ============================================================
+        // 強信號保護機制
+        // 如果最低點 (Low Point) 依然很強 (> -25dB)，視為叫聲本體
+        // 忽略此處的 "Rebounce" 判定，防止腰斬具有振幅調變的叫聲
+        // ============================================================
+        if (minDbSoFar > -25) {
+            if (DEBUG) {
+              console.log(`[Oscillogram] SKIP Rebounce: Low point ${minDbSoFar.toFixed(1)}dB > -25dB (Signal Body).`);
+            }
+            continue;
+        }
+        // ============================================================
+
         // 檢查持續性
         let isSustained = true;
         let lookAheadLimit = Math.min(envelope.length, i + Math.ceil(sustainedSamples / hopSize));
