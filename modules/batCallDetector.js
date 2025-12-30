@@ -724,42 +724,75 @@ export class BatCallDetector {
           let safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
 
           // ============================================================
-          // Oscillogram Refinement
+          // [2025 NEW] Oscillogram Refinement Step (Log Enhanced)
           // ============================================================
           try {
-              // 1. 計算 ROI 內的 Sample Index (相對位置)
-              const startSample = Math.floor(timeFrames[safeStartFrame] * sampleRate);
-              const endSample = Math.floor(timeFrames[safeEndFrame] * sampleRate);
+              // 1. 計算目前的 Sample 範圍
+             const startSample = Math.floor(timeFrames[safeStartFrame] * sampleRate);
+             const endSample = Math.floor(timeFrames[safeEndFrame] * sampleRate);
+
+              // 2. 執行雙向精修 (傳入 audioData)
+             const refinedBounds = this.refineBoundsUsingOscillogram(audioData, sampleRate, startSample, endSample);
+
+              // ------------------------------------------------------------
+              // [LOGIC] 處理 Start Trimming & Logging
+              // ------------------------------------------------------------
+              let startLogMsg = '[Segment Start] No trim';
+              let startLogStyle = 'color: #bdc3c7'; // 灰色 (無動作)
+          
+              if (refinedBounds.startSample > startSample) {
+                  const cutMs = ((refinedBounds.startSample - startSample) / sampleRate) * 1000;
+                  const refinedStartTime = refinedBounds.startSample / sampleRate;
               
-              // 2. 執行時域精修 (使用 segmentAudio)
-              const refinedEndSample = this.refineBoundsUsingOscillogram(segmentAudio, sampleRate, startSample, endSample);
+                  // 計算 Frame 的變化
+                  let newStartFrame = safeStartFrame;
+                  while (newStartFrame < safeEndFrame && timeFrames[newStartFrame] < refinedStartTime) {
+                      newStartFrame++;
+                  }
+                  // 退回一格 (Floor logic)
+                  newStartFrame = Math.max(safeStartFrame, newStartFrame - 1);
+                  const frameDiff = newStartFrame - safeStartFrame;
               
-              // 3. 檢查是否有變化
-              if (refinedEndSample < endSample) {
-                  const cutSamples = endSample - refinedEndSample;
-                  const cutMs = (cutSamples / sampleRate) * 1000;
-                  
-                  // 轉換回 Frame Index
-                  const refinedEndTime = refinedEndSample / sampleRate;
-                  
+                  // 準備 Log 訊息
+                  startLogMsg = `[Segment Start] Trim ${cutMs.toFixed(2)} ms (${frameDiff} Frames)`;
+                  startLogStyle = 'color: #00cec9; font-weight: bold'; // 青色 (有動作)
+              
+                  // 應用更新
+                  safeStartFrame = Math.max(0, newStartFrame);
+              }
+              console.log(`%c${startLogMsg}`, startLogStyle);
+
+              // ------------------------------------------------------------
+              // [LOGIC] 處理 End Trimming & Logging
+              // ------------------------------------------------------------
+              let endLogMsg = '[Segment End] No trim';
+              let endLogStyle = 'color: #bdc3c7'; // 灰色 (無動作)
+
+              if (refinedBounds.endSample < endSample) {
+                  const cutMs = ((endSample - refinedBounds.endSample) / sampleRate) * 1000;
+                  const refinedEndTime = refinedBounds.endSample / sampleRate;
+              
+                  // 計算 Frame 的變化
                   let newEndFrame = safeEndFrame;
                   while (newEndFrame > safeStartFrame && timeFrames[newEndFrame] > refinedEndTime) {
-                      newEndFrame--;
+                      ewEndFrame--;
                   }
-                  
                   const frameDiff = safeEndFrame - (newEndFrame + 1);
-                  
-                  // [DEBUG LOG] 這裡一定會印出來
-                  console.log(`%c[AutoDetect Refine] Cut ${cutMs.toFixed(2)}ms`, 'color: #e67e22; font-weight: bold');
-                  
-                  // 更新 safeEndFrame
+
+                  // 準備 Log 訊息
+                  endLogMsg = `[Segment End] Trim ${cutMs.toFixed(2)} ms (${frameDiff} Frames)`;
+                  endLogStyle = 'color: #e67e22; font-weight: bold'; // 橙色 (有動作)
+
+                  // 應用更新
                   safeEndFrame = Math.min(powerMatrix.length - 1, newEndFrame + 1);
               }
+              console.log(`%c${endLogMsg}`, endLogStyle);
+          
           } catch (e) {
               console.warn('[AutoDetect] Oscillogram refinement failed:', e);
           }
+          
           // ============================================================
-
           // Setup Call Object
           call.spectrogram = powerMatrix.slice(safeStartFrame, safeEndFrame + 1);
           call.timeFrames = timeFrames.slice(safeStartFrame, safeEndFrame + 2); // +2 for safety
@@ -1551,7 +1584,7 @@ export class BatCallDetector {
     
     // Start 判定參數
     const startThresholdRelative_dB = -40; // 起點判定：Peak - 40dB
-    const absoluteNoiseFloorDb = -85;      // 絕對底噪 (視錄音環境而定)
+    const absoluteNoiseFloorDb = -60;      // 絕對底噪 (視錄音環境而定)
     const startPaddingMs = 1;            // [重要] 起點保護區：保留起點前 1ms，避免切掉 Attack 瞬間
     const startPaddingSamples = Math.floor(sampleRate * (startPaddingMs / 1000));
 
