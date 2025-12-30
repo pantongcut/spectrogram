@@ -723,6 +723,45 @@ export class BatCallDetector {
           const safeStartFrame = Math.max(0, segment.startFrame - paddingFrames);
           const safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
 
+          // ============================================================
+          // [FIX] 這裡也要加入 Oscillogram Refinement 邏輯！
+          // 注意：這裡傳入的是 segmentAudio (ROI 的音訊片段)
+          // ============================================================
+          try {
+              // 1. 計算 ROI 內的 Sample Index (相對位置)
+              const startSample = Math.floor(timeFrames[safeStartFrame] * sampleRate);
+              const endSample = Math.floor(timeFrames[safeEndFrame] * sampleRate);
+              
+              // 2. 執行時域精修 (使用 segmentAudio)
+              // 注意：this.refineEndUsingOscillogram 必須已經定義在 class 內
+              const refinedEndSample = this.refineEndUsingOscillogram(segmentAudio, sampleRate, startSample, endSample);
+              
+              // 3. 檢查是否有變化
+              if (refinedEndSample < endSample) {
+                  const cutSamples = endSample - refinedEndSample;
+                  const cutMs = (cutSamples / sampleRate) * 1000;
+                  
+                  // 轉換回 Frame Index
+                  const refinedEndTime = refinedEndSample / sampleRate;
+                  
+                  let newEndFrame = safeEndFrame;
+                  while (newEndFrame > safeStartFrame && timeFrames[newEndFrame] > refinedEndTime) {
+                      newEndFrame--;
+                  }
+                  
+                  const frameDiff = safeEndFrame - (newEndFrame + 1);
+                  
+                  // [DEBUG LOG] 這裡一定會印出來
+                  console.log(`%c[AutoDetect Refine] Cut ${cutMs.toFixed(2)}ms`, 'color: #e67e22; font-weight: bold');
+                  
+                  // 更新 safeEndFrame
+                  safeEndFrame = Math.min(powerMatrix.length - 1, newEndFrame + 1);
+              }
+          } catch (e) {
+              console.warn('[AutoDetect] Oscillogram refinement failed:', e);
+          }
+          // ============================================================
+
           // Setup Call Object
           call.spectrogram = powerMatrix.slice(safeStartFrame, safeEndFrame + 1);
           call.timeFrames = timeFrames.slice(safeStartFrame, safeEndFrame + 2); // +2 for safety
