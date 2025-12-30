@@ -3448,11 +3448,13 @@ export class BatCallDetector {
     // [Logic Flow]
     // Priority 1: Check if it is a CF Call (Detected in Auto-Threshold Loop)
     // CF Call: 頻率穩定，跳動容忍度低
-    const maxJumpHz = isCFStablePattern ? 1000 : 2500; 
+    // [FIX] 修正變數名稱: 使用 isCFCallDetected 而非 isCFStablePattern
+    const maxJumpHz = isCFCallDetected ? 1000 : 2500; 
     const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
     
     // Check if signal is too weak to trace
-    if (!isCFStablePattern) {
+    // [FIX] 同樣修正此處的變數名稱
+    if (!isCFCallDetected) {
         if (highFreqPointPower_dB < (peakPower_dB - 30) || highFreqPointPower_dB < -80) {
             performStartFreqTracing = false;
         }
@@ -3465,7 +3467,6 @@ export class BatCallDetector {
     if (performStartFreqTracing && highFreqFrameIdx > 0) {
       
       // A. Calculate Zonal Noise Floors for the Start Region (Frame 0 to HighFreqFrame)
-      // 這讓我們知道在不同頻段，什麼樣的能量才算"信號"
       const startZoneFloors = this.calculateZonalNoiseFloors(
         spectrogram,
         freqBins,
@@ -3489,13 +3490,11 @@ export class BatCallDetector {
       });
 
       // Backward Scan: Trace from High Freq Frame down to Frame 0
-      // 邏輯：從 High Freq (通常能量最強或較後端) 往回找，直到信號淹沒在底噪中
       for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
           const framePower = spectrogram[f];
           const frameTime = timeFrames[f];
           
           // 1. Narrowing Searching Area (Time & Frequency)
-          // 只在上一幀頻率的附近 (maxJumpBins) 尋找，防止跳到遠處的昆蟲噪音
           const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
           const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
           
@@ -3517,15 +3516,13 @@ export class BatCallDetector {
           // 2. Zonal Noise Floor Mechanism
           if (bestBin >= 0) {
               const zoneKey = Math.floor(traceFreq_kHz / 10) * 10;
-              // 獲取該頻段的底噪，並限制最小值以防太敏感
               let rawFloor = startZoneFloors[zoneKey] !== undefined ? startZoneFloors[zoneKey] : -100;
               zoneFloor_dB = Math.max(rawFloor, -115);
               
-              // 設定 SNR Margin (CF 可以低一點，FM 需要高一點)
-              const snrMargin = isCFStablePattern ? 3.0 : 6.0;
+              // [FIX] 修正變數名稱: 設定 SNR Margin (CF 可以低一點，FM 需要高一點)
+              const snrMargin = isCFCallDetected ? 3.0 : 6.0;
 
               // 3. Signal vs Noise Decision
-              // 如果能量大於分區底噪 + Margin，視為有效信號
               if (bestPower > (zoneFloor_dB + snrMargin)) {
                   // Connection found! Update tracking
                   currentTrackBinIdx = bestBin;
@@ -3536,16 +3533,15 @@ export class BatCallDetector {
                   validStartFrameIdx = f;
                   validStartFreq_Hz = freqBins[bestBin];
                   
-                  // Linear Interpolation for higher precision
+                  // Linear Interpolation
                   if (bestBin > 0 && bestBin < numBins - 1) {
                     const prevP = framePower[bestBin - 1];
                     const nextP = framePower[bestBin + 1];
-                    const localThreshold = zoneFloor_dB + snrMargin; // Use local noise as threshold base
+                    const localThreshold = zoneFloor_dB + snrMargin; 
                     
                     if (bestPower > prevP && bestPower > nextP && bestPower > localThreshold) {
-                         // Simple weighted interpolation around peak
                          const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
-                         const shift = (nextP - prevP) / (2 * (2 * bestPower - nextP - prevP)); // Quadratic interpolation peak
+                         const shift = (nextP - prevP) / (2 * (2 * bestPower - nextP - prevP)); 
                          validStartFreq_Hz = freqBins[bestBin] + (shift * freqDiff);
                          traceFreq_kHz = validStartFreq_Hz / 1000;
                     }
@@ -3553,7 +3549,6 @@ export class BatCallDetector {
                   
                   status = 'Linked';
               } else {
-                  // Signal Lost (Below Noise Floor)
                   status = 'Below Noise';
                   consecutiveGapFrames++;
               }
@@ -3562,7 +3557,6 @@ export class BatCallDetector {
               consecutiveGapFrames++;
           }
           
-          // Add row to log
           traceLog.push({
               'Frame': f,
               'Time (s)': frameTime.toFixed(4),
@@ -3572,8 +3566,6 @@ export class BatCallDetector {
               'Status': status
           });
 
-          // 4. Hard Stop Logic
-          // 如果連續丟失信號超過限制，停止追蹤
           if (consecutiveGapFrames > MAX_GAP_FRAMES) {
               break;
           }
@@ -3592,12 +3584,9 @@ export class BatCallDetector {
         call.startFreq_ms = (call.startFreqTime_s - firstFrameTime_s) * 1000;
     }
 
-    // [2025 NEW] Output the Summary Table
     if (traceLog.length > 0) {
-        // 獲取最終選定的頻率值用於顯示
         const finalFreq = call.startFreq_kHz;
         const freqText = finalFreq !== null ? ` | Final: ${finalFreq.toFixed(2)} kHz @ ${(call.startFreqTime_s).toFixed(4)}s` : '';
-        
         console.groupCollapsed(`[Start Freq] Trace Summary (Zonal Noise Based${freqText})`);
         console.table(traceLog);
         console.groupEnd();
