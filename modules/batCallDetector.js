@@ -720,8 +720,8 @@ export class BatCallDetector {
           const timePerFrame = timeFrames[1] - timeFrames[0];
           const paddingFrames = Math.ceil((pad_ms / 1000) / timePerFrame);
           
-          const safeStartFrame = Math.max(0, segment.startFrame - paddingFrames);
-          const safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
+          let safeStartFrame = Math.max(0, segment.startFrame - paddingFrames);
+          let safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
 
           // ============================================================
           // [FIX] 這裡也要加入 Oscillogram Refinement 邏輯！
