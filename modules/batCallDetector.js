@@ -1542,7 +1542,7 @@ export class BatCallDetector {
     const windowSizeMs = 0.2; 
     const windowSize = Math.floor(sampleRate * (windowSizeMs / 1000));
     // 建議：如果是為了測試，可以先將閾值調敏感一點，例如 1.0dB，確認機制有運作
-    const rebounceThreshold_dB = 2.0; 
+    const rebounceThreshold_dB = 1.5; 
     const sustainedDuration_ms = 0.8; 
     const sustainedSamples = Math.floor(sampleRate * (sustainedDuration_ms / 1000));
 
