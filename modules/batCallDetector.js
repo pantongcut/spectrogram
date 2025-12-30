@@ -1037,8 +1037,41 @@ export class BatCallDetector {
       const paddingFrames = Math.ceil((padding_ms / 1000) / timePerFrame);
       
       // 計算擴張後的安全邊界
-      const safeStartFrame = Math.max(0, segment.startFrame - paddingFrames);
-      const safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
+      let safeStartFrame = Math.max(0, segment.startFrame - paddingFrames);
+      let safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
+
+      // ============================================================
+      // [2025 NEW] Oscillogram Refinement Step
+      // 在取出 Spectrogram 之前，先利用時域波形精修 safeEndFrame
+      // ============================================================
+      try {
+        // 1. 將 Frame 轉換為 Sample Index
+        // 注意：timeFrames[i] 是 Frame 的中心時間
+        const startSample = Math.floor(timeFrames[safeStartFrame] * sampleRate);
+        const endSample = Math.floor(timeFrames[safeEndFrame] * sampleRate);
+        
+        // 2. 執行時域精修
+        const refinedEndSample = this.refineEndUsingOscillogram(audioData, sampleRate, startSample, endSample);
+        
+        // 3. 如果結尾被裁剪了，更新 safeEndFrame
+        if (refinedEndSample < endSample) {
+          // 將 Sample 轉回 Frame Index
+          const refinedEndTime = refinedEndSample / sampleRate;
+          
+          // 簡單搜尋法找最近的 Frame (因為 timeFrames 是有序的)
+          // 從後往前的快速搜尋
+          let newEndFrame = safeEndFrame;
+          while (newEndFrame > safeStartFrame && timeFrames[newEndFrame] > refinedEndTime) {
+            newEndFrame--;
+          }
+          
+          // 更新 safeEndFrame (加 1 是為了保險包含邊界)
+          safeEndFrame = Math.min(powerMatrix.length - 1, newEndFrame + 1);
+        }
+      } catch (e) {
+        console.warn('[BatCallDetector] Oscillogram refinement failed:', e);
+      }
+      // ============================================================
       
       // 設定時間與切片
       call.startTime_s = timeFrames[safeStartFrame];
@@ -1434,6 +1467,111 @@ export class BatCallDetector {
     }
     
     return smoothed;
+  }
+
+  /**
+   * [2025 NEW] 利用 Oscillogram (時域波形) 精修叫聲結尾
+   * 目的：防止 Spectrogram 拖尾、去除回聲 (Rebounce)、精準切割
+   * 邏輯：蝙蝠叫聲尾端能量應為單調衰減。若偵測到能量在衰減後顯著回升，視為回聲並截斷。
+   * 
+   * @param {Float32Array} audioData - 原始音訊數據
+   * @param {number} sampleRate - 取樣率
+   * @param {number} startSample - 初步判定 (Spectrogram) 的開始點
+   * @param {number} endSample - 初步判定 (Spectrogram) 的結束點 (含 Padding)
+   * @returns {number} 精修後的結束點 Sample Index
+   */
+  refineEndUsingOscillogram(audioData, sampleRate, startSample, endSample) {
+    // 1. 安全邊界檢查
+    const safeStart = Math.max(0, startSample);
+    const safeEnd = Math.min(audioData.length, endSample);
+    if (safeEnd - safeStart < sampleRate * 0.0005) return endSample; // 太短不處理 (<0.5ms)
+
+    // 2. 參數設定
+    const windowSizeMs = 0.25; // RMS 窗口大小 (0.25ms 對於高頻信號足夠平滑且反應快)
+    const windowSize = Math.floor(sampleRate * (windowSizeMs / 1000));
+    const rebounceThreshold_dB = 2.0; // 允許的能量波動 (dB)。超過此值視為反彈
+    const sustainedDuration_ms = 0.15; // 反彈必須持續多久才算數 (避免單點噪聲)
+    const sustainedSamples = Math.floor(sampleRate * (sustainedDuration_ms / 1000));
+
+    // 3. 計算局部 RMS Envelope & 尋找峰值
+    // 我們不需要計算整個 Segment 的 envelope，只需從 Peak 開始往後找
+    // 但為了找 Peak，還是先掃一遍比較穩
+    let peakRms = -Infinity;
+    let peakIndex = 0;
+    
+    // 為了效能，我們用跳步計算 RMS (Hop size = window size / 2)
+    const hopSize = Math.floor(windowSize / 2);
+    const envelope = []; // 存儲: { sampleIdx, db }
+    
+    for (let i = safeStart; i < safeEnd - windowSize; i += hopSize) {
+      let sumSq = 0;
+      for (let j = 0; j < windowSize; j++) {
+        const val = audioData[i + j];
+        sumSq += val * val;
+      }
+      const rms = Math.sqrt(sumSq / windowSize);
+      const db = 20 * Math.log10(rms + 1e-9); // 防止 log(0)
+      
+      envelope.push({ sampleIdx: i + windowSize / 2, db: db });
+      
+      if (db > peakRms) {
+        peakRms = db;
+        peakIndex = envelope.length - 1;
+      }
+    }
+
+    if (envelope.length === 0) return endSample;
+
+    // 4. 從峰值往後掃描，尋找「能量反彈」或「落入底噪」
+    // 策略：記錄衰減過程中的最低點。如果新值 > 最低點 + 閾值，且持續一段時間 -> 截斷
+    let minDbSoFar = peakRms;
+    let minDbIndex = peakIndex;
+    
+    // 簡單的底噪估計：取這段聲音最後 10% 的平均能量 (假設最後是靜音/底噪)
+    // 或者直接設定一個絕對閾值 (例如 -60dB)
+    const absoluteNoiseFloorDb = -60; 
+
+    for (let i = peakIndex + 1; i < envelope.length; i++) {
+      const currentDb = envelope[i].db;
+      const currentSampleIdx = envelope[i].sampleIdx;
+
+      // A. 更新最低能量點 (Monotonic Decay Tracking)
+      if (currentDb < minDbSoFar) {
+        minDbSoFar = currentDb;
+        minDbIndex = i;
+      }
+
+      // B. 檢查是否落入絕對底噪 (Noise Floor Cutoff)
+      // 如果能量已經非常低，且趨勢平緩，可以直接結束，避免拖泥帶水
+      if (minDbSoFar < absoluteNoiseFloorDb && currentDb < absoluteNoiseFloorDb + 2) {
+        // 已經進入底噪區，可以在此截斷
+        return envelope[minDbIndex].sampleIdx;
+      }
+
+      // C. 檢查反彈 (Rebounce Detection)
+      // 條件：當前能量 > 歷史最低 + 閾值
+      if (currentDb > minDbSoFar + rebounceThreshold_dB) {
+        // 檢查這種反彈是否是「持續性」的 (Look-ahead)
+        let isSustained = true;
+        let lookAheadLimit = Math.min(envelope.length, i + Math.ceil(sustainedSamples / hopSize));
+        
+        for (let k = i + 1; k < lookAheadLimit; k++) {
+          if (envelope[k].db < minDbSoFar + rebounceThreshold_dB) {
+            isSustained = false; // 只是短暫突波，不算反彈
+            break;
+          }
+        }
+
+        if (isSustained) {
+          // 確認為反彈/回聲！
+          // 返回反彈發生前的那個最低點 (谷底)
+          return envelope[minDbIndex].sampleIdx;
+        }
+      }
+    }
+
+    // 如果沒有檢測到反彈，返回原本的結束點
+    return endSample;
   }
 
   /**
