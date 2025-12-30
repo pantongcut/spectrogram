@@ -1067,72 +1067,71 @@ export class BatCallDetector {
 
       // ============================================================
       // [保留此邏輯] 加入 Padding 以保留叫聲微弱的頭尾
-      // 這是解決 Start Freq = High Freq 的關鍵！
       // ============================================================
-      const padding_ms = 3; // 你可以調整這裡
+      const padding_ms = 3; 
       const timePerFrame = timeFrames[1] - timeFrames[0];
       const paddingFrames = Math.ceil((padding_ms / 1000) / timePerFrame);
       
       // 計算擴張後的安全邊界
       let safeStartFrame = Math.max(0, segment.startFrame - paddingFrames);
-          let safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
+      let safeEndFrame = Math.min(powerMatrix.length - 1, segment.endFrame + paddingFrames);
 
-          // ============================================================
-          // [2025 NEW] Oscillogram Refinement Step (Bi-directional)
-          // ============================================================
-          try {
-              // 1. 計算目前的 Sample 範圍
-              const startSample = Math.floor(timeFrames[safeStartFrame] * sampleRate);
-              const endSample = Math.floor(timeFrames[safeEndFrame] * sampleRate);
+      // ============================================================
+      // [2025 NEW] Oscillogram Refinement Step (Bi-directional)
+      // ============================================================
+      try {
+          // 1. 計算目前的 Sample 範圍
+          const startSample = Math.floor(timeFrames[safeStartFrame] * sampleRate);
+          const endSample = Math.floor(timeFrames[safeEndFrame] * sampleRate);
+          
+          // 2. 執行雙向精修 (Start & End)
+          // [FIX] 這裡修正為使用 audioData (detectCalls 的輸入參數)
+          const refinedBounds = this.refineBoundsUsingOscillogram(audioData, sampleRate, startSample, endSample);
+          
+          const refinedStartSample = refinedBounds.startSample;
+          const refinedEndSample = refinedBounds.endSample;
+          
+          // 3. 處理 Start 變化
+          if (refinedStartSample > startSample) {
+              const cutMs = ((refinedStartSample - startSample) / sampleRate) * 1000;
+              const refinedStartTime = refinedStartSample / sampleRate;
               
-              // 2. 執行雙向精修 (Start & End)
-              const refinedBounds = this.refineBoundsUsingOscillogram(segmentAudio, sampleRate, startSample, endSample);
-              
-              const refinedStartSample = refinedBounds.startSample;
-              const refinedEndSample = refinedBounds.endSample;
-              
-              // 3. 處理 Start 變化
-              if (refinedStartSample > startSample) {
-                  const cutMs = ((refinedStartSample - startSample) / sampleRate) * 1000;
-                  const refinedStartTime = refinedStartSample / sampleRate;
-                  
-                  // 轉換回 Frame (向前找最近的)
-                  let newStartFrame = safeStartFrame;
-                  while (newStartFrame < safeEndFrame && timeFrames[newStartFrame] < refinedStartTime) {
-                      newStartFrame++;
-                  }
-                  // 往回退一格以策安全 (Floor)
-                  newStartFrame = Math.max(safeStartFrame, newStartFrame - 1);
-                  
-                  console.log(`%c[Start Refine] Trimmed start by ${cutMs.toFixed(2)}ms`, 'color: #00cec9; font-weight: bold');
-                  safeStartFrame = Math.max(0, newStartFrame);
+              // 轉換回 Frame (向前找最近的)
+              let newStartFrame = safeStartFrame;
+              while (newStartFrame < safeEndFrame && timeFrames[newStartFrame] < refinedStartTime) {
+                  newStartFrame++;
               }
-
-              // 4. 處理 End 變化
-              if (refinedEndSample < endSample) {
-                  const cutMs = ((endSample - refinedEndSample) / sampleRate) * 1000;
-                  const refinedEndTime = refinedEndSample / sampleRate;
-                  
-                  // 轉換回 Frame (向後找最近的)
-                  let newEndFrame = safeEndFrame;
-                  while (newEndFrame > safeStartFrame && timeFrames[newEndFrame] > refinedEndTime) {
-                      newEndFrame--;
-                  }
-                  
-                  console.log(`%c[End Refine] Trimmed end by ${cutMs.toFixed(2)}ms`, 'color: #e67e22; font-weight: bold');
-                  safeEndFrame = Math.min(powerMatrix.length - 1, newEndFrame + 1);
-              }
+              // 往回退一格以策安全 (Floor)
+              newStartFrame = Math.max(safeStartFrame, newStartFrame - 1);
               
-          } catch (e) {
-              console.warn('[AutoDetect] Oscillogram refinement failed:', e);
+              console.log(`%c[Start Refine] Trimmed start by ${cutMs.toFixed(2)}ms`, 'color: #00cec9; font-weight: bold');
+              safeStartFrame = Math.max(0, newStartFrame);
           }
+
+          // 4. 處理 End 變化
+          if (refinedEndSample < endSample) {
+              const cutMs = ((endSample - refinedEndSample) / sampleRate) * 1000;
+              const refinedEndTime = refinedEndSample / sampleRate;
+              
+              // 轉換回 Frame (向後找最近的)
+              let newEndFrame = safeEndFrame;
+              while (newEndFrame > safeStartFrame && timeFrames[newEndFrame] > refinedEndTime) {
+                  newEndFrame--;
+              }
+              
+              console.log(`%c[End Refine] Trimmed end by ${cutMs.toFixed(2)}ms`, 'color: #e67e22; font-weight: bold');
+              safeEndFrame = Math.min(powerMatrix.length - 1, newEndFrame + 1);
+          }
+          
+      } catch (e) {
+          console.warn('[AutoDetect] Oscillogram refinement failed:', e);
+      }
       // ============================================================
       
       // 設定時間與切片
       call.startTime_s = timeFrames[safeStartFrame];
       call.endTime_s = timeFrames[Math.min(safeEndFrame + 1, timeFrames.length - 1)];
       
-      // [關鍵] 切出的 spectrogram[0] 會是安靜的 padding 區
       call.spectrogram = powerMatrix.slice(safeStartFrame, safeEndFrame + 1);
       call.timeFrames = timeFrames.slice(safeStartFrame, safeEndFrame + 2);
       call.freqBins = freqBins;
@@ -1186,13 +1185,11 @@ export class BatCallDetector {
       }
       
       try {
-        // [修正這裡！] 確保使用 call.spectrogram 而不是 powerMatrix
-        // 這樣 SNR 計算才會基於正確的切片範圍
         const snrResult = this.calculateRMSbasedSNR(
           call,
-          call.spectrogram, // <--- 從 powerMatrix 改為 call.spectrogram
+          call.spectrogram, 
           freqBins,
-          call.endFrameIdx_forLowFreq, // 確保參數對應 calculateRMSbasedSNR 的新定義
+          call.endFrameIdx_forLowFreq, 
           flowKHz,  
           fhighKHz, 
           options.noiseSpectrogram
