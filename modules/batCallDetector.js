@@ -3520,7 +3520,7 @@ export class BatCallDetector {
               zoneFloor_dB = Math.max(rawFloor, -115);
               
               // [FIX] 修正變數名稱: 設定 SNR Margin (CF 可以低一點，FM 需要高一點)
-              const snrMargin = isCFCallDetected ? 3.0 : 6.0;
+              const snrMargin = isCFCallDetected ? 1.0 : 3.0;
 
               // 3. Signal vs Noise Decision
               if (bestPower > (zoneFloor_dB + snrMargin)) {
