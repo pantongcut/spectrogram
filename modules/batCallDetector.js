@@ -1505,7 +1505,7 @@ export class BatCallDetector {
     const windowSize = Math.floor(sampleRate * (windowSizeMs / 1000));
     // 建議：如果是為了測試，可以先將閾值調敏感一點，例如 1.0dB，確認機制有運作
     const rebounceThreshold_dB = 2.0; 
-    const sustainedDuration_ms = 0.15; 
+    const sustainedDuration_ms = 1; 
     const sustainedSamples = Math.floor(sampleRate * (sustainedDuration_ms / 1000));
 
     // 3. 計算 RMS Envelope
