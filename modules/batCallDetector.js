@@ -3427,59 +3427,49 @@ export class BatCallDetector {
     }
     
     // ============================================================
-    // STEP 2.5: Calculate START FREQUENCY (Optimized 2025 with Zonal Noise & Narrowing)
+    // STEP 2.5: Calculate START FREQUENCY (Debug Version)
     // ============================================================
     
-    // 1. Initialize result variables with High Frequency (Default fallback)
     let validStartFreq_Hz = highFreq_Hz;
     let validStartBinIdx = highFreqBinIdx;
     let validStartFrameIdx = highFreqFrameIdx;
 
-    // 2. Determine Logic & Parameters
     let performStartFreqTracing = true;
     
-    // Get power at the High Frequency point for validation
     let highFreqPointPower_dB = -Infinity;
     if (highFreqFrameIdx >= 0 && highFreqFrameIdx < spectrogram.length && 
         highFreqBinIdx >= 0 && highFreqBinIdx < spectrogram[highFreqFrameIdx].length) {
       highFreqPointPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
     }
 
-    // [Logic Flow]
-    // Priority 1: Check if it is a CF Call (Detected in Auto-Threshold Loop)
-    // CF Call: 頻率穩定，跳動容忍度低
-    // [FIX] 修正變數名稱: 使用 isCFCallDetected 而非 isCFStablePattern
     const maxJumpHz = isCFCallDetected ? 1000 : 2500; 
     const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
     
-    // Check if signal is too weak to trace
-    // [FIX] 同樣修正此處的變數名稱
     if (!isCFCallDetected) {
         if (highFreqPointPower_dB < (peakPower_dB - 30) || highFreqPointPower_dB < -80) {
             performStartFreqTracing = false;
         }
     }
 
-    // [2025 NEW] Summary Log for Start Freq Tracing
     const traceLog = [];
 
-    // 3. Perform Back-tracking Trace
     if (performStartFreqTracing && highFreqFrameIdx > 0) {
       
-      // A. Calculate Zonal Noise Floors for the Start Region (Frame 0 to HighFreqFrame)
       const startZoneFloors = this.calculateZonalNoiseFloors(
         spectrogram,
         freqBins,
         0,
         highFreqFrameIdx
       );
+      
+      // [DEBUG] 印出目前計算出的分區底噪表，檢查是否有資料
+      // console.log('[StartFreq] Zone Floors Map:', startZoneFloors);
 
       let currentTrackBinIdx = highFreqBinIdx; 
       const numBins = freqBins.length;
       let consecutiveGapFrames = 0;
       const MAX_GAP_FRAMES = 1;
 
-      // Log initial point (High Freq)
       traceLog.push({
          'Frame': highFreqFrameIdx,
          'Time (s)': timeFrames[highFreqFrameIdx].toFixed(4),
@@ -3489,19 +3479,16 @@ export class BatCallDetector {
          'Status': 'Start Point'
       });
 
-      // Backward Scan: Trace from High Freq Frame down to Frame 0
       for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
           const framePower = spectrogram[f];
           const frameTime = timeFrames[f];
           
-          // 1. Narrowing Searching Area (Time & Frequency)
           const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
           const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
           
           let bestBin = -1;
           let bestPower = -Infinity;
 
-          // Find max power bin within the "Narrowed" window
           for (let b = searchMinBin; b <= searchMaxBin; b++) {
               if (framePower[b] > bestPower) {
                   bestPower = framePower[b];
@@ -3511,29 +3498,36 @@ export class BatCallDetector {
           
           let traceFreq_kHz = (bestBin >= 0) ? (freqBins[bestBin] / 1000) : 0;
           let status = 'Scanning';
-          let zoneFloor_dB = -100;
+          
+          // [FIXED] Fallback 改為 -999 以區分是否為 Lookup 失敗
+          let zoneFloor_dB = -999; 
 
-          // 2. Zonal Noise Floor Mechanism
           if (bestBin >= 0) {
               const zoneKey = Math.floor(traceFreq_kHz / 10) * 10;
-              let rawFloor = startZoneFloors[zoneKey] !== undefined ? startZoneFloors[zoneKey] : -100;
-              zoneFloor_dB = Math.max(rawFloor, -115);
               
-              // [FIX] 修正變數名稱: 設定 SNR Margin (CF 可以低一點，FM 需要高一點)
-              const snrMargin = isCFCallDetected ? 1.0 : 3.0;
+              // [DEBUG LOGIC] 確保 Key 轉為字串進行查找 (JS 物件 Key 都是字串)
+              // 並區分 "沒找到 Key" (-999) 和 "值真的是 -100"
+              if (startZoneFloors[zoneKey] !== undefined) {
+                  let rawFloor = startZoneFloors[zoneKey];
+                  // 這裡限制最小底噪，如果覺得 -100 太高，可以放寬到 -120
+                  zoneFloor_dB = Math.max(rawFloor, -120); 
+              } else {
+                  // 如果 console 出現這個 log，代表 Key 計算有誤
+                  // console.warn(`[StartFreq] Missing Key: ${zoneKey} for Freq: ${traceFreq_kHz.toFixed(2)}kHz`);
+                  zoneFloor_dB = -999; 
+              }
+              
+              const snrMargin = isCFCallDetected ? 3.0 : 6.0;
 
-              // 3. Signal vs Noise Decision
-              if (bestPower > (zoneFloor_dB + snrMargin)) {
-                  // Connection found! Update tracking
+              // 如果 zoneFloor_dB 是 -999 (Lookup 失敗)，這裡條件就不會通過
+              if (zoneFloor_dB > -200 && bestPower > (zoneFloor_dB + snrMargin)) {
                   currentTrackBinIdx = bestBin;
-                  consecutiveGapFrames = 0; // Reset gap
+                  consecutiveGapFrames = 0; 
                   
-                  // Update "valid start" candidates
                   validStartBinIdx = bestBin;
                   validStartFrameIdx = f;
                   validStartFreq_Hz = freqBins[bestBin];
                   
-                  // Linear Interpolation
                   if (bestBin > 0 && bestBin < numBins - 1) {
                     const prevP = framePower[bestBin - 1];
                     const nextP = framePower[bestBin + 1];
@@ -3562,7 +3556,7 @@ export class BatCallDetector {
               'Time (s)': frameTime.toFixed(4),
               'Freq (kHz)': traceFreq_kHz.toFixed(2),
               'Power (dB)': bestPower.toFixed(1),
-              'Floor (dB)': zoneFloor_dB.toFixed(1),
+              'Floor (dB)': zoneFloor_dB.toFixed(1), // 查看 Log 是否顯示 -999
               'Status': status
           });
 
@@ -3572,7 +3566,6 @@ export class BatCallDetector {
       }
     }
 
-    // 4. Assign Final Result
     const startFreq_kHz = validStartFreq_Hz / 1000;
     call.startFreq_kHz = startFreq_kHz;
     call.startFreqBinIdx = validStartBinIdx;
