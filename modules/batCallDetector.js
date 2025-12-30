@@ -1993,13 +1993,13 @@ export class BatCallDetector {
           
           if (lastMeasuredFreq_kHz !== null) {
               const diff = Math.abs(currentFreq_kHz - lastMeasuredFreq_kHz);
-              // Check stability (<= 30Hz difference)
-              if (diff > 0 && diff <= 0.03) {
+              // Check stability (<= 50Hz difference)
+              if (diff > 0 && diff <= 0.05) {
                   consecutiveStableCount++;
               } else if (diff === 0) {
                   // 什麼都不做，保持目前的 consecutiveStableCount，但不增加
               } else {
-                  consecutiveStableCount = 0; // 只有大於 0.03 才重置
+                  consecutiveStableCount = 0; // 只有大於 0.05 才重置
               }
               
               // If we have 10 consecutive stable measurements, flag as CF Call
