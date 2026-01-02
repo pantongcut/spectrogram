@@ -1382,6 +1382,10 @@ export class BatCallDetector {
       freqBins[i] = (minBin + i) * freqResolution;
     }
 
+    // [優化] 預分配可重複使用的暫存陣列，避免每幀都 new 新物件
+    const dcRemoved = new Float32Array(fftSize);
+    const framePower = new Float32Array(numBins);
+
     // Apply Goertzel to each frame
     for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
       const frameStart = frameIdx * hopSize;
@@ -1391,18 +1395,16 @@ export class BatCallDetector {
       // Apply window
       const windowed = this.applyWindow(frameData, windowType);
 
-      // Remove DC offset
+      // Remove DC offset (寫入預分配的 dcRemoved 陣列)
       let dcOffset = 0;
       for (let i = 0; i < windowed.length; i++) dcOffset += windowed[i];
       dcOffset /= windowed.length;
 
-      const dcRemoved = new Float32Array(windowed.length);
       for (let i = 0; i < windowed.length; i++) {
         dcRemoved[i] = windowed[i] - dcOffset;
       }
 
-      // Calculate power for each frequency bin
-      const framePower = new Float32Array(numBins);
+      // Calculate power for each frequency bin (寫入預分配的 framePower 陣列)
       for (let i = 0; i < numBins; i++) {
         const freqHz = freqBins[i];
         const energy = this.goertzelEnergy(dcRemoved, freqHz, sampleRate);
@@ -1411,7 +1413,8 @@ export class BatCallDetector {
         framePower[i] = 10 * Math.log10(Math.max(psd, 1e-16));
       }
 
-      powerMatrix[frameIdx] = framePower;
+      // 複製 framePower 到 powerMatrix (只有這裡需要新建 Float32Array)
+      powerMatrix[frameIdx] = new Float32Array(framePower);
       timeFrames[frameIdx] = (frameStart + fftSize / 2) / sampleRate;  // Center of frame
     }
 
@@ -1571,12 +1574,17 @@ export class BatCallDetector {
     const rebounceThreshold_dB = 0.5;
     const sustainedDuration_ms = 0.5;
     const sustainedSamples = Math.floor(sampleRate * (sustainedDuration_ms / 1000));
+    const hopSize = Math.floor(windowSize / 2);
+    const absoluteNoiseFloorDb = -60;
 
-    // 3. 計算 RMS Envelope
+    // 3. 計算 RMS Envelope - 改用 Float32Array 存儲 dB 值以減少內存分配
+    const maxSteps = Math.ceil((safeEnd - safeStart - windowSize) / hopSize) + 1;
+    const dbValues = new Float32Array(maxSteps);
+    const sampleIndices = new Uint32Array(maxSteps);
+
     let peakRms = -Infinity;
     let peakIndex = 0;
-    const hopSize = Math.floor(windowSize / 2);
-    const envelope = [];
+    let stepCount = 0;
 
     for (let i = safeStart; i < safeEnd - windowSize; i += hopSize) {
       let sumSq = 0;
@@ -1587,23 +1595,25 @@ export class BatCallDetector {
       const rms = Math.sqrt(sumSq / windowSize);
       const db = 20 * Math.log10(rms + 1e-9);
 
-      envelope.push({ sampleIdx: i + windowSize / 2, db: db });
+      dbValues[stepCount] = db;
+      sampleIndices[stepCount] = i + Math.floor(windowSize / 2);
 
       if (db > peakRms) {
         peakRms = db;
-        peakIndex = envelope.length - 1;
+        peakIndex = stepCount;
       }
+
+      stepCount++;
     }
 
-    if (envelope.length === 0) return endSample;
+    if (stepCount === 0) return endSample;
 
     // 4. 掃描邏輯
     let minDbSoFar = peakRms;
     let minDbIndex = peakIndex;
-    const absoluteNoiseFloorDb = -60;
 
-    for (let i = peakIndex + 1; i < envelope.length; i++) {
-      const currentDb = envelope[i].db;
+    for (let i = peakIndex + 1; i < stepCount; i++) {
+      const currentDb = dbValues[i];
 
       // A. 更新最低能量點
       if (currentDb < minDbSoFar) {
@@ -1613,8 +1623,8 @@ export class BatCallDetector {
 
       // B. 底噪截斷檢查
       if (minDbSoFar < absoluteNoiseFloorDb && currentDb < absoluteNoiseFloorDb + 2) {
-        if (DEBUG) console.log(`[Oscillogram] CUT: Hit Noise Floor at point ${i} (${envelope[i].db.toFixed(1)}dB)`);
-        return envelope[minDbIndex].sampleIdx;
+        if (DEBUG) console.log(`[Oscillogram] CUT: Hit Noise Floor at point ${i} (${dbValues[i].toFixed(1)}dB)`);
+        return sampleIndices[minDbIndex];
       }
 
       // C. 反彈 (Rebounce) 檢查
@@ -1636,10 +1646,10 @@ export class BatCallDetector {
 
         // 檢查持續性
         let isSustained = true;
-        let lookAheadLimit = Math.min(envelope.length, i + Math.ceil(sustainedSamples / hopSize));
+        let lookAheadLimit = Math.min(stepCount, i + Math.ceil(sustainedSamples / hopSize));
 
         for (let k = i + 1; k < lookAheadLimit; k++) {
-          if (envelope[k].db < minDbSoFar + rebounceThreshold_dB) {
+          if (dbValues[k] < minDbSoFar + rebounceThreshold_dB) {
             isSustained = false;
             break;
           }
@@ -1650,10 +1660,10 @@ export class BatCallDetector {
             console.log(`%c[Oscillogram] CUT: Rebounce Detected!`, 'color: red');
             console.log(`   Low Point: ${minDbSoFar.toFixed(1)}dB @ ${minDbIndex}`);
             console.log(`   Rebounce to: ${currentDb.toFixed(1)}dB @ ${i} (Diff: +${diff.toFixed(1)}dB)`);
-            console.log(`   Cut Action: Trimming ${(envelope.length - minDbIndex)} envelope points.`);
+            console.log(`   Cut Action: Trimming ${(stepCount - minDbIndex)} envelope points.`);
           }
           // 返回反彈發生前的那個谷底
-          return envelope[minDbIndex].sampleIdx;
+          return sampleIndices[minDbIndex];
         }
       }
     }
