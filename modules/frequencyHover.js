@@ -486,10 +486,7 @@ async function calculateBatCallParams(sel) {
         hopPercent: memory.hopPercent,
         windowType: window.__spectrogramSettings?.windowType || 'hann', // Sync window type
         
-        // Anti-Rebounce
-        enableBackwardEndFreqScan: memory.enableBackwardEndFreqScan !== false,
-        maxFrequencyDropThreshold_kHz: memory.maxFrequencyDropThreshold_kHz || 10,
-        protectionWindowAfterPeak_ms: memory.protectionWindowAfterPeak_ms || 10,
+
         
         // Highpass Filter
         enableHighpassFilter: memory.enableHighpassFilter !== false,

@@ -14,11 +14,6 @@ import {
 /**
  * 全局存儲 bat-call-controls 的配置值
  * 用於在新窗口中記憶之前設置的參數
- * 
- * 2025 Anti-Rebounce Parameters:
- * - enableBackwardEndFreqScan: 從後往前掃描 -24 dB 輪廓
- * - maxFrequencyDropThreshold_kHz: 最大頻率下降規則（鎖定）
- * - protectionWindowAfterPeak_ms: 峰值後的保護窗（10 ms）
  */
 window.__batCallControlsMemory = window.__batCallControlsMemory || {
   callThreshold_dB: -24,
@@ -30,9 +25,6 @@ window.__batCallControlsMemory = window.__batCallControlsMemory || {
   minCallDuration_ms: 2,
   fftSize: '1024',
   hopPercent: 3.125,
-  enableBackwardEndFreqScan: true,
-  maxFrequencyDropThreshold_kHz: 10,
-  protectionWindowAfterPeak_ms: 10,
   enableHighpassFilter: true,            // Highpass filter enable/disable
   highpassFilterFreq_kHz: 40,            // Highpass filter frequency (kHz)
   highpassFilterFreq_kHz_isAuto: true,   // Auto mode for Highpass filter frequency detection
@@ -87,10 +79,6 @@ export function showCallAnalysisPopup({
     freqResolution_Hz: 1,
     callType: 'auto',
     cfRegionThreshold_dB: -30,
-    // 2025 Anti-Rebounce Parameters
-    enableBackwardEndFreqScan: memory.enableBackwardEndFreqScan !== false,
-    maxFrequencyDropThreshold_kHz: memory.maxFrequencyDropThreshold_kHz || 10,
-    protectionWindowAfterPeak_ms: memory.protectionWindowAfterPeak_ms || 10,
     // Highpass Filter Parameters
     enableHighpassFilter: memory.enableHighpassFilter !== false,
     highpassFilterFreq_kHz: memory.highpassFilterFreq_kHz || 40,
@@ -531,10 +519,6 @@ const updateBatCallAnalysis = async (peakFreq) => {
   const batCallHopPercentInput = popup.querySelector('#hopPercent');
   const batCallFFTSizeBtn = popup.querySelector('#batCallFFTSize');
   
-  // 2025 Anti-Rebounce Controls
-  const antiRebounceCheckboxForListeners = popup.querySelector('#enableBackwardEndFreqScan');
-  const maxFreqDropInputForListeners = popup.querySelector('#maxFrequencyDropThreshold_kHz');
-  const protectionWindowInputForListeners = popup.querySelector('#protectionWindowAfterPeak_ms');
   // 2025 Highpass Filter Controls
   const highpassFilterCheckboxForListeners = popup.querySelector('#enableHighpassFilter');
   const highpassFilterFreqInputForListeners = popup.querySelector('#highpassFilterFreq_kHz');
@@ -653,25 +637,11 @@ const updateBatCallAnalysis = async (peakFreq) => {
       }
     }
     
-    // 2025 Anti-Rebounce 參數
-    // 注意：每次都重新查詢元素，確保獲取最新的 DOM 節點
-    let antiRebounceCheckbox = antiRebounceCheckboxForListeners || popup.querySelector('#enableBackwardEndFreqScan');
-    let maxFreqDropInput = maxFreqDropInputForListeners || popup.querySelector('#maxFrequencyDropThreshold_kHz');
-    let protectionWindowInput = protectionWindowInputForListeners || popup.querySelector('#protectionWindowAfterPeak_ms');
     // 2025 Highpass Filter Controls
     let highpassFilterCheckbox = highpassFilterCheckboxForListeners || popup.querySelector('#enableHighpassFilter');
     let highpassFilterFreqInput = highpassFilterFreqInputForListeners || popup.querySelector('#highpassFilterFreq_kHz');
     let highpassFilterOrderInput = highpassFilterOrderInputForListeners || popup.querySelector('#highpassFilterOrder');
     
-    if (antiRebounceCheckbox) {
-      batCallConfig.enableBackwardEndFreqScan = antiRebounceCheckbox.checked;
-    }
-    if (maxFreqDropInput) {
-      batCallConfig.maxFrequencyDropThreshold_kHz = parseFloat(maxFreqDropInput.value) || 10;
-    }
-    if (protectionWindowInput) {
-      batCallConfig.protectionWindowAfterPeak_ms = parseFloat(protectionWindowInput.value) || 10;
-    }
     // 2025 Highpass Filter Config Update
     if (highpassFilterCheckbox) {
       batCallConfig.enableHighpassFilter = highpassFilterCheckbox.checked;
@@ -714,10 +684,6 @@ const updateBatCallAnalysis = async (peakFreq) => {
       minCallDuration_ms: batCallConfig.minCallDuration_ms,
       fftSize: batCallConfig.fftSize.toString(),
       hopPercent: batCallConfig.hopPercent,
-      // 2025 Anti-Rebounce
-      enableBackwardEndFreqScan: batCallConfig.enableBackwardEndFreqScan,
-      maxFrequencyDropThreshold_kHz: batCallConfig.maxFrequencyDropThreshold_kHz,
-      protectionWindowAfterPeak_ms: batCallConfig.protectionWindowAfterPeak_ms,
       // 2025 Highpass Filter
       enableHighpassFilter: batCallConfig.enableHighpassFilter,
       highpassFilterFreq_kHz: batCallConfig.highpassFilterFreq_kHz,
@@ -912,33 +878,6 @@ const updateBatCallAnalysis = async (peakFreq) => {
     batCallHopPercentInput._updateTimeout = setTimeout(updateBatCallConfig, 30);
   });
   addNumberInputKeyboardSupport(batCallHopPercentInput);
-
-  // 2025 Anti-Rebounce Control Listeners
-  
-  // Anti-Rebounce Checkbox
-  if (antiRebounceCheckboxForListeners) {
-    antiRebounceCheckboxForListeners.addEventListener('change', updateBatCallConfig);
-  }
-
-  // Max Frequency Drop Input
-  if (maxFreqDropInputForListeners) {
-    maxFreqDropInputForListeners.addEventListener('change', updateBatCallConfig);
-    maxFreqDropInputForListeners.addEventListener('input', () => {
-      clearTimeout(maxFreqDropInputForListeners._updateTimeout);
-      maxFreqDropInputForListeners._updateTimeout = setTimeout(updateBatCallConfig, 30);
-    });
-    addNumberInputKeyboardSupport(maxFreqDropInputForListeners);
-  }
-
-  // Protection Window Input
-  if (protectionWindowInputForListeners) {
-    protectionWindowInputForListeners.addEventListener('change', updateBatCallConfig);
-    protectionWindowInputForListeners.addEventListener('input', () => {
-      clearTimeout(protectionWindowInputForListeners._updateTimeout);
-      protectionWindowInputForListeners._updateTimeout = setTimeout(updateBatCallConfig, 30);
-    });
-    addNumberInputKeyboardSupport(protectionWindowInputForListeners);
-  }
 
   // 2025 Highpass Filter Checkbox
   if (highpassFilterCheckboxForListeners) {
@@ -1321,66 +1260,6 @@ function createPopupWindow() {
   batCallControlPanel.appendChild(hopPercentControl);
 
   // ============================================================
-  // 2025 ANTI-REBOUNCE CONTROLS
-  // ============================================================
-  
-  // enableBackwardEndFreqScan (Checkbox)
-  const antiRebounceControl = document.createElement('label');
-  const antiRebounceCheckbox = document.createElement('input');
-  antiRebounceCheckbox.id = 'enableBackwardEndFreqScan';
-  antiRebounceCheckbox.type = 'checkbox';
-  antiRebounceCheckbox.checked = window.__batCallControlsMemory.enableBackwardEndFreqScan !== false;
-  antiRebounceCheckbox.title = 'Anti-rebounce: Backward scan from end to find clean cutoff';
-  antiRebounceControl.appendChild(antiRebounceCheckbox);
-  
-  const antiRebounceLabel = document.createElement('span');
-  antiRebounceLabel.textContent = 'Anti-Rebounce:';
-  antiRebounceControl.appendChild(antiRebounceLabel);
-  batCallControlPanel.appendChild(antiRebounceControl);
-
-  // maxFrequencyDropThreshold_kHz (Number input)
-  const maxFreqDropControl = document.createElement('label');
-  const maxFreqDropLabel = document.createElement('span');
-  maxFreqDropLabel.textContent = 'Max Freq Drop:';
-  maxFreqDropControl.appendChild(maxFreqDropLabel);
-  
-  const maxFreqDropInput = document.createElement('input');
-  maxFreqDropInput.id = 'maxFrequencyDropThreshold_kHz';
-  maxFreqDropInput.type = 'number';
-  maxFreqDropInput.value = window.__batCallControlsMemory.maxFrequencyDropThreshold_kHz.toString();
-  maxFreqDropInput.min = '1';
-  maxFreqDropInput.max = '50';
-  maxFreqDropInput.step = '0.5';
-  maxFreqDropInput.title = 'Maximum frequency drop threshold (kHz) - triggers lock';
-  maxFreqDropControl.appendChild(maxFreqDropInput);
-  
-  const maxFreqDropUnit = document.createElement('span');
-  maxFreqDropUnit.textContent = 'kHz';
-  maxFreqDropControl.appendChild(maxFreqDropUnit);
-  batCallControlPanel.appendChild(maxFreqDropControl);
-
-  // protectionWindowAfterPeak_ms (Number input)
-  const protectionWindowControl = document.createElement('label');
-  const protectionWindowLabel = document.createElement('span');
-  protectionWindowLabel.textContent = 'Protect Window:';
-  protectionWindowControl.appendChild(protectionWindowLabel);
-  
-  const protectionWindowInput = document.createElement('input');
-  protectionWindowInput.id = 'protectionWindowAfterPeak_ms';
-  protectionWindowInput.type = 'number';
-  protectionWindowInput.value = window.__batCallControlsMemory.protectionWindowAfterPeak_ms.toString();
-  protectionWindowInput.min = '1';
-  protectionWindowInput.max = '20';
-  protectionWindowInput.step = '1';
-  protectionWindowInput.title = 'Protection window after peak energy (ms)';
-  protectionWindowControl.appendChild(protectionWindowInput);
-  
-  const protectionWindowUnit = document.createElement('span');
-  protectionWindowUnit.textContent = 'ms';
-  protectionWindowControl.appendChild(protectionWindowUnit);
-  batCallControlPanel.appendChild(protectionWindowControl);
-
-  // ============================================================
   // HIGHPASS FILTER CONTROL
   // ============================================================
   
@@ -1466,7 +1345,7 @@ function createPopupWindow() {
         // 展開 - 移除 display 以恢復 CSS 中的 flex
         controlPanel.style.removeProperty('display');
         batCallControlPanel.style.removeProperty('display');
-        popup.style.height = '880px';
+        popup.style.height = '850px';
         settingBtn.classList.add('active');
       } else {
         // 隱藏

@@ -48,23 +48,6 @@ export const DEFAULT_DETECTION_CONFIG = {
 
   // For CF-FM calls: minimum power requirement in characteristic freq region (dB)
   cfRegionThreshold_dB: -30,
-
-  // ============================================================
-  // 2025 ANTI-REBOUNCE (Anti-Echo/Reflection) PARAMETERS
-  // ============================================================
-  // These parameters protect against reverberations in tunnels, forests, buildings
-
-  // Trick 1: Backward scanning for end frequency detection
-  // When enabled, scan from end towards start to find -27dB cutoff (prevents rebounce tail)
-  enableBackwardEndFreqScan: true,
-
-  // Trick 2: Maximum Frequency Drop Rule (kHz)
-  // Once frequency drops by this amount below peak, lock and don't accept further increases
-  maxFrequencyDropThreshold_kHz: 10,
-
-  // Trick 3: Protection window after peak energy (ms)
-  // Only accept call content within this duration after peak energy frame
-  protectionWindowAfterPeak_ms: 10,
 };
 
 export class CallTypeClassifier {
@@ -1222,15 +1205,14 @@ export class BatCallDetector {
       }
 
       try {
-        // [修正這裡！] 確保使用 call.spectrogram 而不是 powerMatrix
-        // 這樣 SNR 計算才會基於正確的切片範圍
         const snrResult = this.calculateRMSbasedSNR(
           call,
-          call.spectrogram, // <--- 從 powerMatrix 改為 call.spectrogram
+          call.spectrogram, 
           freqBins,
-          call.endFrameIdx_forLowFreq, // 確保參數對應 calculateRMSbasedSNR 的新定義
-          flowKHz,
-          fhighKHz,
+          0,                             // signalStartIdx (相對於 slice，通常是開頭)
+          call.endFrameIdx_forLowFreq,   // signalEndIdx (相對於 slice)
+          flowKHz, 
+          fhighKHz, 
           options.noiseSpectrogram
         );
 
@@ -1703,109 +1685,6 @@ export class BatCallDetector {
    * @param {boolean} rebounceDetected - Whether rebounce was detected by anti-rebounce mechanism
    * @returns {Object} {valid: boolean, reason: string, confidence: number (0-1)}
    */
-  validateLowFrequencyMeasurement(
-    lowFreq_Hz, lowFreq_kHz, peakFreq_Hz, peakPower_dB,
-    thisPower, prevPower, endThreshold_dB, freqBinWidth_Hz,
-    rebounceDetected = false
-  ) {
-    // Initialize validation result
-    const result = {
-      valid: true,
-      reason: '',
-      confidence: 1.0,
-      details: {
-        frequencySpread: Math.abs((peakFreq_Hz / 1000) - lowFreq_kHz),
-        powerRatio_dB: thisPower - prevPower,
-        interpolationRatio: (thisPower - endThreshold_dB) / Math.max(thisPower - prevPower, 0.001),
-        rebounceCompat: !rebounceDetected ? 'N/A' : 'verified'
-      }
-    };
-
-    // ============================================================
-    // CHECK 1: Frequency relationship (Low < Peak)
-    // FM calls should have peak freq > low freq (frequency sweep)
-    // ============================================================
-    const peakFreq_kHz = peakFreq_Hz / 1000;
-    if (lowFreq_kHz > peakFreq_kHz) {
-      // Low frequency should not exceed peak
-      // This would indicate measurement error
-      result.valid = false;
-      result.reason = `Low Frequency (${lowFreq_kHz.toFixed(2)} kHz) exceeds Peak (${peakFreq_kHz.toFixed(2)} kHz)`;
-      result.confidence = 0.0;
-      return result;
-    }
-
-    // Check frequency spread is reasonable
-    const freqSpread = peakFreq_kHz - lowFreq_kHz;
-    if (freqSpread < 0.5) {
-      // Very small frequency spread: might be CF or measurement artifact
-      result.confidence *= 0.8; // Reduce confidence slightly
-      result.details.frequencySpreadWarning = 'Very narrow bandwidth (< 0.5 kHz)';
-    }
-
-    // ============================================================
-    // CHECK 2: Power ratio at threshold crossing
-    // Should have significant power difference between prev and current bin
-    // Low power ratio = gentle slope = poor interpolation reliability
-    // ============================================================
-    const powerRatio = Math.abs(thisPower - prevPower);
-    if (powerRatio < 2.0) {
-      // Weak power gradient: interpolation may be unreliable
-      result.confidence *= 0.7; // Reduce confidence
-      result.details.powerRatioWarning = 'Weak power gradient (< 2 dB)';
-    } else if (powerRatio > 20) {
-      // Steep power gradient: good interpolation reliability
-      result.confidence *= 1.0;
-    } else {
-      // Normal gradient (2-20 dB)
-      result.confidence *= 0.95;
-    }
-
-    // ============================================================
-    // CHECK 3: Interpolation sanity
-    // Verify interpolated frequency is within bin boundaries
-    // ============================================================
-    const prevFreq_Hz = lowFreq_Hz - (peakPower_dB - prevPower) * freqBinWidth_Hz /
-      Math.max(thisPower - prevPower, 0.001);
-
-    // Interpolation ratio should be between 0 and 1
-    const interpolationRatio = result.details.interpolationRatio;
-    if (interpolationRatio < 0 || interpolationRatio > 1) {
-      result.valid = false;
-      result.reason = `Invalid interpolation ratio: ${interpolationRatio.toFixed(3)} (should be 0-1)`;
-      result.confidence = 0.3;
-      return result;
-    }
-
-    // ============================================================
-    // CHECK 4: Anti-rebounce compatibility
-    // If rebounce was detected, verify Low Frequency is from last valid frame
-    // (before energy rise indicating echo/reflection)
-    // ============================================================
-    if (rebounceDetected) {
-      // Low frequency should be measured at higher power than end threshold
-      // to ensure it's from the true call, not from rebounce tail
-      if (thisPower < (endThreshold_dB + 3)) {
-        // Power is barely above threshold: might be from rebounce tail
-        result.confidence *= 0.65; // Reduce confidence
-        result.details.rebounceWarning = 'Low frequency power barely above threshold';
-      }
-      result.details.rebounceCompat = 'verified'; // Mark as checked
-    }
-
-    // ============================================================
-    // FINAL CONFIDENCE ASSESSMENT
-    // ============================================================
-    if (result.confidence < 0.65) {
-      result.valid = false;
-      if (!result.reason) {
-        result.reason = `Low confidence measurement (${(result.confidence * 100).toFixed(1)}%)`;
-      }
-    }
-
-    return result;
-  }
-
   /**
    * [2025 OPTIMIZED] Calculate Noise Floor per 10kHz Frequency Zone
    * Fix: High frequency silence (<-100dB) is now clamped and included in stats 
@@ -3155,17 +3034,9 @@ export class BatCallDetector {
     // ============================================================
     // STEP 1.5: 重新計算時間邊界 (基於新的 highFreqThreshold_dB)
     // 
-    // 2025 ANTI-REBOUNCE UPGRADE:
-    // - Backward scanning for clean end frequency detection
-    // - Maximum frequency drop rule to lock end frame
-    // - 10ms protection window after peak energy
+    // Standard approach: Use energy threshold to find start and end
     // ============================================================
-    const {
-      enableBackwardEndFreqScan,
-      maxFrequencyDropThreshold_kHz,
-      protectionWindowAfterPeak_ms
-    } = this.config;
-
+    
     const highThreshold_dB = peakPower_dB + this.config.highFreqThreshold_dB;  // High Frequency threshold (可調整)
 
     // ============================================================
@@ -3199,147 +3070,23 @@ export class BatCallDetector {
       }
     }
 
-    // TRICK 1 & 3: Find end frame with anti-rebounce protection
-    // 
-    // Standard method: Backward scan from end to find -27dB cutoff
-    // + Maximum frequency drop detection (Trick 2)
-    // + Protection window limit (Trick 3) - but only if frequency drop is detected
-    // ============================================================
+    // Find end frame using standard forward scanning method
     let newEndFrameIdx = spectrogram.length - 1;
 
-    // Calculate frame limit for Trick 3 (10ms protection window)
-    const protectionFrameLimit = Math.round(
-      (protectionWindowAfterPeak_ms / 1000) / (timeFrames[1] - timeFrames[0])
-    );
-    const maxFrameIdxAllowed = Math.min(
-      peakFrameIdx + protectionFrameLimit,
-      spectrogram.length - 1
-    );
-
-    // ANTI-REBOUNCE: Forward scan from peak to find natural end
-    // Professional approach: Use energy trend analysis + monotonic decay detection
-    // - FM/Sweep: Stop when frequency drops significantly (TRICK 2)
-    // - CF/QCF: Energy monotonically decreases until call ends
-    //   Special rule: If energy rises after falling = rebounce signal detected → STOP immediately
-    if (enableBackwardEndFreqScan) {
-      let lastValidEndFrame = peakFrameIdx;
-      let freqDropDetected = false;
-
-      // Professional criterion (Avisoft/SonoBat style): Find last frame where energy > peakPower_dB - 18dB
-      // This softer threshold (-18dB vs -27dB) better handles natural decay in CF/QCF calls
-      const sustainedEnergyThreshold = peakPower_dB - 18; // 18dB drop from peak
-      let lastFrameAboveSustainedThreshold = peakFrameIdx;
-
-      // Track energy for monotonic decay detection
-      let lastFrameMaxPower = peakPower_dB;
-      let hasStartedDecaying = false;
-      let lastValidEndBeforeRebounce = peakFrameIdx;
-
-      // Scan FORWARD from peak to END to find natural decay point
-      for (let frameIdx = peakFrameIdx; frameIdx < spectrogram.length; frameIdx++) {
-        const framePower = spectrogram[frameIdx];
-        let frameMaxPower = -Infinity;
-        let framePeakFreq = 0;
-
-        for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-          if (framePower[binIdx] > frameMaxPower) {
-            frameMaxPower = framePower[binIdx];
-            framePeakFreq = freqBins[binIdx] / 1000;
-          }
-        }
-
-        // Check for FM frequency drop (primary indicator for FM calls)
-        if (frameIdx > peakFrameIdx && !freqDropDetected && frameMaxPower > endThreshold_dB) {
-          const prevFramePower = spectrogram[frameIdx - 1];
-          let prevFramePeakFreq = 0;
-          let prevFrameMaxPower = -Infinity;
-          for (let binIdx = 0; binIdx < prevFramePower.length; binIdx++) {
-            if (prevFramePower[binIdx] > prevFrameMaxPower) {
-              prevFrameMaxPower = prevFramePower[binIdx];
-              prevFramePeakFreq = freqBins[binIdx] / 1000;
-            }
-          }
-
-          const frequencyDrop = prevFramePeakFreq - framePeakFreq;
-          if (frequencyDrop > maxFrequencyDropThreshold_kHz) {
-            // FM call: frequency drop detected, stop here
-            freqDropDetected = true;
-            lastValidEndFrame = frameIdx - 1;
-            break;
-          }
-        }
-
-        // CF/QCF monotonic decay detection
-        if (!freqDropDetected) {
-          // Track if energy has started declining from peak
-          if (frameMaxPower < lastFrameMaxPower) {
-            hasStartedDecaying = true;
-            lastValidEndBeforeRebounce = frameIdx;
-          }
-
-          // CRITICAL: Detect rebounce (energy rises after falling)
-          // But with threshold to avoid QCF natural energy fluctuations
-          // QCF signals naturally have ±2-3dB fluctuations, so require >5dB rise to detect rebounce
-          const rebounceThreshold_dB = 0.5; // Minimum dB rise to be considered a rebounce (not QCF fluctuation)
-          if (hasStartedDecaying && frameMaxPower > lastFrameMaxPower && frameIdx > peakFrameIdx + 1) {
-            const energyRise = frameMaxPower - lastFrameMaxPower;
-            if (energyRise > rebounceThreshold_dB) {
-              // Significant energy rise detected = true rebounce!
-              // Use the frame where energy was lowest before rising
-              newEndFrameIdx = lastValidEndBeforeRebounce;
-              break;
-            }
-            // else: Just minor fluctuation in QCF signal, continue scanning
-          }
-
-          // Track sustained energy above -18dB threshold
-          if (frameMaxPower > sustainedEnergyThreshold) {
-            lastFrameAboveSustainedThreshold = frameIdx;
-            lastValidEndFrame = frameIdx;
-          }
-          // If signal drops permanently below -18dB, stop
-          else if (frameMaxPower <= sustainedEnergyThreshold && frameIdx > peakFrameIdx) {
-            // No rebounce detected, just natural decay below threshold
-            newEndFrameIdx = lastFrameAboveSustainedThreshold;
-            break;
-          }
-
-          lastFrameMaxPower = frameMaxPower;
-        }
-      }
-
-      // Determine final end frame if loop completed without special conditions
-      if (newEndFrameIdx === spectrogram.length - 1 || newEndFrameIdx === 0) {
-        if (!freqDropDetected) {
-          // CF/QCF call: use last frame with sustained energy
-          newEndFrameIdx = lastFrameAboveSustainedThreshold;
-        } else {
-          // FM call: already set by frequency drop detection
-          newEndFrameIdx = lastValidEndFrame;
-        }
-      }
-    } else {
-      // Original forward scanning method (without anti-rebounce)
-      for (let frameIdx = spectrogram.length - 1; frameIdx >= 0; frameIdx--) {
-        const framePower = spectrogram[frameIdx];
-        let frameHasSignal = false;
-        for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-          if (framePower[binIdx] > endThreshold_dB) {
-            frameHasSignal = true;
-            break;
-          }
-        }
-        if (frameHasSignal) {
-          newEndFrameIdx = frameIdx;
+    for (let frameIdx = spectrogram.length - 1; frameIdx >= 0; frameIdx--) {
+      const framePower = spectrogram[frameIdx];
+      let frameHasSignal = false;
+      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
+        if (framePower[binIdx] > endThreshold_dB) {
+          frameHasSignal = true;
           break;
         }
       }
+      if (frameHasSignal) {
+        newEndFrameIdx = frameIdx;
+        break;
+      }
     }
-
-    // 注意：For CF/QCF calls, newEndFrameIdx 可能超過 maxFrameIdxAllowed
-    // 這是正常的，因為 CF 信號可能延續超過 10ms 的保護窗
-    // Protection window 限制只應用於檢測到頻率下降（FM 類型）的情況
-    // 不應在此進行全局限制
 
     // 更新時間邊界
     if (newStartFrameIdx < timeFrames.length) {
@@ -3878,74 +3625,15 @@ export class BatCallDetector {
       }
     }
 
-    // ============================================================
-    // 2025 ENHANCEMENT: Validate Low Frequency measurement quality
-    // This ensures compatibility with anti-rebounce protection
-    // ============================================================
-    let validationResult = null;
-
-    // Retrieve power values for validation
-    const lastFramePowerAtLowFreq = lastFramePower[Math.max(0, Math.floor(lowFreq_Hz / (freqBins[1] - freqBins[0])))];
-    const prevBinIdx = Math.max(0, Math.floor(lowFreq_Hz / (freqBins[1] - freqBins[0])) - 1);
-    const prevFramePowerAtLowFreq = lastFramePower[prevBinIdx];
-    const freqBinWidth = freqBins.length > 1 ? freqBins[1] - freqBins[0] : 1;
-
-    // Run validation if we have valid power values
-    if (lastFramePowerAtLowFreq !== undefined && prevFramePowerAtLowFreq !== undefined) {
-      validationResult = this.validateLowFrequencyMeasurement(
-        lowFreq_Hz,
-        lowFreq_kHz,
-        peakFreq_Hz,
-        peakPower_dB,
-        lastFramePowerAtLowFreq,
-        prevFramePowerAtLowFreq,
-        endThreshold_dB,
-        freqBinWidth,
-        this.config.enableBackwardEndFreqScan  // rebounce detection status
-      );
-
-      // Store validation metadata on call object (for debugging/analysis)
-      call._lowFreqValidation = {
-        valid: validationResult.valid,
-        confidence: validationResult.confidence,
-        interpolationRatio: validationResult.details.interpolationRatio,
-        powerRatio_dB: validationResult.details.powerRatio_dB,
-        frequencySpread_kHz: validationResult.details.frequencySpread,
-        rebounceCompat: validationResult.details.rebounceCompat,
-        warnings: []
-      };
-
-      // Collect warnings
-      if (validationResult.details.frequencySpreadWarning) {
-        call._lowFreqValidation.warnings.push(validationResult.details.frequencySpreadWarning);
-      }
-      if (validationResult.details.powerRatioWarning) {
-        call._lowFreqValidation.warnings.push(validationResult.details.powerRatioWarning);
-      }
-      if (validationResult.details.rebounceWarning) {
-        call._lowFreqValidation.warnings.push(validationResult.details.rebounceWarning);
-      }
-    }
 
     // ============================================================
     // LOW FREQUENCY OPTIMIZATION: Compare with Start Frequency
     // If Start Frequency is lower, use it as Low Frequency
     // 優化邏輯：如果 Start Frequency 比計算的 Low Frequency 更低
     // 則使用 Start Frequency 作為 Low Frequency
-    // 
-    // IMPORTANT: This optimization respects anti-rebounce mechanism
-    // Start Frequency is from FIRST frame (after anti-rebounce boundary)
-    // Low Frequency is from LAST frame (also respects anti-rebounce)
-    // Both are measured within the same protected boundaries
     // ============================================================
     if (startFreq_kHz !== null && startFreq_kHz < lowFreq_kHz) {
       lowFreq_kHz = startFreq_kHz;
-
-      // Update validation metadata to reflect use of Start Frequency
-      if (call._lowFreqValidation) {
-        call._lowFreqValidation.usedStartFreq = true;
-        call._lowFreqValidation.note = 'Low Frequency replaced by Start Frequency (lower value)';
-      }
     }
 
     call.lowFreq_kHz = lowFreq_kHz;
@@ -4383,17 +4071,7 @@ export class BatCallDetector {
     // ============================================================
     // CF-FM AUTO-DETECTION
     // ============================================================
-    if (freqDifference < 1.0) {
-      // CF-FM type call detected: peak and start frequencies very close
-      // This means the call has a significant CF phase followed by FM sweep
-      // The call duration likely exceeds the 10ms protection window
-      // Auto-disable anti-rebounce to prevent false truncation
-      this.config.enableBackwardEndFreqScan = false;
-    } else {
-      // Pure FM call: restore the anti-rebounce setting from original config
-      // Re-read from parent config to get user's intended setting
-      this.config.enableBackwardEndFreqScan = this.config.enableBackwardEndFreqScan !== false;
-    }
+
 
     // ============================================================
     // [REMOVED 2025] Populate Frequency Contour for Peak Mode Visualization
