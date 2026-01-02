@@ -1245,22 +1245,14 @@ export class BatCallDetector {
   /**
    * Generate high-resolution STFT spectrogram using WebAssembly FFT
    * Much faster than Goertzel algorithm for large audio buffers.
-   * Returns: { powerMatrix, timeFrames, freqBins, freqResolution }
-   * 
-   * [CRITICAL FIX] This method ensures mathematical alignment with legacy Goertzel algorithm:
-   * - Uses the WASM engine's actual FFT size (should be 1024 from dedicated analysis engine)
-   * - Applies correct dB conversion: 10 * log10(magnitude^2 / fftSize)
-   * - Ensures all frequency measurements match legacy JS behavior
+   * Returns: { powerMatrix, timeFrames, freqBins, freqResolution } or null if failed
    */
   generateSpectrogramWasm(audioData, sampleRate, flowKHz, fhighKHz) {
-    if (!this.wasmEngine) {
-      console.warn('WASM engine not available, falling back to legacy method');
-      return this.generateSpectrogramLegacy(audioData, sampleRate, flowKHz, fhighKHz);
-    }
-
+    // [OPTIMIZED] Removed redundant check and fallback logic.
+    // This method now purely attempts WASM calculation and returns null on failure.
+    
     try {
       // 1. Get the actual FFT size from WASM engine
-      // [CRITICAL] This should be 1024 if using dedicated analysis engine
       const effectiveFFTSize = this.wasmEngine.get_fft_size();
 
       // 2. Calculate hop size based on effective FFT size
@@ -1278,13 +1270,12 @@ export class BatCallDetector {
 
       // 4. Get metadata
       const numBinsTotal = this.wasmEngine.get_freq_bins();
-      // [CRITICAL] Frequency resolution must use effective FFT size
       const freqResolution = sampleRate / effectiveFFTSize;
       const numFrames = Math.floor(rawSpectrum.length / numBinsTotal);
 
       if (numFrames < 1 || numBinsTotal < 1 || rawSpectrum.length === 0) {
         console.warn('Invalid WASM output dimensions');
-        return this.generateSpectrogramLegacy(audioData, sampleRate, flowKHz, fhighKHz);
+        return null;
       }
 
       // 5. Calculate frequency range indices
@@ -1306,53 +1297,65 @@ export class BatCallDetector {
         freqBins[i] = (minBin + i) * freqResolution;
       }
 
-      // 6. Reshape data and convert to dB (aligned with legacy Goertzel)
+      // 6. Reshape data and convert to dB
       for (let f = 0; f < numFrames; f++) {
         const framePower = new Float32Array(numBinsOfInterest);
         const frameOffset = f * numBinsTotal;
-
-        // Calculate time stamp at frame center
         const frameStart = f * hopSize;
         timeFrames[f] = (frameStart + effectiveFFTSize / 2) / sampleRate;
 
         for (let b = 0; b < numBinsOfInterest; b++) {
           const sourceIdx = frameOffset + (minBin + b);
-
-          // Safety check
           if (sourceIdx >= rawSpectrum.length) break;
 
           const magnitude = rawSpectrum[sourceIdx];
-
-          // [MATH ALIGNMENT] Convert to dB with correct formula:
-          // Legacy JS: psd = (rms^2) / fftSize -> dB = 10 * log10(psd)
-          // WASM Linear: magnitude is already processed magnitude output
-          // Unified formula: Power = magnitude^2, Normalized = Power / fftSize
           const power = magnitude * magnitude;
           const psd = power / effectiveFFTSize;
-
-          // Convert to dB with safety floor to prevent -Infinity
           framePower[b] = 10 * Math.log10(Math.max(psd, 1e-16));
         }
-
         powerMatrix[f] = framePower;
       }
 
-      // [IMPORTANT] Sync config fftSize for consistency in downstream measurements
+      // [IMPORTANT] Sync config fftSize
       if (this.config.fftSize !== effectiveFFTSize) {
         console.log(`[FFT Alignment] Detector config FFT adjusted from ${this.config.fftSize} to ${effectiveFFTSize}`);
         this.config.fftSize = effectiveFFTSize;
       }
 
       return { powerMatrix, timeFrames, freqBins, freqResolution };
+
     } catch (error) {
       console.warn('WASM computation failed:', error);
-      return this.generateSpectrogramLegacy(audioData, sampleRate, flowKHz, fhighKHz);
+      return null; // Return null to trigger fallback in the caller
     }
   }
 
   /**
-   * Generate high-resolution STFT spectrogram using legacy Goertzel algorithm
+   * Generate high-resolution STFT spectrogram
+   * Orchestrator method: Tries WASM first, falls back to Legacy JS if WASM fails or is missing.
    * Returns: { powerMatrix, timeFrames, freqBins, freqResolution }
+   */
+  generateSpectrogram(audioData, sampleRate, flowKHz, fhighKHz) {
+    // 1. Try WASM Engine
+    if (this.wasmEngine) {
+      const spec = this.generateSpectrogramWasm(audioData, sampleRate, flowKHz, fhighKHz);
+      if (spec) {
+        return spec;
+      }
+      // If spec is null (error occurred inside WASM method), fall through to Legacy
+      console.warn('Switching to Legacy JS Spectrogram generation due to WASM failure.');
+    }
+
+    // 2. Fallback to Legacy Engine
+    return this.generateSpectrogramLegacy(audioData, sampleRate, flowKHz, fhighKHz);
+  }
+
+  /**
+   * [Optimized] Generate high-resolution STFT spectrogram using legacy Goertzel algorithm
+   * Optimizations:
+   * 1. Replaced .slice() with .subarray() and .set() to avoid memory allocation per frame.
+   * 2. Pre-calculated Window weights to avoid repeated function calls.
+   * 3. Used a single reusable buffer for signal processing (Windowing/DC removal).
    */
   generateSpectrogramLegacy(audioData, sampleRate, flowKHz, fhighKHz) {
     const { fftSize, hopPercent, windowType } = this.config;
@@ -1382,40 +1385,85 @@ export class BatCallDetector {
       freqBins[i] = (minBin + i) * freqResolution;
     }
 
-    // [優化] 預分配可重複使用的暫存陣列，避免每幀都 new 新物件
-    const dcRemoved = new Float32Array(fftSize);
-    const framePower = new Float32Array(numBins);
+    // ============================================================
+    // OPTIMIZATION 1: Pre-calculate Window Weights (Lookup Table)
+    // ============================================================
+    // Avoids calling function and Math.cos() thousands of times
+    const windowWeights = new Float32Array(fftSize);
+    const twoPiOverLen = (2 * Math.PI) / (fftSize - 1);
+    
+    for (let i = 0; i < fftSize; i++) {
+      if (windowType === 'hann' || windowType === 'hanning') {
+        windowWeights[i] = 0.5 * (1 - Math.cos(twoPiOverLen * i));
+      } else if (windowType === 'hamming') {
+        windowWeights[i] = 0.54 - 0.46 * Math.cos(twoPiOverLen * i);
+      } else {
+        windowWeights[i] = 1.0; // Rectangular / Default
+      }
+    }
+
+    // ============================================================
+    // OPTIMIZATION 2: Pre-allocate Reusable Buffer
+    // ============================================================
+    const processingBuffer = new Float32Array(fftSize);
 
     // Apply Goertzel to each frame
     for (let frameIdx = 0; frameIdx < numFrames; frameIdx++) {
       const frameStart = frameIdx * hopSize;
-      const frameEnd = frameStart + fftSize;
-      const frameData = audioData.slice(frameStart, frameEnd);
 
-      // Apply window
-      const windowed = this.applyWindow(frameData, windowType);
-
-      // Remove DC offset (寫入預分配的 dcRemoved 陣列)
-      let dcOffset = 0;
-      for (let i = 0; i < windowed.length; i++) dcOffset += windowed[i];
-      dcOffset /= windowed.length;
-
-      for (let i = 0; i < windowed.length; i++) {
-        dcRemoved[i] = windowed[i] - dcOffset;
+      // ============================================================
+      // OPTIMIZATION 3: Zero-Copy Data Loading
+      // ============================================================
+      if (frameStart + fftSize <= audioData.length) {
+        processingBuffer.set(audioData.subarray(frameStart, frameStart + fftSize));
+      } else {
+        // Edge case: Handle end of file padding
+        processingBuffer.fill(0); // Reset buffer first
+        processingBuffer.set(audioData.subarray(frameStart));
       }
 
-      // Calculate power for each frequency bin (寫入預分配的 framePower 陣列)
+      // ============================================================
+      // In-Place Processing: Windowing & DC Removal
+      // ============================================================
+      
+      // 1. Apply Window (In-place)
+      for (let i = 0; i < fftSize; i++) {
+        processingBuffer[i] = processingBuffer[i] * windowWeights[i];
+      }
+
+      // 2. Calculate DC Offset (Mean)
+      let sum = 0;
+      for (let i = 0; i < fftSize; i++) {
+        sum += processingBuffer[i];
+      }
+      const dcOffset = sum / fftSize;
+
+      // 3. Remove DC Offset (In-place)
+      // processingBuffer is now clean and ready for Goertzel
+      for (let i = 0; i < fftSize; i++) {
+        processingBuffer[i] -= dcOffset;
+      }
+
+      // ============================================================
+      // Frequency Analysis (Goertzel)
+      // ============================================================
+      // Only allocate the result array for storage
+      const framePower = new Float32Array(numBins);
+
       for (let i = 0; i < numBins; i++) {
         const freqHz = freqBins[i];
-        const energy = this.goertzelEnergy(dcRemoved, freqHz, sampleRate);
+        
+        // Pass the prepared buffer to Goertzel
+        const energy = this.goertzelEnergy(processingBuffer, freqHz, sampleRate);
+        
+        // Convert to dB
         const rms = Math.sqrt(energy);
         const psd = (rms * rms) / fftSize;
         framePower[i] = 10 * Math.log10(Math.max(psd, 1e-16));
       }
 
-      // 複製 framePower 到 powerMatrix (只有這裡需要新建 Float32Array)
-      powerMatrix[frameIdx] = new Float32Array(framePower);
-      timeFrames[frameIdx] = (frameStart + fftSize / 2) / sampleRate;  // Center of frame
+      powerMatrix[frameIdx] = framePower;
+      timeFrames[frameIdx] = (frameStart + fftSize / 2) / sampleRate; // Center of frame
     }
 
     return { powerMatrix, timeFrames, freqBins, freqResolution };
@@ -1673,33 +1721,12 @@ export class BatCallDetector {
   }
 
   /**
-   * 2025 ENHANCEMENT: Validate Low Frequency measurement against anti-rebounce protection
-   * 
-   * This method ensures that the Low Frequency measurement is consistent with the
-   * anti-rebounce detection mechanism (detect energy rises after falling).
-   * 
-   * Validation checks:
-   * 1. Low frequency should be reasonably lower than Peak frequency (FM characteristic)
-   * 2. Power ratio at Low Frequency threshold should be significant
-   * 3. Interpolation should not exceed frequency bin boundaries
-   * 4. If rebounce detected: verify Low Frequency is from last stable frame (before energy rise)
-   * 
-   * @param {number} lowFreq_Hz - Measured low frequency (Hz)
-   * @param {number} lowFreq_kHz - Measured low frequency (kHz)
-   * @param {number} peakFreq_Hz - Peak frequency (Hz)
-   * @param {number} peakPower_dB - Peak power (dB)
-   * @param {number} thisPower - Power at low frequency bin (dB)
-   * @param {number} prevPower - Power at previous bin (dB)
-   * @param {number} endThreshold_dB - End frequency threshold (dB)
-   * @param {number} freqBinWidth_Hz - Frequency distance between bins (Hz)
-   * @param {boolean} rebounceDetected - Whether rebounce was detected by anti-rebounce mechanism
-   * @returns {Object} {valid: boolean, reason: string, confidence: number (0-1)}
-   */
-  /**
-   * [2025 OPTIMIZED] Calculate Noise Floor per 10kHz Frequency Zone
-   * Fix: High frequency silence (<-100dB) is now clamped and included in stats 
-   * instead of being ignored, ensuring noise floor doesn't drift up to signal level.
-   * [UPDATE] Applied -2dB offset to final result per user request.
+   * [2025 OPTIMIZED & CONSISTENT] Calculate Noise Floor per 10kHz Frequency Zone
+   * Optimization: Uses a flat Int32Array for histograms to avoid GC and Object overhead.
+   * Consistency: STRICTLY matches the original logic:
+   * 1. Clamps < -100dB to -100dB.
+   * 2. Uses Math.floor() for binning.
+   * 3. Resolves ties by picking the LOWER dB value (Conservative Mode).
    * * @param {Array} spectrogram - Power matrix [time][freq]
    * @param {Float32Array} freqBins - Frequency bin values in Hz
    * @param {number} startFrame - Analysis start frame index
@@ -1707,73 +1734,109 @@ export class BatCallDetector {
    * @returns {Object} Map of zone start freq (kHz) -> noise floor (dB)
    */
   calculateZonalNoiseFloors(spectrogram, freqBins, startFrame, endFrame) {
-    const zoneFloors = {};
-    const zoneHistograms = {}; // Key: "10", "20" -> Array of dB values
-
-    // 定義系統最低底噪 (Hard floor)
+    // ============================================================
+    // 1. Constants (Strictly matching original logic)
+    // ============================================================
     const MIN_NOISE_FLOOR_DB = -100.0;
+    const OFFSET_DB = -2.0;
 
-    // 1. Initialize Histograms
-    const getZoneKey = (freqHz) => Math.floor(freqHz / 10000) * 10;
+    // Define Histogram Bounds (Integers)
+    // Original logic bins by Math.floor(val).
+    // We map dB values to array indices. 
+    // Range covered: -120dB to +20dB (Sufficient for standard audio)
+    const HIST_MIN = -120; 
+    const HIST_MAX = 20;
+    const HIST_RANGE = HIST_MAX - HIST_MIN + 1;
 
-    // 2. Collect dB values into zones
+    // ============================================================
+    // 2. Setup Memory-Efficient Histogram
+    // ============================================================
+    // Calculate how many zones we need (e.g., 0-150kHz -> 16 zones)
+    const maxFreq = freqBins[freqBins.length - 1];
+    const maxZoneIdx = Math.floor(maxFreq / 10000);
+    const numZones = maxZoneIdx + 1;
+
+    // Flat array to store counts for all zones
+    // Index = (ZoneIndex * HIST_RANGE) + (DbValue - HIST_MIN)
+    // This replaces the dynamic object/array structure.
+    const histograms = new Int32Array(numZones * HIST_RANGE);
+
+    // ============================================================
+    // 3. Single Pass Aggregation (Zero GC)
+    // ============================================================
     for (let f = startFrame; f <= endFrame; f++) {
       if (f >= spectrogram.length) break;
       const frame = spectrogram[f];
 
       for (let b = 0; b < frame.length; b++) {
-        const freqHz = freqBins[b];
         let powerDb = frame[b];
 
-        // Clamp silence to MIN_NOISE_FLOOR_DB
+        // [CONSISTENCY CHECK 1] Clamp silence to -100dB
         if (powerDb < MIN_NOISE_FLOOR_DB) {
           powerDb = MIN_NOISE_FLOOR_DB;
         }
 
-        const zoneKey = getZoneKey(freqHz);
+        // Determine Zone
+        // Note: Avoiding string conversion here saves significant CPU
+        const freqHz = freqBins[b];
+        const zoneIdx = Math.floor(freqHz / 10000);
 
-        if (!zoneHistograms[zoneKey]) {
-          zoneHistograms[zoneKey] = [];
+        // Determine dB Bin (Math.floor)
+        let intDb = Math.floor(powerDb);
+
+        // Safety clamp for array bounds (just in case of extreme signals)
+        if (intDb < HIST_MIN) intDb = HIST_MIN;
+        if (intDb > HIST_MAX) intDb = HIST_MAX;
+
+        // Increment count in the flat array
+        if (zoneIdx < numZones) {
+          const histIdx = (zoneIdx * HIST_RANGE) + (intDb - HIST_MIN);
+          histograms[histIdx]++;
         }
-        zoneHistograms[zoneKey].push(powerDb);
       }
     }
 
-    // 3. Calculate Mode (Most Frequent Value) & Apply Offset
-    const BIN_SIZE = 1.0; 
+    // ============================================================
+    // 4. Calculate Mode per Zone (Strictly matching tie-breaker)
+    // ============================================================
+    const zoneFloors = {};
 
-    Object.keys(zoneHistograms).forEach(key => {
-      const values = zoneHistograms[key];
-      if (values.length === 0) {
-        zoneFloors[key] = MIN_NOISE_FLOOR_DB - 2; // [OFFSET] Apply -2dB here as well
-        return;
-      }
-
-      const histogram = {};
+    for (let z = 0; z < numZones; z++) {
       let maxCount = 0;
-      let modeBin = MIN_NOISE_FLOOR_DB;
+      let modeDb = MIN_NOISE_FLOOR_DB; // Default if empty
+      let hasData = false;
 
-      for (const val of values) {
-        // Round to nearest integer bin for stability
-        const bin = Math.floor(val / BIN_SIZE) * BIN_SIZE;
+      // Iterate through the dB range for this zone
+      const offset = z * HIST_RANGE;
+      
+      // [CONSISTENCY CHECK 2] Loop from Low dB to High dB
+      for (let i = 0; i < HIST_RANGE; i++) {
+        const count = histograms[offset + i];
+        
+        if (count > 0) hasData = true;
 
-        const count = (histogram[bin] || 0) + 1;
-        histogram[bin] = count;
-
+        // Tie-breaker Logic:
+        // Original: if (count > max) update; else if (count == max && bin < mode) update;
+        // Since we iterate from LOW to HIGH dB:
+        // - If we find a `count > maxCount`, it's a new peak.
+        // - If we find a `count == maxCount`, the current `i` is HIGHER than the stored one.
+        //   The original rule says "pick smaller bin". So we do NOT update.
+        // -> Therefore, using strictly `>` ensures we keep the lowest dB bin in a tie.
         if (count > maxCount) {
           maxCount = count;
-          modeBin = bin;
-        } else if (count === maxCount) {
-          // 如果出現次數相同，取較小的值（保守估計底噪）
-          if (bin < modeBin) {
-            modeBin = bin;
-          }
+          modeDb = i + HIST_MIN; // Recover original Math.floor(dB) value
         }
       }
 
-      // [OFFSET] 在這裡統一減去 2dB
-      zoneFloors[key] = modeBin - 2;
-    });
+      // Restore string key format for compatibility ("0", "10", "20")
+      const zoneKey = (z * 10).toString();
+
+      if (hasData) {
+        zoneFloors[zoneKey] = modeDb + OFFSET_DB;
+      } else {
+        zoneFloors[zoneKey] = MIN_NOISE_FLOOR_DB + OFFSET_DB;
+      }
+    }
 
     return zoneFloors;
   }

@@ -1261,8 +1261,11 @@ function createBtnGroup(sel, isShortSelection = false) {
     if (!calls || calls.length === 0) return;
 
     const freqRange = maxFrequency - minFrequency;
+    
+    // 1. 建立一個陣列來收集數據
+    const summaryData = [];
 
-    calls.forEach(call => {
+    calls.forEach((call, index) => {
 
       let signalStartTime = call.startFreqTime_s;
       let signalEndTime = call.endFreqTime_s;
@@ -1305,8 +1308,24 @@ function createBtnGroup(sel, isShortSelection = false) {
         selObj.tooltip.style.display = 'none';
       }
       
-      console.log(`[FrequencyHover] Created auto selection: Time ${startTime.toFixed(3)}-${endTime.toFixed(3)}s`);
+      // 2. 收集數據而不是直接 log (已移除舊的 console.log)
+      summaryData.push({
+        '#': index + 1,
+        'Start (s)': startTime.toFixed(3),
+        'End (s)': endTime.toFixed(3),
+        'Duration (ms)': (Duration * 1000).toFixed(1),
+        'Low (kHz)': flow.toFixed(1),
+        'High (kHz)': fhigh.toFixed(1),
+        'Peak (kHz)': (call.peakFreq_kHz || 0).toFixed(1)
+      });
     });
+
+    // 3. 在迴圈結束後，顯示整齊的表格
+    if (summaryData.length > 0) {
+      console.groupCollapsed(`[FrequencyHover] Created ${summaryData.length} auto selections`);
+      console.table(summaryData);
+      console.groupEnd();
+    }
   }
 
 
