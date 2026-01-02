@@ -1,6 +1,5 @@
 // modules/callAnalysisPopup.js
-// 蝙蝠叫聲分析彈窗
-// 提供 Power Spectrum 計算、展示和蝙蝠叫聲參數分析功能
+
 
 import { initDropdown } from './dropdown.js';
 import { BatCallDetector } from './batCallDetector.js';
@@ -64,7 +63,12 @@ export function showCallAnalysisPopup({
   let batCallConfig = {
     windowType: windowType,
     callThreshold_dB: memory.callThreshold_dB,
-    // [2026] Removed High/Low Manual Config Keys - forcing defaults internally in detector
+    
+    // [FIXED] 強制啟用 Auto Threshold Mode
+    // 這是解決 Popup 數值不一致的關鍵，確保 Detector 進入掃描模式
+    highFreqThreshold_dB_isAuto: true,
+    lowFreqThreshold_dB_isAuto: true,
+
     characteristicFreq_percentEnd: memory.characteristicFreq_percentEnd,
     minCallDuration_ms: memory.minCallDuration_ms,
     fftSize: parseInt(memory.fftSize) || 1024,
@@ -244,9 +248,8 @@ export function showCallAnalysisPopup({
 
   // 根據 peakFreq 計算最佳的高通濾波器頻率（Auto Mode 使用）
   // 獨立的 Bat Call 檢測分析函數（只更新參數顯示，不重新計算 Power Spectrum）
-const updateBatCallAnalysis = async (peakFreq) => {
+  const updateBatCallAnalysis = async (peakFreq) => {
     try {
-      // ... (existing auto setup code) ...
       let highpassFilterFreqInput = popup.querySelector('#highpassFilterFreq_kHz');
       if (highpassFilterFreqInput) {
         const currentValue = highpassFilterFreqInput.value.trim();
@@ -258,7 +261,13 @@ const updateBatCallAnalysis = async (peakFreq) => {
         batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(peakFreq);
       }
       
-      detector.config = { ...batCallConfig };
+      // [FIXED] 使用合併配置，確保 auto flags 不會被覆蓋
+      detector.config = { 
+        ...detector.config, 
+        ...batCallConfig,   
+        highFreqThreshold_dB_isAuto: true,
+        lowFreqThreshold_dB_isAuto: true
+      };
       
       // 1. PREPARE NOISE SPECTROGRAM (Last 10ms of FULL file)
       // =========================================================
@@ -274,8 +283,6 @@ const updateBatCallAnalysis = async (peakFreq) => {
         const noiseStart = Math.max(0, fullChanData.length - noiseDurationSamples);
         let noiseAudio = fullChanData.slice(noiseStart);
         
-        // IMPORTANT: If detection uses Highpass Filter, apply it to Noise too 
-        // to ensure fair SNR comparison (Signal Filtered vs Noise Filtered)
         if (batCallConfig.enableHighpassFilter) {
            const highpassFreq_Hz = batCallConfig.highpassFilterFreq_kHz * 1000;
            noiseAudio = detector.applyHighpassFilter(
@@ -286,11 +293,10 @@ const updateBatCallAnalysis = async (peakFreq) => {
            );
         }
         
-        // Generate Noise Spectrogram
         noiseSpectrogram = detector.generateSpectrogram(
            noiseAudio,
            sampleRate,
-           selection.Flow, // Only generate relevant bins if possible, or filter later
+           selection.Flow, 
            selection.Fhigh
         );
       }
@@ -304,16 +310,17 @@ const updateBatCallAnalysis = async (peakFreq) => {
         audioDataForDetection = detector.applyHighpassFilter(audioDataForDetection, highpassFreq_Hz, sampleRate, batCallConfig.highpassFilterOrder);
       }
 
-      // 3. DETECT CALLS
-      // Pass noiseSpectrogram in options
+      // 3. DETECT CALLS (Auto-create ROI & Call Segment)
+      // 使用 detectCalls 讓 Detector 在選取範圍內自動尋找能量符合的 Call Segment
+      // 這會過濾掉選取框內的靜音部分，並精確鎖定 Start/End Time
       const calls = await detector.detectCalls(
         audioDataForDetection,
         sampleRate,
         selection.Flow,
         selection.Fhigh,
         { 
-          skipSNR: batCallConfig.enableHighpassFilter, // Skip if we are going to refine later (unless refined logic also needs it immediately)
-          noiseSpectrogram: noiseSpectrogram // Pass the noise reference
+          skipSNR: batCallConfig.enableHighpassFilter, 
+          noiseSpectrogram: noiseSpectrogram 
         } 
       );
       
@@ -321,7 +328,6 @@ const updateBatCallAnalysis = async (peakFreq) => {
       // =========================================================
       if (batCallConfig.enableHighpassFilter && calls.length > 0) {
         try {
-          // A. Generate Original (Unfiltered) Signal Spectrogram
           const rawSpectrogram = detector.generateSpectrogram(
             audioData,  // Original selection audio
             sampleRate,
@@ -329,8 +335,6 @@ const updateBatCallAnalysis = async (peakFreq) => {
             selection.Fhigh
           );
           
-          // B. Generate Original (Unfiltered) Noise Spectrogram
-          // We need unfiltered noise for the "Original Audio" SNR calculation
           let rawNoiseSpectrogram = null;
           if (fullBuffer) {
              const fullChanData = fullBuffer.getChannelData(0);
@@ -346,97 +350,77 @@ const updateBatCallAnalysis = async (peakFreq) => {
              );
           }
           
-          // C. Calculate SNR on Original Audio
           const snrResult = detector.calculateRMSbasedSNR(
             calls[0],
             rawSpectrogram.powerMatrix,
             rawSpectrogram.freqBins,
             calls[0].endFrameIdx_forLowFreq,
-            selection.Flow,  // Pass flow
-            selection.Fhigh, // Pass fhigh
-            rawNoiseSpectrogram // Pass unfiltered noise spectrogram
+            selection.Flow,
+            selection.Fhigh,
+            rawNoiseSpectrogram
           );
           
           if (snrResult.snr_dB !== null && isFinite(snrResult.snr_dB)) {
             calls[0].snr_dB = snrResult.snr_dB;
             calls[0].snrMechanism = 'RMS-based (2025) - Last 10ms (Original Audio)';
-            calls[0].snrDetails = {
-              // ... existing mapping ...
-              frequencyRange_kHz: snrResult.frequencyRange_kHz,
-              timeRange_frames: snrResult.timeRange_frames,
-              signalPowerMean_dB: snrResult.signalPowerMean_dB,
-              noisePowerMean_dB: snrResult.noisePowerMean_dB,
-              signalCount: snrResult.signalCount,
-              noiseCount: snrResult.noiseCount
-            };
             calls[0].quality = detector.getQualityRating(snrResult.snr_dB);
-            
-            // Log final SNR
-            console.log(`[SNR REFINED] Using last 10ms of original file... SNR: ${calls[0].snr_dB.toFixed(2)} dB`);
           }
         } catch (error) {
           console.warn(`[SNR] Failed to recalculate SNR on original audio: ${error.message}`);
         }
       }
       
-      // 更新 UI 以反映實際使用的 highFreqThreshold 值（用於 High Frequency 計算）
-      // 更新 UI 以反映實際使用的 highpassFilterFreq 值
-      // Auto mode 時：清空 value，在 placeholder 中顯示 "Auto (40)" 格式，灰色樣式
-      // Manual mode 時：顯示用戶設定的值
+      // 更新 UI Input 顯示
       if (!highpassFilterFreqInput) {
         highpassFilterFreqInput = popup.querySelector('#highpassFilterFreq_kHz');
       }
       if (highpassFilterFreqInput) {
         if (detector.config.highpassFilterFreq_kHz_isAuto === true) {
-          // Auto 模式：清空 value，在 placeholder 中顯示計算值，並設定灰色樣式
-          const displayValue = detector.config.highpassFilterFreq_kHz;  // 已在 updateBatCallAnalysis 開始時計算
-          
-          highpassFilterFreqInput.value = '';  // 清空 value
-          highpassFilterFreqInput.placeholder = `Auto (${displayValue})`;  // 更新 placeholder，顯示計算值
-          highpassFilterFreqInput.style.color = '#999';  // 灰色
+          const displayValue = detector.config.highpassFilterFreq_kHz;
+          highpassFilterFreqInput.value = '';
+          highpassFilterFreqInput.placeholder = `Auto (${displayValue})`;
+          highpassFilterFreqInput.style.color = '#999';
         } else {
-          // Manual 模式：顯示用戶設定的值，黑色文字
           highpassFilterFreqInput.value = detector.config.highpassFilterFreq_kHz.toString();
-          highpassFilterFreqInput.placeholder = 'Auto';  // 恢復預設 placeholder
-          highpassFilterFreqInput.style.color = 'var(--text-primary)';  // 黑色
+          highpassFilterFreqInput.placeholder = 'Auto';
+          highpassFilterFreqInput.style.color = 'var(--text-primary)';
         }
       }
       
+      // [CRITICAL FIX] 處理偵測結果與時間偏移校正
       if (calls.length > 0) {
-        const call = calls[0];  // 取第一個偵測到的 call
+        // 如果偵測到多個 Call（選取範圍太大），取持續時間最長或能量最強的（這裡取第一個）
+        const call = calls[0];
         
-        // 2025 NEW: Log SNR calculation mechanism and details
-        console.log('[SNR Calculation] Detection completed');
-        if (call.snrMechanism) {
-          console.log(`[SNR Mechanism] ${call.snrMechanism}`);
-        }
-        if (call.snrDetails) {
-          console.log(
-            `[SNR Range] Frequency: ${call.snrDetails.frequencyRange_kHz?.lowFreq?.toFixed(1) || '-'} ` +
-            `to ${call.snrDetails.frequencyRange_kHz?.highFreq?.toFixed(1) || '-'} kHz, ` +
-            `Time frames: ${call.snrDetails.timeRange_frames?.start || '-'} ` +
-            `to ${call.snrDetails.timeRange_frames?.end || '-'} ` +
-            `(${call.snrDetails.timeRange_frames?.duration || '-'} frames)`
-          );
-          console.log(
-            `[SNR Values] Signal power: ${call.snrDetails.signalPowerMean_dB?.toFixed(1) || '-'} dB (${call.snrDetails.signalCount || '-'} bins), ` +
-            `Noise power: ${call.snrDetails.noisePowerMean_dB?.toFixed(1) || '-'} dB (${call.snrDetails.noiseCount || '-'} bins)`
-          );
-        }
-        console.log(`[SNR Result] SNR = ${call.snr_dB?.toFixed(2) || '-'} dB, Quality: ${call.quality || '-'}`);
+        // 校正時間：detector 返回的時間是相對於 audioData (slice) 的 0 秒
+        // 必須加上 selection.startTime 才能對應到整個檔案的真實時間
+        const offset = selection.startTime;
+
+        // 注意：Duration 是相對值，不需要加 offset
+        if (call.startTime_s !== null) call.startTime_s += offset;
+        if (call.endTime_s !== null) call.endTime_s += offset;
         
-        // 2025: 存儲最新檢測到的 call 對象到 popup 上，供 selection rect warning 圖標使用
+        // 頻率特徵點的發生時間也需要校正
+        if (call.peakFreqTime_ms !== null) call.peakFreqTime_ms = (call.peakFreqTime_ms / 1000 + offset) * 1000;
+        if (call.highFreqTime_ms !== null) call.highFreqTime_ms = (call.highFreqTime_ms / 1000 + offset) * 1000;
+        if (call.lowFreq_ms !== null) call.lowFreq_ms = (call.lowFreq_ms / 1000 + offset) * 1000;
+        if (call.startFreq_ms !== null) call.startFreq_ms = (call.startFreq_ms / 1000 + offset) * 1000;
+        if (call.endFreq_ms !== null) call.endFreq_ms = (call.endFreq_ms / 1000 + offset) * 1000;
+        if (call.characteristicFreq_ms !== null) call.characteristicFreq_ms = (call.characteristicFreq_ms / 1000 + offset) * 1000;
+        if (call.kneeFreq_ms !== null) call.kneeFreq_ms = (call.kneeFreq_ms / 1000 + offset) * 1000;
+        
+        // 存儲最新檢測到的 call 對象到 popup 上
         popup.__latestDetectedCall = call;
         updateParametersDisplay(popup, call);
       } else {
-        // 如果沒有偵測到 call，所有參數顯示 '-'（包括 peak freq）
+        // 如果沒有偵測到符合閾值的 call，顯示空白或 fallback
         popup.__latestDetectedCall = null;
-        updateParametersDisplay(popup, null);
+        updateParametersDisplay(popup, null, peakFreq); // 傳入 peakFreq 作為 fallback 顯示
       }
     } catch (err) {
       console.error('Bat call detection error:', err);
       popup.__latestDetectedCall = null;
-      updateParametersDisplay(popup, null);
+      updateParametersDisplay(popup, null, peakFreq);
     }
   };
 
@@ -480,7 +464,12 @@ const updateBatCallAnalysis = async (peakFreq) => {
       batCallFFTSizeBtn.textContent = newFftSize.toString();
       
       // 更新 detector 配置
-      detector.config = { ...batCallConfig };
+      detector.config = { 
+          ...detector.config, 
+          ...batCallConfig,
+          highFreqThreshold_dB_isAuto: true,
+          lowFreqThreshold_dB_isAuto: true
+      };
       await updateBatCallAnalysis(lastPeakFreq);
     }
   });
@@ -555,13 +544,18 @@ const updateBatCallAnalysis = async (peakFreq) => {
     };
     
     // 2025: Auto Mode 時，根據原始 spectrum 的 peakFreq 計算自動高通濾波器頻率
-    // 這與 SNR 計算邏輯一致，都使用原始（未濾波）音頻的峰值頻率
     if (batCallConfig.highpassFilterFreq_kHz_isAuto === true && lastPeakFreq) {
       batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(lastPeakFreq);
     }
     
-    // 更新 detector 配置
-    detector.config = { ...batCallConfig };
+    // 更新 detector 配置 (使用合併，並強制 Auto Mode)
+    // [FIXED]
+    detector.config = { 
+        ...detector.config, 
+        ...batCallConfig,
+        highFreqThreshold_dB_isAuto: true,
+        lowFreqThreshold_dB_isAuto: true
+    };
     
     // 只進行 Bat Call 分析，不重新計算 Power Spectrum
     await updateBatCallAnalysis(lastPeakFreq);
