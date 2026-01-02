@@ -578,7 +578,7 @@ const tagControl = initTagControl();
   demoFetchController = new AbortController();
   try {
     const resp = await fetch(
-      'https://raw.githubusercontent.com/hkbatradar/SonoRadar/main/recording/demo_recording.wav',
+      './recording/demo_recording.wav',
       { signal: demoFetchController.signal }
     );
     const blob = await resp.blob();
