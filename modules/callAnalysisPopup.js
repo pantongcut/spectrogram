@@ -17,15 +17,18 @@ import {
  */
 window.__batCallControlsMemory = window.__batCallControlsMemory || {
   callThreshold_dB: -24,
-  // Removed High/Low Threshold Memory Keys
+  highFreqThreshold_dB: -24,  // Threshold for calculating High Frequency (optimal value range: -24 to -70)
+  highFreqThreshold_dB_isAuto: true,  // Auto mode for High Frequency threshold detection
+  lowFreqThreshold_dB: -27,   // Threshold for calculating Low Frequency (optimal value range: -24 to -70)
+  lowFreqThreshold_dB_isAuto: true,   // Auto mode for Low Frequency threshold detection
   characteristicFreq_percentEnd: 20,
   minCallDuration_ms: 2,
   fftSize: '1024',
   hopPercent: 3.125,
-  enableHighpassFilter: true,            
-  highpassFilterFreq_kHz: 40,            
-  highpassFilterFreq_kHz_isAuto: true,   
-  highpassFilterOrder: 4                 
+  enableHighpassFilter: true,            // Highpass filter enable/disable
+  highpassFilterFreq_kHz: 40,            // Highpass filter frequency (kHz)
+  highpassFilterFreq_kHz_isAuto: true,   // Auto mode for Highpass filter frequency detection
+  highpassFilterOrder: 4                 // Highpass filter order (1-8, step 1)
 };
 
 /**
@@ -64,7 +67,10 @@ export function showCallAnalysisPopup({
   let batCallConfig = {
     windowType: windowType,
     callThreshold_dB: memory.callThreshold_dB,
-    // [2026] Removed High/Low Manual Config Keys - forcing defaults internally in detector
+    highFreqThreshold_dB: memory.highFreqThreshold_dB,
+    highFreqThreshold_dB_isAuto: memory.highFreqThreshold_dB_isAuto !== false,  // Auto mode (default true)
+    lowFreqThreshold_dB: memory.lowFreqThreshold_dB,
+    lowFreqThreshold_dB_isAuto: memory.lowFreqThreshold_dB_isAuto !== false,    // Auto mode (default true)
     characteristicFreq_percentEnd: memory.characteristicFreq_percentEnd,
     minCallDuration_ms: memory.minCallDuration_ms,
     fftSize: parseInt(memory.fftSize) || 1024,
@@ -73,9 +79,10 @@ export function showCallAnalysisPopup({
     freqResolution_Hz: 1,
     callType: 'auto',
     cfRegionThreshold_dB: -30,
+    // Highpass Filter Parameters
     enableHighpassFilter: memory.enableHighpassFilter !== false,
     highpassFilterFreq_kHz: memory.highpassFilterFreq_kHz || 40,
-    highpassFilterFreq_kHz_isAuto: memory.highpassFilterFreq_kHz_isAuto !== false,
+    highpassFilterFreq_kHz_isAuto: memory.highpassFilterFreq_kHz_isAuto !== false,  // Auto mode (default true)
     highpassFilterOrder: memory.highpassFilterOrder || 4
   };
 
@@ -380,6 +387,61 @@ const updateBatCallAnalysis = async (peakFreq) => {
       }
       
       // 更新 UI 以反映實際使用的 highFreqThreshold 值（用於 High Frequency 計算）
+      // Auto mode 時：清空 value，在 placeholder 中顯示 "Auto (24)" 格式（絕對值），灰色樣式
+      // Manual mode 時：顯示用戶設定的絕對值
+      if (batCallHighThresholdInput) {
+        if (detector.config.highFreqThreshold_dB_isAuto === true) {
+          // Auto 模式：清空 value，在 placeholder 中顯示計算值（絕對值），並設定灰色樣式
+          // 2025: 使用實際檢測到的 call 使用的 threshold 值（而不是 config 中的值）
+          // 這樣可以正確反映該 call 實際使用的 threshold，特別是在防呆檢查後可能達到 -70dB 時
+          let displayValue = Math.abs(detector.config.highFreqThreshold_dB);  // 轉換為絕對值
+          
+          if (calls.length > 0) {
+            const firstCall = calls[0];
+            if (firstCall.highFreqThreshold_dB_used !== null && firstCall.highFreqThreshold_dB_used !== undefined) {
+              // 使用實際檢測到的 call 使用的 threshold 值（轉換為絕對值）
+              displayValue = Math.abs(firstCall.highFreqThreshold_dB_used);
+            }
+          }
+          
+          batCallHighThresholdInput.value = '';  // 清空 value
+          batCallHighThresholdInput.placeholder = `Auto (${displayValue})`;  // 更新 placeholder，顯示絕對值
+          batCallHighThresholdInput.style.color = '#999';  // 灰色
+        } else {
+          // Manual 模式：保持用戶輸入的值（已經是絕對值），黑色文字
+          batCallHighThresholdInput.value = Math.abs(detector.config.highFreqThreshold_dB).toString();
+          batCallHighThresholdInput.placeholder = 'Auto';  // 恢復預設 placeholder
+          batCallHighThresholdInput.style.color = 'var(--text-primary)';  // 黑色
+        }
+      }
+      
+      // 更新 UI 以反映實際使用的 lowFreqThreshold 值（用於 Low Frequency 計算）
+      // Auto mode 時：清空 value，在 placeholder 中顯示 "Auto (27)" 格式（絕對值），灰色樣式
+      // Manual mode 時：顯示用戶設定的絕對值
+      if (batCallLowThresholdInput) {
+        if (detector.config.lowFreqThreshold_dB_isAuto === true) {
+          // Auto 模式：清空 value，在 placeholder 中顯示計算值（絕對值），並設定灰色樣式
+          let displayValue = Math.abs(detector.config.lowFreqThreshold_dB);  // 轉換為絕對值
+          
+          if (calls.length > 0) {
+            const firstCall = calls[0];
+            if (firstCall.lowFreqThreshold_dB_used !== null && firstCall.lowFreqThreshold_dB_used !== undefined) {
+              // 使用實際檢測到的 call 使用的 threshold 值（轉換為絕對值）
+              displayValue = Math.abs(firstCall.lowFreqThreshold_dB_used);
+            }
+          }
+          
+          batCallLowThresholdInput.value = '';  // 清空 value
+          batCallLowThresholdInput.placeholder = `Auto (${displayValue})`;  // 更新 placeholder，顯示絕對值
+          batCallLowThresholdInput.style.color = '#999';  // 灰色
+        } else {
+          // Manual 模式：保持用戶輸入的值（已經是絕對值），黑色文字
+          batCallLowThresholdInput.value = Math.abs(detector.config.lowFreqThreshold_dB).toString();
+          batCallLowThresholdInput.placeholder = 'Auto';  // 恢復預設 placeholder
+          batCallLowThresholdInput.style.color = 'var(--text-primary)';  // 黑色
+        }
+      }
+      
       // 更新 UI 以反映實際使用的 highpassFilterFreq 值
       // Auto mode 時：清空 value，在 placeholder 中顯示 "Auto (40)" 格式，灰色樣式
       // Manual mode 時：顯示用戶設定的值
@@ -450,7 +512,8 @@ const updateBatCallAnalysis = async (peakFreq) => {
   // 初始化 Bat Call Controls 事件監聽器
   // ========================================================
   const batCallThresholdInput = popup.querySelector('#callThreshold_dB');
-  // [2026] Removed batCallHighThresholdInput, batCallLowThresholdInput
+  const batCallHighThresholdInput = popup.querySelector('#highThreshold_dB');
+  const batCallLowThresholdInput = popup.querySelector('#lowThreshold_dB');
   const batCallCharFreqPercentInput = popup.querySelector('#characteristicFreq_percentEnd');
   const batCallMinDurationInput = popup.querySelector('#minCallDuration_ms');
   const batCallHopPercentInput = popup.querySelector('#hopPercent');
@@ -490,19 +553,89 @@ const updateBatCallAnalysis = async (peakFreq) => {
   const fftSizeIndex = fftSizeItems.indexOf(batCallConfig.fftSize.toString());
   batCallFFTDropdown.select(fftSizeIndex >= 0 ? fftSizeIndex : 1, { triggerOnChange: false }); // Default to '1024'
 
-  // [2026] Removed mode tracking variables - Auto Mode only
+  // 2025: 追蹤前一個 mode 狀態，用於檢測 mode 改變
+  let lastHighFreqAutoMode = window.__batCallControlsMemory.highFreqThreshold_dB_isAuto !== false;
+  let lastLowFreqAutoMode = window.__batCallControlsMemory.lowFreqThreshold_dB_isAuto !== false;
 
   // 通用函數：更新所有 Bat Call 配置
   const updateBatCallConfig = async () => {
+    // 2025: 保存舊的 mode 狀態用於檢測改變
+    const oldHighFreqAutoMode = lastHighFreqAutoMode;
+    const oldLowFreqAutoMode = lastLowFreqAutoMode;
+    
     // callThreshold_dB: 用戶輸入絕對值，轉換為負值用於計算
     const callThreshValue = parseFloat(batCallThresholdInput.value) || 24;
     batCallConfig.callThreshold_dB = -callThreshValue;  // 轉換為負值
     
-    // [2026] Removed reading of High/Low Threshold Inputs logic - Auto Mode only
+    // 處理 High Frequency Threshold 的 Auto/Manual 模式
+    // 新 UI 格式：
+    // 處理 High Frequency Threshold 的 Auto/Manual 模式
+    // 新 UI 格式：
+    // - Auto 模式：value 為空（placeholder 顯示 "Auto (24)"）→ 設定 isAuto = true
+    // - Manual 模式：value 顯示用戶輸入的絕對值 "24" → 轉換為 -24 設定 isAuto = false
+    const highFreqThresholdValue = batCallHighThresholdInput.value.trim();
+    
+    if (highFreqThresholdValue === '') {
+      // Auto 模式：value 為空字符串
+      batCallConfig.highFreqThreshold_dB_isAuto = true;
+      batCallConfig.highFreqThreshold_dB = -24;  // 預設值，會被 findOptimalHighFrequencyThreshold 覆蓋
+      // Auto 模式不修改顯示，由 updateBatCallAnalysis 更新
+      
+      // 2025: 如果從 manual 切換到 auto，需要清除舊的 call 數據
+      // 因為舊的 call 對象可能保存了 manual mode 計算的 threshold 值
+      if (oldHighFreqAutoMode === false) {
+        // 從 manual 切換到 auto：清空 input value 並強制重新檢測
+        // 這樣新的 call 對象會有正確的 auto mode threshold 值
+        batCallHighThresholdInput.value = '';
+      }
+    } else {
+      // Manual 模式：嘗試解析為數字（絕對值），轉換為負值
+      const numValue = parseFloat(highFreqThresholdValue);
+      if (!isNaN(numValue)) {
+        batCallConfig.highFreqThreshold_dB_isAuto = false;
+        batCallConfig.highFreqThreshold_dB = -numValue;  // 轉換為負值
+      } else {
+        // 無效輸入，回退到 Auto
+        batCallConfig.highFreqThreshold_dB_isAuto = true;
+        batCallConfig.highFreqThreshold_dB = -24;
+      }
+    }
     
     batCallConfig.characteristicFreq_percentEnd = parseInt(batCallCharFreqPercentInput.value) || 20;
     batCallConfig.minCallDuration_ms = parseInt(batCallMinDurationInput.value) || 2;
     batCallConfig.hopPercent = parseInt(batCallHopPercentInput.value) || 3.125;
+    
+    // 處理 Low Frequency Threshold 的 Auto/Manual 模式
+    // 新 UI 格式：
+    // - Auto 模式：value 為空（placeholder 顯示 "Auto (27)"）→ 設定 isAuto = true
+    // - Manual 模式：value 顯示用戶輸入的絕對值 "27" → 轉換為 -27 設定 isAuto = false
+    const lowFreqThresholdValue = batCallLowThresholdInput.value.trim();
+    
+    if (lowFreqThresholdValue === '') {
+      // Auto 模式：value 為空字符串
+      batCallConfig.lowFreqThreshold_dB_isAuto = true;
+      batCallConfig.lowFreqThreshold_dB = -27;  // 預設值，會被 findOptimalLowFrequencyThreshold 覆蓋
+      // Auto 模式不修改顯示，由 updateBatCallAnalysis 更新
+      
+      // 2025: 如果從 manual 切換到 auto，需要清除舊的 call 數據
+      // 因為舊的 call 對象可能保存了 manual mode 計算的 threshold 值
+      if (oldLowFreqAutoMode === false) {
+        // 從 manual 切換到 auto：清空 input value 並強制重新檢測
+        // 這樣新的 call 對象會有正確的 auto mode threshold 值
+        batCallLowThresholdInput.value = '';
+      }
+    } else {
+      // Manual 模式：嘗試解析為數字（絕對值），轉換為負值
+      const numValue = parseFloat(lowFreqThresholdValue);
+      if (!isNaN(numValue)) {
+        batCallConfig.lowFreqThreshold_dB_isAuto = false;
+        batCallConfig.lowFreqThreshold_dB = -numValue;  // 轉換為負值
+      } else {
+        // 無效輸入，回退到 Auto
+        batCallConfig.lowFreqThreshold_dB_isAuto = true;
+        batCallConfig.lowFreqThreshold_dB = -27;
+      }
+    }
     
     // 2025 Highpass Filter Controls
     let highpassFilterCheckbox = highpassFilterCheckboxForListeners || popup.querySelector('#enableHighpassFilter');
@@ -543,6 +676,10 @@ const updateBatCallAnalysis = async (peakFreq) => {
     // 保存到全局記憶中
     window.__batCallControlsMemory = {
       callThreshold_dB: batCallConfig.callThreshold_dB,
+      highFreqThreshold_dB: batCallConfig.highFreqThreshold_dB,
+      highFreqThreshold_dB_isAuto: batCallConfig.highFreqThreshold_dB_isAuto,
+      lowFreqThreshold_dB: batCallConfig.lowFreqThreshold_dB,
+      lowFreqThreshold_dB_isAuto: batCallConfig.lowFreqThreshold_dB_isAuto,
       characteristicFreq_percentEnd: batCallConfig.characteristicFreq_percentEnd,
       minCallDuration_ms: batCallConfig.minCallDuration_ms,
       fftSize: batCallConfig.fftSize.toString(),
@@ -553,6 +690,21 @@ const updateBatCallAnalysis = async (peakFreq) => {
       highpassFilterFreq_kHz_isAuto: batCallConfig.highpassFilterFreq_kHz_isAuto,
       highpassFilterOrder: batCallConfig.highpassFilterOrder
     };
+    
+    // 2025 CRITICAL FIX: 檢測 mode 是否改變
+    // 如果從 manual 切換到 auto mode，需要清除舊的 call 數據強制重新檢測
+    // 因為舊的 call 對象保存的是 manual mode 的 threshold 值
+    const highFreqModeChanged = (lastHighFreqAutoMode !== batCallConfig.highFreqThreshold_dB_isAuto);
+    const lowFreqModeChanged = (lastLowFreqAutoMode !== batCallConfig.lowFreqThreshold_dB_isAuto);
+    
+    // 更新 mode 狀態以供下一次比較
+    lastHighFreqAutoMode = batCallConfig.highFreqThreshold_dB_isAuto;
+    lastLowFreqAutoMode = batCallConfig.lowFreqThreshold_dB_isAuto;
+    
+    if (highFreqModeChanged || lowFreqModeChanged) {
+      // Mode 改變時，強制重新檢測以獲得正確的 threshold 值
+      // （input value 已在上面的邏輯中被清空）
+    }
     
     // 2025: Auto Mode 時，根據原始 spectrum 的 peakFreq 計算自動高通濾波器頻率
     // 這與 SNR 計算邏輯一致，都使用原始（未濾波）音頻的峰值頻率
@@ -579,26 +731,70 @@ const updateBatCallAnalysis = async (peakFreq) => {
         if (e.key === 'ArrowUp') {
           e.preventDefault();
           
-          // [2026] Removed special handling for threshold inputs - Auto Mode only
-          // 普通數值 input
-          const step = parseFloat(inputElement.step) || 1;
-          const currentValue = parseFloat(inputElement.value) || 0;
-          const max = inputElement.max ? parseFloat(inputElement.max) : Infinity;
-          const newValue = Math.min(currentValue + step, max);
-          inputElement.value = newValue;
+          // 特殊處理 highThreshold 和 lowThreshold input
+          // 支持格式：空白 / "auto" / 純數值（絕對值）
+          if (inputElement.id === 'highThreshold_dB' || inputElement.id === 'lowThreshold_dB') {
+            const currentValue = inputElement.value.trim().toLowerCase();
+            
+            // 檢查是否是 Auto 模式（空白或"auto"）
+            if (currentValue === '' || currentValue === 'auto') {
+              // 從 Auto 切換到 24 (絕對值)
+              inputElement.value = '24';
+              inputElement.style.color = 'var(--text-primary)';
+              inputElement.style.fontStyle = 'normal';
+            } else {
+              // 數值增加，使用 step 值（0.5）
+              const step = parseFloat(inputElement.step) || 1;
+              const numValue = parseFloat(currentValue);
+              if (!isNaN(numValue)) {
+                const newValue = numValue + step;
+                const max = inputElement.max ? parseFloat(inputElement.max) : Infinity;
+                inputElement.value = Math.min(newValue, max).toString();
+              }
+            }
+          } else {
+            // 普通數值 input
+            const step = parseFloat(inputElement.step) || 1;
+            const currentValue = parseFloat(inputElement.value) || 0;
+            const max = inputElement.max ? parseFloat(inputElement.max) : Infinity;
+            const newValue = Math.min(currentValue + step, max);
+            inputElement.value = newValue;
+          }
           
           inputElement.dispatchEvent(new Event('input', { bubbles: true }));
           inputElement.dispatchEvent(new Event('change', { bubbles: true }));
         } else if (e.key === 'ArrowDown') {
           e.preventDefault();
           
-          // [2026] Removed special handling for threshold inputs - Auto Mode only
-          // 普通數值 input
-          const step = parseFloat(inputElement.step) || 1;
-          const currentValue = parseFloat(inputElement.value) || 0;
-          const min = inputElement.min ? parseFloat(inputElement.min) : -Infinity;
-          const newValue = Math.max(currentValue - step, min);
-          inputElement.value = newValue;
+          // 特殊處理 highThreshold 和 lowThreshold input
+          // 支持格式：空白 / "auto" / 純數值（絕對值）
+          if (inputElement.id === 'highThreshold_dB' || inputElement.id === 'lowThreshold_dB') {
+            const currentValue = inputElement.value.trim().toLowerCase();
+            
+            // 檢查是否是 Auto 模式（空白或"auto"）
+            if (currentValue === '' || currentValue === 'auto') {
+              // 從 Auto 切換到 70 (絕對值)
+              inputElement.value = '70';
+              inputElement.style.color = 'var(--text-primary)';
+              inputElement.style.fontStyle = 'normal';
+            } else {
+              // 數值減少，使用 step 值（0.5）
+              const step = parseFloat(inputElement.step) || 1;
+              const numValue = parseFloat(currentValue);
+              if (!isNaN(numValue)) {
+                const newValue = numValue - step;
+                const min = inputElement.min ? parseFloat(inputElement.min) : -Infinity;
+                inputElement.value = Math.max(newValue, min).toString();
+              }
+            }
+          } else {
+            // 普通數值 input
+            const step = parseFloat(inputElement.step) || 1;
+            const currentValue = parseFloat(inputElement.value) || 0;
+            const min = inputElement.min ? parseFloat(inputElement.min) : -Infinity;
+            const newValue = Math.max(currentValue - step, min);
+            inputElement.value = newValue;
+          }
           
           inputElement.dispatchEvent(new Event('input', { bubbles: true }));
           inputElement.dispatchEvent(new Event('change', { bubbles: true }));
@@ -648,7 +844,19 @@ const updateBatCallAnalysis = async (peakFreq) => {
   });
   addNumberInputKeyboardSupport(batCallThresholdInput);
 
-  // [2026] Removed event listeners for High/Low Threshold Inputs - Auto Mode only
+  batCallHighThresholdInput.addEventListener('change', updateBatCallConfig);
+  batCallHighThresholdInput.addEventListener('input', () => {
+    clearTimeout(batCallHighThresholdInput._updateTimeout);
+    batCallHighThresholdInput._updateTimeout = setTimeout(updateBatCallConfig, 30);
+  });
+  addNumberInputKeyboardSupport(batCallHighThresholdInput);
+
+  batCallLowThresholdInput.addEventListener('change', updateBatCallConfig);
+  batCallLowThresholdInput.addEventListener('input', () => {
+    clearTimeout(batCallLowThresholdInput._updateTimeout);
+    batCallLowThresholdInput._updateTimeout = setTimeout(updateBatCallConfig, 30);
+  });
+  addNumberInputKeyboardSupport(batCallLowThresholdInput);
 
   batCallCharFreqPercentInput.addEventListener('change', updateBatCallConfig);
   batCallCharFreqPercentInput.addEventListener('input', () => {
@@ -922,7 +1130,71 @@ function createPopupWindow() {
   callThresholdControl.appendChild(callThresholdInput);
   batCallControlPanel.appendChild(callThresholdControl);
 
-  // [2026] Removed High/Low Threshold DOM creation - Auto Mode only
+  // highFreqThreshold_dB 控制 (Auto 和 Manual 模式)
+  // 用於 High Frequency 邊界計算，獨立於 End/Low Frequency 的固定 -27dB 閾值
+  const highThresholdControl = document.createElement('label');
+  const highThresholdLabel = document.createElement('span');
+  highThresholdLabel.textContent = 'High Thresh:';
+  highThresholdControl.appendChild(highThresholdLabel);
+  
+  // Input field (可顯示 Auto 或具體數值)
+  const highThresholdInput = document.createElement('input');
+  highThresholdInput.id = 'highThreshold_dB';
+  highThresholdInput.type = 'number';
+  highThresholdInput.placeholder = 'Auto';
+  highThresholdInput.title = 'Auto or Manual High Frequency threshold (-24 to -70)';
+  highThresholdInput.style.width = '69px';
+  highThresholdInput.min = '24';
+  highThresholdInput.max = '70';
+  highThresholdInput.step = '0.5';
+  
+  // 根據模式初始化顯示
+  const isAutoMode = window.__batCallControlsMemory.highFreqThreshold_dB_isAuto !== false;
+  if (isAutoMode) {
+    // Auto 模式：顯示 "Auto" 格式，灰色樣式
+    highThresholdInput.value = '';  // 初始時為空白，等待第一次計算
+    highThresholdInput.style.color = '#999';
+  } else {
+    // Manual 模式：顯示具體值（絕對值），黑色樣式
+    highThresholdInput.value = Math.abs(window.__batCallControlsMemory.highFreqThreshold_dB).toString();
+    highThresholdInput.style.color = 'var(--text-primary)';
+  }
+  
+  highThresholdControl.appendChild(highThresholdInput);
+  batCallControlPanel.appendChild(highThresholdControl);
+
+  // lowFreqThreshold_dB 控制 (Auto 和 Manual 模式)
+  // 用於 Low Frequency 邊界計算，對稱於 High Frequency 控制
+  const lowThresholdControl = document.createElement('label');
+  const lowThresholdLabel = document.createElement('span');
+  lowThresholdLabel.textContent = 'Low Thresh:';
+  lowThresholdControl.appendChild(lowThresholdLabel);
+  
+  // Input field (可顯示 Auto 或具體數值)
+  const lowThresholdInput = document.createElement('input');
+  lowThresholdInput.id = 'lowThreshold_dB';
+  lowThresholdInput.type = 'number';
+  lowThresholdInput.placeholder = 'Auto';
+  lowThresholdInput.title = 'Auto or Manual Low Frequency threshold (-24 to -70)';
+  lowThresholdInput.style.width = '69px';
+  lowThresholdInput.min = '24';  // 絕對值範圍
+  lowThresholdInput.max = '70';
+  lowThresholdInput.step = '0.5';
+  
+  // 根據模式初始化顯示
+  const isLowAutoMode = window.__batCallControlsMemory.lowFreqThreshold_dB_isAuto !== false;
+  if (isLowAutoMode) {
+    // Auto 模式：顯示 "Auto" 格式，灰色樣式
+    lowThresholdInput.value = '';  // 初始時為空白，等待第一次計算
+    lowThresholdInput.style.color = '#999';
+  } else {
+    // Manual 模式：顯示具體值（絕對值），黑色樣式
+    lowThresholdInput.value = Math.abs(window.__batCallControlsMemory.lowFreqThreshold_dB).toString();
+    lowThresholdInput.style.color = 'var(--text-primary)';
+  }
+  
+  lowThresholdControl.appendChild(lowThresholdInput);
+  batCallControlPanel.appendChild(lowThresholdControl);
 
   // characteristicFreq_percentEnd 控制
   const charFreqPercentControl = document.createElement('label');
@@ -1089,6 +1361,7 @@ function createPopupWindow() {
   // 便於外層函數訪問這些輸入框
   popup.batCallInputs = {
     callThresholdInput,
+    highThresholdInput,
     charFreqPercentInput,
     minDurationInput,
     hopPercentInput,

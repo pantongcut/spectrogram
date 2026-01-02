@@ -6,13 +6,18 @@ export const DEFAULT_DETECTION_CONFIG = {
   callThreshold_dB: -24,
 
   // High frequency threshold (dB below peak for finding edges)
-  // [2026] Now strictly Auto-calculated
-  highFreqThreshold_dB: -24,  
+  highFreqThreshold_dB: -24,  // Threshold for calculating High Frequency (optimal value range: -24 to -70)
+
+  // Automatic high frequency threshold optimization, automatically tests thresholds from -24dB to -70dB to find optimal value that provides stable measurements
+  highFreqThreshold_dB_isAuto: true,
 
   // Low frequency threshold (dB below peak for finding edges) 
   // Fixed at -27dB for anti-rebounce compatibility
-  // [2026] Now strictly Auto-calculated
+  // This is used for finding the lowest frequency in the call (last frame)
   lowFreqThreshold_dB: -27,
+
+  // Automatic low frequency threshold optimization, automatically tests thresholds from -24dB to -70dB to find optimal value that provides stable measurements
+  lowFreqThreshold_dB_isAuto: true,
 
   // Characteristic frequency is defined as lowest or average frequency in the last 10-20% of the call duration
   characteristicFreq_percentEnd: 20,  // Last 20% duration
