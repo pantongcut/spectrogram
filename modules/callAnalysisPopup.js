@@ -63,12 +63,6 @@ export function showCallAnalysisPopup({
   let batCallConfig = {
     windowType: windowType,
     callThreshold_dB: memory.callThreshold_dB,
-    
-    // [FIXED] 強制啟用 Auto Threshold Mode
-    // 這是解決 Popup 數值不一致的關鍵，確保 Detector 進入掃描模式
-    highFreqThreshold_dB_isAuto: true,
-    lowFreqThreshold_dB_isAuto: true,
-
     characteristicFreq_percentEnd: memory.characteristicFreq_percentEnd,
     minCallDuration_ms: memory.minCallDuration_ms,
     fftSize: parseInt(memory.fftSize) || 1024,
@@ -261,12 +255,10 @@ export function showCallAnalysisPopup({
         batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(peakFreq);
       }
       
-      // [FIXED] 使用合併配置，確保 auto flags 不會被覆蓋
+      // Apply merged configuration
       detector.config = { 
         ...detector.config, 
-        ...batCallConfig,   
-        highFreqThreshold_dB_isAuto: true,
-        lowFreqThreshold_dB_isAuto: true
+        ...batCallConfig
       };
       
       // 1. PREPARE NOISE SPECTROGRAM (Last 10ms of FULL file)
@@ -463,12 +455,10 @@ export function showCallAnalysisPopup({
       // 更新 UI 按鈕文本
       batCallFFTSizeBtn.textContent = newFftSize.toString();
       
-      // 更新 detector 配置
+      // Update detector configuration
       detector.config = { 
           ...detector.config, 
-          ...batCallConfig,
-          highFreqThreshold_dB_isAuto: true,
-          lowFreqThreshold_dB_isAuto: true
+          ...batCallConfig
       };
       await updateBatCallAnalysis(lastPeakFreq);
     }
@@ -548,13 +538,10 @@ export function showCallAnalysisPopup({
       batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(lastPeakFreq);
     }
     
-    // 更新 detector 配置 (使用合併，並強制 Auto Mode)
-    // [FIXED]
+    // Update detector configuration with merged settings
     detector.config = { 
         ...detector.config, 
-        ...batCallConfig,
-        highFreqThreshold_dB_isAuto: true,
-        lowFreqThreshold_dB_isAuto: true
+        ...batCallConfig
     };
     
     // 只進行 Bat Call 分析，不重新計算 Power Spectrum

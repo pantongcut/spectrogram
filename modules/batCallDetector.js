@@ -8,16 +8,10 @@ export const DEFAULT_DETECTION_CONFIG = {
   // High frequency threshold (dB below peak for finding edges)
   highFreqThreshold_dB: -24,  // Threshold for calculating High Frequency (optimal value range: -24 to -70)
 
-  // Automatic high frequency threshold optimization, automatically tests thresholds from -24dB to -70dB to find optimal value that provides stable measurements
-  highFreqThreshold_dB_isAuto: true,
-
   // Low frequency threshold (dB below peak for finding edges) 
   // Fixed at -27dB for anti-rebounce compatibility
   // This is used for finding the lowest frequency in the call (last frame)
   lowFreqThreshold_dB: -27,
-
-  // Automatic low frequency threshold optimization, automatically tests thresholds from -24dB to -70dB to find optimal value that provides stable measurements
-  lowFreqThreshold_dB_isAuto: true,
 
   // Characteristic frequency is defined as lowest or average frequency in the last 10-20% of the call duration
   characteristicFreq_percentEnd: 20,  // Last 20% duration
@@ -3046,30 +3040,30 @@ export class BatCallDetector {
     let skipStep2HighFrequency = false;
     let isCFCallDetected = false; // 2025 NEW: Flag for CF Call
 
-    if (this.config.highFreqThreshold_dB_isAuto === true) {
-      const result = this.findOptimalHighFrequencyThreshold(
-        spectrogram,
-        timeFrames,
-        freqBins,
-        flowKHz,
-        fhighKHz,
-        peakPower_dB,  // Pass stable call peak value instead of computing global peak again
-        peakFrameIdx,  // Pass peak frame index to only check frames before peak
-        zonalNoiseMap  // [NEW] Pass the pre-calculated map
-      );
+    // Always execute Optimal Threshold Search (Auto Mode)
+    const result = this.findOptimalHighFrequencyThreshold(
+      spectrogram,
+      timeFrames,
+      freqBins,
+      flowKHz,
+      fhighKHz,
+      peakPower_dB,  // Pass stable call peak value instead of computing global peak again
+      peakFrameIdx,  // Pass peak frame index to only check frames before peak
+      zonalNoiseMap  // [NEW] Pass the pre-calculated map
+    );
 
-      // Capture CF Detection Result
-      isCFCallDetected = result.isCFStablePattern;
-      if (isCFCallDetected) {
-        console.log('[Detector] CF Call Species Pattern Detected (Stable High Freq)');
-      }
+    // Capture CF Detection Result
+    isCFCallDetected = result.isCFStablePattern;
+    if (isCFCallDetected) {
+      console.log('[Detector] CF Call Species Pattern Detected (Stable High Freq)');
+    }
 
-      safeHighFreq_kHz = result.highFreq_kHz;
-      safeHighFreq_Hz = result.highFreq_Hz;
-      safeHighFreqBinIdx = result.highFreqBinIdx;  
-      safeHighFreqFrameIdx = result.highFreqFrameIdx; 
-      finalSearchLimitFrameFromAuto = result.finalSearchLimitFrame; 
-      let usedThreshold = result.threshold;
+    safeHighFreq_kHz = result.highFreq_kHz;
+    safeHighFreq_Hz = result.highFreq_Hz;
+    safeHighFreqBinIdx = result.highFreqBinIdx;  
+    safeHighFreqFrameIdx = result.highFreqFrameIdx; 
+    finalSearchLimitFrameFromAuto = result.finalSearchLimitFrame; 
+    let usedThreshold = result.threshold;
 
       // ============================================================
       // [OPTIMIZED 2025] High Freq Safety Re-scan
@@ -3113,30 +3107,29 @@ export class BatCallDetector {
         }
       }
 
-      // Update the config with the calculated optimal threshold
-      this.config.highFreqThreshold_dB = usedThreshold;
-      call.highFreqThreshold_dB_used = usedThreshold;
+    // Update the config with the calculated optimal threshold
+    this.config.highFreqThreshold_dB = usedThreshold;
+    call.highFreqThreshold_dB_used = usedThreshold;
 
-      // ============================================================
-      // 2025 NEW: DIRECT ASSIGNMENT - Trust Auto Mode Result
-      // If Auto Mode found a valid high frequency, assign it directly
-      // ============================================================
-      if (safeHighFreq_kHz !== null) {
-        call.highFreq_kHz = safeHighFreq_kHz;
-        call.highFreqFrameIdx = safeHighFreqFrameIdx;
+    // ============================================================
+    // 2025 NEW: DIRECT ASSIGNMENT - Trust Auto Mode Result
+    // If Auto Mode found a valid high frequency, assign it directly
+    // ============================================================
+    if (safeHighFreq_kHz !== null) {
+      call.highFreq_kHz = safeHighFreq_kHz;
+      call.highFreqFrameIdx = safeHighFreqFrameIdx;
 
-        // Calculate high frequency time immediately
-        const firstFrameTimeInSeconds = timeFrames[0];
-        if (safeHighFreqFrameIdx < timeFrames.length) {
-          const highFreqTimeInSeconds = timeFrames[safeHighFreqFrameIdx];
-          call.highFreqTime_ms = (highFreqTimeInSeconds - firstFrameTimeInSeconds) * 1000;
-        } else {
-          call.highFreqTime_ms = 0;
-        }
-
-        // Flag to skip Step 2 re-calculation
-        skipStep2HighFrequency = true;
+      // Calculate high frequency time immediately
+      const firstFrameTimeInSeconds = timeFrames[0];
+      if (safeHighFreqFrameIdx < timeFrames.length) {
+        const highFreqTimeInSeconds = timeFrames[safeHighFreqFrameIdx];
+        call.highFreqTime_ms = (highFreqTimeInSeconds - firstFrameTimeInSeconds) * 1000;
+      } else {
+        call.highFreqTime_ms = 0;
       }
+
+      // Flag to skip Step 2 re-calculation
+      skipStep2HighFrequency = true;
     }
 
     // ============================================================
@@ -3150,12 +3143,8 @@ export class BatCallDetector {
     // ============================================================
     // End & Low Frequency Threshold Setup
     // ============================================================
-    let endThreshold_dB;
-    if (this.config.lowFreqThreshold_dB_isAuto === false) {
-      endThreshold_dB = peakPower_dB + this.config.lowFreqThreshold_dB;
-    } else {
-      endThreshold_dB = peakPower_dB - 27;
-    }
+    // Always use fixed offset for time boundary detection (Auto Mode)
+    const endThreshold_dB = peakPower_dB - 27;
 
     // 找到第一個幀，其中有信號超過閾值
     let newStartFrameIdx = 0;
@@ -3215,7 +3204,7 @@ export class BatCallDetector {
 
     if (!skipStep2HighFrequency) {
       // 2025 v2: 使用 AUTO MODE 返回的 finalSearchLimitFrame
-      const highFreqScanLimit = (this.config.highFreqThreshold_dB_isAuto === true && finalSearchLimitFrameFromAuto > 0)
+      const highFreqScanLimit = (finalSearchLimitFrameFromAuto > 0)
         ? Math.min(finalSearchLimitFrameFromAuto, spectrogram.length - 1)
         : Math.min(peakFrameIdx, spectrogram.length - 1);
 
@@ -3444,91 +3433,90 @@ export class BatCallDetector {
     let lowFreq_kHz = lowFreq_Hz / 1000;
 
     // ============================================================
-    // AUTO MODE: If lowFreqThreshold_dB_isAuto is enabled
+    // AUTO MODE: Low Frequency Threshold
     // ============================================================
-    if (this.config.lowFreqThreshold_dB_isAuto === true) {
-      const result = this.findOptimalLowFrequencyThreshold(
-        spectrogram,
-        timeFrames,
-        freqBins,
-        flowKHz,
-        fhighKHz,
-        peakPower_dB,
-        peakFrameIdx,
-        endFrameIdx_forLowFreq,
-        zonalNoiseMap 
-      );
+    // Always execute Optimal Low Freq Search
+    const resultLow = this.findOptimalLowFrequencyThreshold(
+      spectrogram,
+      timeFrames,
+      freqBins,
+      flowKHz,
+      fhighKHz,
+      peakPower_dB,
+      peakFrameIdx,
+      endFrameIdx_forLowFreq,
+      zonalNoiseMap 
+    );
 
-      let safeLowFreq_kHz = result.lowFreq_kHz;
-      let safeEndFreq_kHz = result.endFreq_kHz;
-      let usedThreshold = result.threshold;
+    let safeLowFreq_kHz = resultLow.lowFreq_kHz;
+    let safeEndFreq_kHz = resultLow.endFreq_kHz;
+    usedThreshold = resultLow.threshold;
 
-      // ============================================================
-      // [OPTIMIZED 2025] Low Freq Safety Re-scan
-      // 如果最優閾值的 Low Frequency 高於 Peak Frequency，執行防呆檢查
-      // ============================================================
-      if (result.lowFreq_kHz !== null && result.lowFreq_kHz > (peakFreq_Hz / 1000)) {
-        const peakFreq_kHz = peakFreq_Hz / 1000;
-        const lastFramePowerForTest = spectrogram[spectrogram.length - 1];
+    // ============================================================
+    // [OPTIMIZED 2025] Low Freq Safety Re-scan
+    // 如果最優閾值的 Low Frequency 高於 Peak Frequency，執行防呆檢查
+    // ============================================================
+    if (resultLow.lowFreq_kHz !== null && resultLow.lowFreq_kHz > (peakFreq_Hz / 1000)) {
+      const peakFreq_kHz = peakFreq_Hz / 1000;
+      const lastFramePowerForTest = spectrogram[spectrogram.length - 1];
 
-        // 重新測試閾值範圍
-        for (let testThreshold_dB = -24; testThreshold_dB >= -70; testThreshold_dB--) {
-          const lowFreqThreshold_dB = peakPower_dB + testThreshold_dB;
+      // 重新測試閾值範圍
+      for (let testThreshold_dB = -24; testThreshold_dB >= -70; testThreshold_dB--) {
+        const lowFreqThreshold_dB = peakPower_dB + testThreshold_dB;
 
-          // Use Helper to scan Low to High
-          const scanRes = this._scanSpectrumForFrequency(lastFramePowerForTest, freqBins, lowFreqThreshold_dB, 'LowToHigh');
-          
-          if (scanRes && (scanRes.freq_Hz / 1000) <= peakFreq_kHz) {
-            safeLowFreq_kHz = scanRes.freq_Hz / 1000;
-            safeEndFreq_kHz = safeLowFreq_kHz; // End freq = low freq
-            usedThreshold = testThreshold_dB;
-            break; // Found valid
-          }
+        // Use Helper to scan Low to High
+        const scanRes = this._scanSpectrumForFrequency(lastFramePowerForTest, freqBins, lowFreqThreshold_dB, 'LowToHigh');
+        
+        if (scanRes && (scanRes.freq_Hz / 1000) <= peakFreq_kHz) {
+          safeLowFreq_kHz = scanRes.freq_Hz / 1000;
+          safeEndFreq_kHz = safeLowFreq_kHz; // End freq = low freq
+          usedThreshold = testThreshold_dB;
+          break; // Found valid
         }
       }
+    }
 
-      // Update the config with the calculated optimal threshold
-      // 2025 SAFETY MECHANISM: 應用安全機制 - 如果 usedThreshold 達到 -70，改用 -30
-      const finalSafeThreshold = (usedThreshold <= -70) ? -30 : usedThreshold;
-      this.config.lowFreqThreshold_dB = finalSafeThreshold;
-      call.lowFreqThreshold_dB_used = finalSafeThreshold;
+    // Update the config with the calculated optimal threshold
+    // 2025 SAFETY MECHANISM: 應用安全機制 - 如果 usedThreshold 達到 -70，改用 -30
+    const finalSafeThresholdLow = (usedThreshold <= -70) ? -30 : usedThreshold;
+    this.config.lowFreqThreshold_dB = finalSafeThresholdLow;
+    call.lowFreqThreshold_dB_used = finalSafeThresholdLow;
 
-      // 如果安全機制改變了閾值，使用新閾值重新計算 lowFreq_Hz
-      if (finalSafeThreshold !== usedThreshold) {
-        const lastFramePowerForSafe = spectrogram[spectrogram.length - 1];
-        const lowFreqThreshold_dB_safe = peakPower_dB + finalSafeThreshold;
+    // 如果安全機制改變了閾值，使用新閾值重新計算 lowFreq_Hz
+    if (finalSafeThresholdLow !== usedThreshold) {
+      const lastFramePowerForSafe = spectrogram[spectrogram.length - 1];
+      const lowFreqThreshold_dB_safe = peakPower_dB + finalSafeThresholdLow;
 
-        const safeScanRes = this._scanSpectrumForFrequency(lastFramePowerForSafe, freqBins, lowFreqThreshold_dB_safe, 'LowToHigh');
-        if (safeScanRes) {
-           safeLowFreq_kHz = safeScanRes.freq_Hz / 1000;
-           safeEndFreq_kHz = safeLowFreq_kHz;
-        }
+      const safeScanRes = this._scanSpectrumForFrequency(lastFramePowerForSafe, freqBins, lowFreqThreshold_dB_safe, 'LowToHigh');
+      if (safeScanRes) {
+         safeLowFreq_kHz = safeScanRes.freq_Hz / 1000;
+         safeEndFreq_kHz = safeLowFreq_kHz;
+      }
+    }
+
+    lowFreq_kHz = safeLowFreq_kHz;
+    endFreq_kHz = safeEndFreq_kHz; // Declare locally since we are in the block
+
+    // Auto mode: End Frequency = Auto-calculated Low Frequency
+    call.endFreq_kHz = endFreq_kHz;
+
+    // Sync Time & Duration with Auto-Detected End Frame
+    if (resultLow.lowFreqFrameIdx !== undefined && resultLow.lowFreqFrameIdx !== null) {
+      const newAutoEndFrameIdx = resultLow.lowFreqFrameIdx;
+      call.endFrameIdx_forLowFreq = newAutoEndFrameIdx;
+      call.lowFreqFrameIdx = newAutoEndFrameIdx;
+
+      if (newAutoEndFrameIdx < timeFrames.length) {
+        call.endFreqTime_s = timeFrames[newAutoEndFrameIdx];
       }
 
-      lowFreq_kHz = safeLowFreq_kHz;
-      endFreq_kHz = safeEndFreq_kHz;
+      const firstFrameTime = timeFrames[0];
+      const newEndTime_ms = (call.endFreqTime_s - firstFrameTime) * 1000;
+      call.lowFreq_ms = newEndTime_ms;
+      call.endFreq_ms = newEndTime_ms;
 
-      // Auto mode: End Frequency = Auto-calculated Low Frequency
-      call.endFreq_kHz = endFreq_kHz;
-
-      // [2025 FIX] Sync Time & Duration with Auto-Detected End Frame
-      if (result.lowFreqFrameIdx !== undefined && result.lowFreqFrameIdx !== null) {
-        const newAutoEndFrameIdx = result.lowFreqFrameIdx;
-        call.endFrameIdx_forLowFreq = newAutoEndFrameIdx;
-        call.lowFreqFrameIdx = newAutoEndFrameIdx;
-
-        if (newAutoEndFrameIdx < timeFrames.length) {
-          call.endFreqTime_s = timeFrames[newAutoEndFrameIdx];
-        }
-
-        const firstFrameTime = timeFrames[0];
-        const newEndTime_ms = (call.endFreqTime_s - firstFrameTime) * 1000;
-        call.lowFreq_ms = newEndTime_ms;
-        call.endFreq_ms = newEndTime_ms;
-
-        if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
-          call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
-        }
+      if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
+        call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
       }
     }
 
