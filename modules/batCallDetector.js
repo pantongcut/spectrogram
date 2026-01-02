@@ -604,6 +604,13 @@ export class BatCallDetector {
 
       let { powerMatrix, timeFrames, freqBins, freqResolution } = spec;
 
+      const roiZonalNoiseMap = this.calculateZonalNoiseFloors(
+        powerMatrix, 
+        freqBins, 
+        0, 
+        Math.min(5, powerMatrix.length - 1) // 取前 5 frames
+      );
+
       // 3.2 [Optional] Auto-HPF Logic
       // Check global peak of this ROI to decide if HPF is needed
       let maxPower = -Infinity;
@@ -714,7 +721,7 @@ export class BatCallDetector {
 
       for (const segment of keptCandidates) {
         const call = new BatCall();
-
+        
         // Padding Logic (Same as detectCalls)
         const pad_ms = 5;
         const timePerFrame = timeFrames[1] - timeFrames[0];
@@ -773,16 +780,14 @@ export class BatCallDetector {
         call.calculateDuration();
 
         // Run Detailed Measurement
-        this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution);
+        this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution, roiZonalNoiseMap);
 
         // Classify
         call.Flow = call.lowFreq_kHz * 1000;
         call.Fhigh = call.highFreq_kHz;
         call.callType = CallTypeClassifier.classify(call); // Assuming imported
 
-        // SNR Calculation (Optional: Can skip if needed for speed)
-        // ... (SNR code if needed, using robustNoiseFloor) ...
-        // Simplification for speed:
+        // SNR Calculation (Simplified)
         call.snr_dB = call.peakPower_dB - (-80); // Placeholder or calculate properly
         call.quality = this.getQualityRating(call.snr_dB);
 
@@ -791,12 +796,7 @@ export class BatCallDetector {
         call.endTime_s += timeOffset_s;
         if (call.startFreqTime_s !== null) call.startFreqTime_s += timeOffset_s;
         if (call.endFreqTime_s !== null) call.endFreqTime_s += timeOffset_s;
-        if (call.peakFreqTime_ms !== null) call.peakFreqTime_ms = call.peakFreqTime_ms; // ms is relative to start, so handled by logic? 
-        // Note: peakFreqTime_ms in BatCall is usually "time offset from selection start".
-        // If we want absolute time for UI plotting:
-        // Better to keep it relative to call start, or convert properly.
-        // Standard: peakFreqTime_ms is relative to selection (now call) start.
-
+        
         allCalls.push(call);
       }
 
@@ -1055,17 +1055,34 @@ export class BatCallDetector {
     let globalZonalNoiseMap = null;
 
     if (options.noiseSpectrogram && options.noiseSpectrogram.powerMatrix && options.noiseSpectrogram.powerMatrix.length > 0) {
-      // 情況 A: 使用外部傳入的 Last 10ms Noise Spectrogram
+      const ns = options.noiseSpectrogram;
+      const totalNoiseFrames = ns.powerMatrix.length;
+      let startFrameIdx = 0;
+
+      // 計算 5ms 對應多少 Frames
+      if (ns.timeFrames && ns.timeFrames.length > 1) {
+        const timePerFrame = ns.timeFrames[1] - ns.timeFrames[0]; // 秒
+        const targetDuration_sec = 0.005; // 5ms
+        const framesFor5ms = Math.ceil(targetDuration_sec / timePerFrame);
+
+        // 設定起始點：總長度 - 5ms的Frame數 (確保只取最後一段)
+        startFrameIdx = Math.max(0, totalNoiseFrames - framesFor5ms);
+        
+        // Debug Log (Optional)
+        // console.log(`[Detector] Noise Map Source: Last 5ms (Frames ${startFrameIdx} - ${totalNoiseFrames-1})`);
+      }
+
+      // 情況 A: 使用外部傳入的 Noise Spectrogram (Last 5ms)
       globalZonalNoiseMap = this.calculateZonalNoiseFloors(
-        options.noiseSpectrogram.powerMatrix,
-        options.noiseSpectrogram.freqBins,
-        0,
-        options.noiseSpectrogram.powerMatrix.length - 1
+        ns.powerMatrix,
+        ns.freqBins,
+        startFrameIdx,      // <--- 從倒數 5ms 處開始
+        totalNoiseFrames - 1
       );
-      //   console.log('[Detector] Using External Last 10ms Noise Map:', globalZonalNoiseMap);
+
     } else {
-      // 情況 B: Fallback (如果沒有外部噪音樣本，使用當前頻譜的前 5 frame 作為估計)
-      // 雖然不如 Last 10ms 準確，但比動態計算快
+      // 情況 B: Fallback (使用當前選取範圍的前 5 Frames)
+      // 這通常是選取範圍開頭的靜音區
       globalZonalNoiseMap = this.calculateZonalNoiseFloors(
         powerMatrix,
         freqBins,
