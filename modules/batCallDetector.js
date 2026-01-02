@@ -1047,6 +1047,33 @@ export class BatCallDetector {
 
     const { powerMatrix, timeFrames, freqBins, freqResolution } = spectrogram;
 
+    // ============================================================
+    // 2025 OPTIMIZATION: Pre-calculate Zonal Noise Map (Last 10ms)
+    // 利用 RMS-based SNR 的邏輯，優先使用外部的 noiseSpectrogram (Last 10ms)
+    // 這樣在 findOptimalThreshold 時不用重複計算，且基準更穩定。
+    // ============================================================
+    let globalZonalNoiseMap = null;
+
+    if (options.noiseSpectrogram && options.noiseSpectrogram.powerMatrix && options.noiseSpectrogram.powerMatrix.length > 0) {
+      // 情況 A: 使用外部傳入的 Last 10ms Noise Spectrogram
+      globalZonalNoiseMap = this.calculateZonalNoiseFloors(
+        options.noiseSpectrogram.powerMatrix,
+        options.noiseSpectrogram.freqBins,
+        0,
+        options.noiseSpectrogram.powerMatrix.length - 1
+      );
+      //   console.log('[Detector] Using External Last 10ms Noise Map:', globalZonalNoiseMap);
+    } else {
+      // 情況 B: Fallback (如果沒有外部噪音樣本，使用當前頻譜的前 5 frame 作為估計)
+      // 雖然不如 Last 10ms 準確，但比動態計算快
+      globalZonalNoiseMap = this.calculateZonalNoiseFloors(
+        powerMatrix,
+        freqBins,
+        0,
+        Math.min(5, powerMatrix.length - 1)
+      );
+    }
+
     // Phase 1: Detect call boundaries using energy threshold
     const callSegments = this.detectCallSegments(powerMatrix, timeFrames, freqBins, flowKHz, fhighKHz);
 
@@ -1134,7 +1161,8 @@ export class BatCallDetector {
         return null;
       }
 
-      this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution);
+      // [CRITICAL] 傳遞預計算的 globalZonalNoiseMap
+      this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution, globalZonalNoiseMap);
 
       call.Flow = call.lowFreq_kHz * 1000;
       call.Fhigh = call.highFreq_kHz;
@@ -1765,6 +1793,7 @@ export class BatCallDetector {
    * [2025 OPTIMIZED] Calculate Noise Floor per 10kHz Frequency Zone
    * Fix: High frequency silence (<-100dB) is now clamped and included in stats 
    * instead of being ignored, ensuring noise floor doesn't drift up to signal level.
+   * [UPDATE] Applied -2dB offset to final result per user request.
    * * @param {Array} spectrogram - Power matrix [time][freq]
    * @param {Float32Array} freqBins - Frequency bin values in Hz
    * @param {number} startFrame - Analysis start frame index
@@ -1776,8 +1805,6 @@ export class BatCallDetector {
     const zoneHistograms = {}; // Key: "10", "20" -> Array of dB values
 
     // 定義系統最低底噪 (Hard floor)
-    // 任何低於此值的信號都被視為絕對靜音/底噪，並納入統計
-    // 這確保了高頻區的"安靜" Bin 能夠將 Mode 拉回正確的低水平
     const MIN_NOISE_FLOOR_DB = -100.0;
 
     // 1. Initialize Histograms
@@ -1792,9 +1819,7 @@ export class BatCallDetector {
         const freqHz = freqBins[b];
         let powerDb = frame[b];
 
-        // [FIX] 不再過濾掉 <-100 的值 (if powerDb < -100 continue)
-        // 而是將其 Clamp 到最低底噪值並納入統計。
-        // 這樣如果高頻區大部分是靜音，Histogram 的 Mode 就會正確落在 -100dB
+        // Clamp silence to MIN_NOISE_FLOOR_DB
         if (powerDb < MIN_NOISE_FLOOR_DB) {
           powerDb = MIN_NOISE_FLOOR_DB;
         }
@@ -1808,13 +1833,13 @@ export class BatCallDetector {
       }
     }
 
-    // 3. Calculate Mode (Most Frequent Value)
-    const BIN_SIZE = 1.0; // 稍微增大 Bin Size 以獲得更平滑的統計 (0.5 -> 1.0)
+    // 3. Calculate Mode (Most Frequent Value) & Apply Offset
+    const BIN_SIZE = 1.0; 
 
     Object.keys(zoneHistograms).forEach(key => {
       const values = zoneHistograms[key];
       if (values.length === 0) {
-        zoneFloors[key] = MIN_NOISE_FLOOR_DB;
+        zoneFloors[key] = MIN_NOISE_FLOOR_DB - 2; // [OFFSET] Apply -2dB here as well
         return;
       }
 
@@ -1822,7 +1847,6 @@ export class BatCallDetector {
       let maxCount = 0;
       let modeBin = MIN_NOISE_FLOOR_DB;
 
-      // 優化：只需一次遍歷
       for (const val of values) {
         // Round to nearest integer bin for stability
         const bin = Math.floor(val / BIN_SIZE) * BIN_SIZE;
@@ -1841,7 +1865,8 @@ export class BatCallDetector {
         }
       }
 
-      zoneFloors[key] = modeBin;
+      // [OFFSET] 在這裡統一減去 2dB
+      zoneFloors[key] = modeBin - 2;
     });
 
     return zoneFloors;
@@ -1855,7 +1880,7 @@ export class BatCallDetector {
      * 3. Test threshold (-1 -> -70 dB), detect highFreq position
      * 4. Apply Jump Protection using Zonal Noise Floors
      */
-  findOptimalHighFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0) {
+  findOptimalHighFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, zonalNoiseMap = null) {
     if (spectrogram.length === 0) return {
       threshold: -1,
       highFreq_Hz: null,
@@ -1904,6 +1929,11 @@ export class BatCallDetector {
     // [NEW 2025] Initialize frequency search lower limit (Frequency space convergence)
     // Starts at 0, but will increase as we find higher frequencies
     let currentSearchMinBinIdx = 0;
+
+    // [Fallback] 如果沒有傳入 map，為了兼容性，在此處計算一次 (但不建議)
+    if (!zonalNoiseMap) {
+       zonalNoiseMap = this.calculateZonalNoiseFloors(spectrogram, freqBins, 0, Math.min(peakFrameIdx, spectrogram.length - 1));
+    }
 
     for (const testThreshold_dB of thresholdRange) {
       const highFreqThreshold_dB = stablePeakPower_dB + testThreshold_dB;
@@ -2096,30 +2126,21 @@ export class BatCallDetector {
           // 只有在非 CF 模式，或差異未觸發 CF Break 時執行
           // ============================================================
           else if (jumpDiff > 1.5) {
-            // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current highFreqFrameIdx
-            const currentZoneFloors = this.calculateZonalNoiseFloors(
-              spectrogram,
-              freqBins,
-              0,                    // Start from Frame 0
-              highFreqFrameIdx      // End at current High Freq Frame
-            );
-
+            // [OPTIMIZED] Use Pre-calculated Zonal Noise Map
             const zoneKey = Math.floor(currentHighFreq_kHz / 10) * 10;
+            
+            // Get raw noise floor from MAP directly
+            let specificNoiseFloor_dB = zonalNoiseMap[zoneKey] !== undefined ? zonalNoiseMap[zoneKey] : -100;
 
-            // Get raw noise floor
-            let specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
-
-            // Prevent noise floor from dropping below -115dB (too sensitive in silence)
+            // Prevent noise floor from dropping below -115dB
             specificNoiseFloor_dB = Math.max(specificNoiseFloor_dB, -115);
 
-            // Log for debug (optional)
             logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
 
             if (currentHighFreqPower_dB > specificNoiseFloor_dB) {
               logRow['Judgment'] = 'Continue';
             } else {
               logRow['Judgment'] = 'STOP';
-
               hitNoiseFloor = true;
               // Revert to last valid
               for (let j = measurements.length - 1; j >= 0; j--) {
@@ -2130,7 +2151,7 @@ export class BatCallDetector {
                 }
               }
               summaryLog.push(logRow);
-              break; // HARD STOP
+              break; 
             }
           }
         }
@@ -2229,26 +2250,16 @@ export class BatCallDetector {
         // Minor Anomaly Logic
         let isAnomaly = false;
         if (freqDifference > 2.5) {
-          // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current measurement's highFreqFrameIdx
-          const currentZoneFloors = this.calculateZonalNoiseFloors(
-            spectrogram,
-            freqBins,
-            0,                                    // Start from Frame 0
-            validMeasurements[i].highFreqFrameIdx // End at current High Freq Frame
-          );
-
+          // [OPTIMIZED] Use Pre-calculated Map
           const zoneKey = Math.floor(currFreq_kHz / 10) * 10;
-          let specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
-
-          // [2025 OPTIMIZATION] Apply Ceiling -115dB
+          let specificNoiseFloor_dB = zonalNoiseMap[zoneKey] !== undefined ? zonalNoiseMap[zoneKey] : -100;
+          
           specificNoiseFloor_dB = Math.max(specificNoiseFloor_dB, -115);
 
           const currentPower_dB = validMeasurements[i].highFreqPower_dB;
 
           if (currentPower_dB !== null && currentPower_dB <= specificNoiseFloor_dB) {
-            // console.log(`    [ANOMALY] ${currFreq_kHz.toFixed(1)}kHz Power ${currentPower_dB.toFixed(1)}dB <= ZoneFloor ${specificNoiseFloor_dB.toFixed(1)}dB`);
-
-            // Mark in summary
+             // Mark in summary
             const targetRow = summaryLog.find(r => r['Thr (dB)'] === validMeasurements[i].threshold);
             if (targetRow) {
               targetRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
@@ -2419,8 +2430,9 @@ export class BatCallDetector {
      * 2. "Reverse Narrowing / Ratcheting"
      * 3. Hard Stop Logic with Fallback
      * 4. Sub-harmonic Rejection (> 15kHz jump protection)
+     * [UPDATED] Added zonalNoiseMap parameter
      */
-  findOptimalLowFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null) {
+  findOptimalLowFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null, zonalNoiseMap = null) {
     if (spectrogram.length === 0) return {
       threshold: -24, // Default fallback
       lowFreq_Hz: null,
@@ -2442,6 +2454,11 @@ export class BatCallDetector {
 
     // Initial search limit: from 0 to peakFrameIdx
     let currentSearchLimitFrame = Math.min(peakFrameIdx, spectrogram.length - 1);
+
+    // [Fallback]
+    if (!zonalNoiseMap) {
+        zonalNoiseMap = this.calculateZonalNoiseFloors(spectrogram, freqBins, validPeakFrameIdx, searchEndFrame);
+    }
 
     // ============================================================
     // 1. Calculate Zonal Robust Noise Floors
@@ -2676,26 +2693,15 @@ export class BatCallDetector {
 
           // Standard Anomaly Check (> 1.5 kHz)
           if (jumpDiff > 1.5) {
-            // [UPDATED] DYNAMIC Calculation: Noise Floor from Frame 0 to current activeEndFrameIdx
-            const currentZoneFloors = this.calculateZonalNoiseFloors(
-              spectrogram,
-              freqBins,
-              0,                    // Start from Frame 0
-              activeEndFrameIdx     // End at current Low Freq Frame
-            );
-
+            // [OPTIMIZED] Use Pre-calculated Map
             const zoneKey = Math.floor(currentLowFreq_kHz / 10) * 10;
-            const specificNoiseFloor_dB = currentZoneFloors[zoneKey] !== undefined ? currentZoneFloors[zoneKey] : -100;
+            const specificNoiseFloor_dB = zonalNoiseMap[zoneKey] !== undefined ? zonalNoiseMap[zoneKey] : -100;
+            
             logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
 
-            // console.log(`  [LOW FREQ JUMP] Thr: ${testThreshold_dB}dB | Freq: ${lastValidFreq_kHz.toFixed(2)} -> ${currentLowFreq_kHz.toFixed(2)} kHz`);
-            // console.log(`    Zone Noise Floor (${Math.floor(currentLowFreq_kHz/10)*10}kHz band): ${specificNoiseFloor_dB.toFixed(2)} dB | Signal: ${currentLowFreqPower_dB.toFixed(2)} dB`);
-
             if (currentLowFreqPower_dB > specificNoiseFloor_dB) {
-              // console.log(`    ✓ Signal ABOVE zonal noise floor -> Continue`);
               logRow['Judgment'] = 'Jump > 2kHz (Signal > Noise) -> Continue';
             } else {
-              // console.log(`    ✗ Signal AT/BELOW zonal noise floor -> BREAK (hit noise)`);
               logRow['Judgment'] = 'Jump > 2kHz (Noise Hit) -> STOP';
 
               hitNoiseFloor = true;
@@ -2709,7 +2715,7 @@ export class BatCallDetector {
                 }
               }
               summaryLog.push(logRow);
-              break; // HARD STOP
+              break; 
             }
           }
         }
@@ -2897,8 +2903,9 @@ export class BatCallDetector {
    * - BatSound: Peak prominence and edge detection
    *  
    * Updates call.peakFreq, startFreq, endFreq, characteristicFreq, bandwidth, duration
+   * [UPDATED] Added zonalNoiseMap parameter
    */
-  measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution) {
+  measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution, zonalNoiseMap = null) {
     let { highFreqThreshold_dB, characteristicFreq_percentEnd } = this.config;
     const spectrogram = call.spectrogram;  // [timeFrame][freqBin]
     const timeFrames = call.timeFrames;    // Time points for each frame
@@ -3012,7 +3019,8 @@ export class BatCallDetector {
         flowKHz,
         fhighKHz,
         peakPower_dB,  // Pass stable call peak value instead of computing global peak again
-        peakFrameIdx   // Pass peak frame index to only check frames before peak
+        peakFrameIdx,   // Pass peak frame index to only check frames before peak
+        zonalNoiseMap // [NEW] Pass the pre-calculated map
       );
 
       // Capture CF Detection Result
@@ -3706,7 +3714,8 @@ export class BatCallDetector {
         fhighKHz,
         peakPower_dB,
         peakFrameIdx,
-        endFrameIdx_forLowFreq
+        endFrameIdx_forLowFreq,
+        zonalNoiseMap // [NEW] Pass the pre-calculated map
       );
 
       // ============================================================
