@@ -896,11 +896,11 @@ export function initMapPopup({
     function fetchDataForSingleLayer(cfg) {
       const currentZoom = map.getZoom();
       
-      // Zoom 保護：如果 Zoom < 15，清空內容並停止下載
-      if (currentZoom < 15) {
+      // Zoom 保護：如果 Zoom < 17，清空內容並停止下載
+      if (currentZoom < 17) {
         if (habitatGroups[cfg.type]) habitatGroups[cfg.type].clearLayers();
         if (!window._habitatZoomWarned) {
-             console.log(`[Habitat] Map too wide (Zoom ${currentZoom}). Zoom in to 15+ to load data.`);
+             console.log(`[Habitat] Map too wide (Zoom ${currentZoom}). Zoom in to 17+ to load data.`);
              window._habitatZoomWarned = true;
         }
         return;
