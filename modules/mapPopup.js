@@ -32,15 +32,15 @@ export function initMapPopup({
     const rect = popup.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
-  
+
     const withinVertical = y >= -edgeThreshold && y <= rect.height + edgeThreshold;
     const withinHorizontal = x >= -edgeThreshold && x <= rect.width + edgeThreshold;
-  
-    const onLeft   = Math.abs(x - 0) <= edgeThreshold && withinVertical;
-    const onRight  = Math.abs(x - rect.width) <= edgeThreshold && withinVertical;
-    const onTop    = Math.abs(y - 0) <= edgeThreshold && withinHorizontal;
+
+    const onLeft = Math.abs(x - 0) <= edgeThreshold && withinVertical;
+    const onRight = Math.abs(x - rect.width) <= edgeThreshold && withinVertical;
+    const onTop = Math.abs(y - 0) <= edgeThreshold && withinHorizontal;
     const onBottom = Math.abs(y - rect.height) <= edgeThreshold && withinHorizontal;
-  
+
     return { onLeft, onRight, onTop, onBottom };
   }
 
@@ -112,7 +112,7 @@ export function initMapPopup({
       if (professionalBtn?.parentElement) {
         professionalBtn.parentElement.style.display = 'none';
       }
-    } catch (e) {}
+    } catch (e) { }
     // Load survey points data after password is verified
     if (!surveyPointsLoaded && !surveyPointsDataPending) {
       loadSurveyPointsData();
@@ -123,7 +123,7 @@ export function initMapPopup({
   function loadSurveyPointsData() {
     if (surveyPointsDataPending || surveyPointsLoaded) return;
     surveyPointsDataPending = true;
-    
+
     fetch("https://opensheet.elk.sh/1Al_sWwiIU6DtQv6sMFvXb9wBUbBiE-zcYk8vEwV82x8/sheet3")
       .then(r => r.json())
       .then(points => {
@@ -152,23 +152,23 @@ export function initMapPopup({
 
         // Set survey points in clustering manager
         clusterManager.setSurveyPoints(formattedPoints);
-        
+
         // Add single Survey point overlay that dynamically shows clusters or markers based on zoom
         try {
           // Create a combined layer group that will be managed dynamically
           const surveyPointLayer = L.layerGroup();
-          
+
           if (layersControl) {
             layersControl.addOverlay(surveyPointLayer, 'Survey point');
           }
-          
+
           // Function to update layer visibility based on zoom level
           const updateSurveyPointLayers = () => {
             if (!map.hasLayer(surveyPointLayer)) return; // Only update if overlay is checked
-            
+
             const clusterLayerGroup = clusterManager.getClusterLayerGroup();
             const markerLayerGroup = clusterManager.getMarkerLayerGroup();
-            
+
             // 在清除前，保存 pinned markers 資訊
             const pinnedMarkersData = [];
             surveyPointLayer.eachLayer(layer => {
@@ -179,13 +179,13 @@ export function initMapPopup({
                 });
               }
             });
-            
+
             surveyPointLayer.clearLayers();
-            
+
             const isClustered = clusterManager.isClustered;
-            
+
             console.log(`[MapPopup] updateSurveyPointLayers: isClustered=${isClustered}, clusters=${clusterManager.currentClusters?.length || 0}, visibleMarkers=${clusterManager.currentVisibleMarkers?.length || 0}`);
-            
+
             if (isClustered && clusterLayerGroup) {
               clusterLayerGroup.eachLayer(layer => {
                 surveyPointLayer.addLayer(layer);
@@ -195,7 +195,7 @@ export function initMapPopup({
                 surveyPointLayer.addLayer(layer);
               });
             }
-            
+
             // Sync pinned markers from clusterManager after layers are updated
             if (clusterManager.getPinnedMarkers) {
               pinnedSurveyMarkers = clusterManager.getPinnedMarkers();
@@ -206,30 +206,30 @@ export function initMapPopup({
                     if (m?._tooltipPinned && m._pinnedIsPopup) {
                       m.openPopup();
                     }
-                  } catch (e) {}
+                  } catch (e) { }
                 });
               }, 20);
             }
           };
-          
+
           // Listen to map events to update layers dynamically
           map.on('zoomend', updateSurveyPointLayers);
           map.on('moveend', updateSurveyPointLayers);
-          
+
           // Listen to overlay toggle
           map.on('overlayadd', (e) => {
             if (e.name === 'Survey point') {
               updateSurveyPointLayers();
             }
           });
-          
+
           // Store reference for later use
           clusterManager.surveyPointLayer = surveyPointLayer;
           clusterManager.updateSurveyPointLayers = updateSurveyPointLayers;
         } catch (e) {
           console.error('[MapPopup] Error adding survey point overlay:', e);
         }
-        
+
         surveyPointsLoaded = true;
         surveyPointsDataPending = false;
         console.log('[MapPopup] Survey points loaded successfully');
@@ -278,7 +278,7 @@ export function initMapPopup({
                   const parent = professionalBtn.parentElement;
                   if (parent) parent.style.display = 'none';
                 }
-              } catch (e) {}
+              } catch (e) { }
             } else {
               showMessageBox({
                 message: 'Wrong password',
@@ -433,9 +433,9 @@ export function initMapPopup({
             if (m?._tooltipPinned) {
               if (m._pinnedIsPopup) m.openPopup(); else m.openTooltip();
             }
-          } catch (e) {}
+          } catch (e) { }
         });
-      } catch (e) {}
+      } catch (e) { }
     });
     // also listen for clicks outside the map (document) to re-open pinned displays
     document.addEventListener('click', () => {
@@ -447,9 +447,9 @@ export function initMapPopup({
             if (m?._tooltipPinned) {
               if (m._pinnedIsPopup) m.openPopup(); else m.openTooltip();
             }
-          } catch (e) {}
+          } catch (e) { }
         });
-      } catch (e) {}
+      } catch (e) { }
     });
     // Protect pinned tooltips/popups: if Leaflet emits close events for pinned layers,
     // immediately re-open them so they remain visible when other markers are clicked.
@@ -461,10 +461,10 @@ export function initMapPopup({
           const layer = e.layer || (e.tooltip && e.tooltip._source) || null;
           if (layer && pinnedSurveyMarkers.has(layer) && layer._tooltipPinned && !layer._pinnedIsPopup) {
             setTimeout(() => {
-              try { if (layer._tooltipPinned) layer.openTooltip(); } catch (err) {}
+              try { if (layer._tooltipPinned) layer.openTooltip(); } catch (err) { }
             }, 0);
           }
-        } catch (err) {}
+        } catch (err) { }
       });
       map.on('popupclose', (e) => {
         try {
@@ -475,10 +475,10 @@ export function initMapPopup({
           if (layer && pinnedSurveyMarkers.has(layer) && layer._tooltipPinned && layer._pinnedIsPopup) {
             // 如果是 pinned popup，重新開啟
             setTimeout(() => {
-              try { if (layer._tooltipPinned) layer.openPopup(); } catch (err) {}
+              try { if (layer._tooltipPinned) layer.openPopup(); } catch (err) { }
             }, 0);
           }
-        } catch (err) {}
+        } catch (err) { }
       });
     }
     // 當拖動或縮放時，不要顯示 marker 的 tooltip (全域抑制)
@@ -498,16 +498,16 @@ export function initMapPopup({
             if (el) el.style.pointerEvents = enabled ? '' : 'none';
           });
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     map.createPane('annotationPane');
     map.getPane('annotationPane').style.zIndex = 650;
     zoomControlContainer = map.zoomControl.getContainer();
-  map.on('dragstart', () => { isMapDragging = true; setAllMarkersPointerEvents(false); updateCursor(); });
-  map.on('dragend', () => { isMapDragging = false; setAllMarkersPointerEvents(true); updateCursor(); });
-  // 當使用者開始/結束縮放時也暫時設置標誌以保護 pinned popups
-  map.on('zoomstart', () => { isMapZooming = true; setAllMarkersPointerEvents(false); });
-  map.on('zoomend', () => { isMapZooming = false; setAllMarkersPointerEvents(true); });
+    map.on('dragstart', () => { isMapDragging = true; setAllMarkersPointerEvents(false); updateCursor(); });
+    map.on('dragend', () => { isMapDragging = false; setAllMarkersPointerEvents(true); updateCursor(); });
+    // 當使用者開始/結束縮放時也暫時設置標誌以保護 pinned popups
+    map.on('zoomstart', () => { isMapZooming = true; setAllMarkersPointerEvents(false); });
+    map.on('zoomend', () => { isMapZooming = false; setAllMarkersPointerEvents(true); });
     updateCursor();
     scaleControl = L.control.scale({
       position: 'bottomleft',
@@ -531,7 +531,7 @@ export function initMapPopup({
     map.on('contextmenu', (e) => {
       const { lat, lng } = e.latlng;
       const text = `${lat.toFixed(6)}\t${lng.toFixed(6)}`;
-      navigator.clipboard?.writeText(text).catch(() => {});
+      navigator.clipboard?.writeText(text).catch(() => { });
       showCopyCoordMessage();
     });
 
@@ -620,10 +620,10 @@ export function initMapPopup({
       'Carto Dark': cartoDark,
       'Google Streets': googleStreets,
       'Google Satellite': googleSatellite,
-  'Google Hybrid': googleHybrid,
-  'Google Terrain': googleTerrain,
-  'HK Vector': hkVectorGroup,
-  'HK Imagery': hkImageryGroup,
+      'Google Hybrid': googleHybrid,
+      'Google Terrain': googleTerrain,
+      'HK Vector': hkVectorGroup,
+      'HK Imagery': hkImageryGroup,
     };
 
     layersControl = L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
@@ -632,41 +632,41 @@ export function initMapPopup({
     // =========== 新增開始: 2.5D Buildings Layer (最終定稿版) ===========
     if (typeof OSMBuildings !== 'undefined') {
       const OsmBuildingsLayer = L.Layer.extend({
-        onAdd: function(map) {
+        onAdd: function (map) {
           // 1. 在建立 OSMBuildings 之前，先記錄地圖容器內現有的元素
           const container = map.getContainer();
           const childrenBefore = Array.from(container.children);
-          
+
           // 2. 初始化 OSMBuildings
           this._osmb = new OSMBuildings(map);
           this._osmb.load('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
           this._osmb.date(new Date());
           this._osmb.style({ wallColor: 'rgb(200, 190, 180)', roofColor: 'rgb(220, 220, 220)', shadows: true });
-          
+
           // 3. 比對找出新產生的 DOM 元素並存入變數
           const childrenAfter = Array.from(container.children);
           this._layerElement = childrenAfter.find(el => !childrenBefore.includes(el));
-          
+
           // 如果在地圖容器層找不到，嘗試去 overlayPane 找
           if (!this._layerElement) {
-             const overlayPane = map.getPanes().overlayPane;
-             if (overlayPane.children.length > 0) {
-                 this._layerElement = overlayPane.children[overlayPane.children.length - 1];
-             }
+            const overlayPane = map.getPanes().overlayPane;
+            if (overlayPane.children.length > 0) {
+              this._layerElement = overlayPane.children[overlayPane.children.length - 1];
+            }
           }
         },
 
-        onRemove: function(map) {
+        onRemove: function (map) {
           // 1. 停止數據載入
           if (this._osmb) {
-             if (typeof this._osmb.unload === 'function') {
-               try { this._osmb.unload(); } catch(e) {}
-             }
-             if (typeof this._osmb.destroy === 'function') {
-               try { this._osmb.destroy(); } catch(e) {}
-             }
+            if (typeof this._osmb.unload === 'function') {
+              try { this._osmb.unload(); } catch (e) { }
+            }
+            if (typeof this._osmb.destroy === 'function') {
+              try { this._osmb.destroy(); } catch (e) { }
+            }
           }
-          
+
           // 2. 移除我們在 onAdd 時精準捕獲的那個容器元素
           if (this._layerElement && this._layerElement.parentNode) {
             this._layerElement.parentNode.removeChild(this._layerElement);
@@ -705,6 +705,298 @@ export function initMapPopup({
         promptForPasswordIfNeeded();
       });
 
+    // =========== NEW: Dynamic Habitat Layers (Load on View Change) ===========
+    console.log('[Habitat] Initializing Dynamic Habitat Control...');
+
+    // 1. 設定清單
+    const habitatConfig = [
+      { type: 'Agricultural_land', name: 'Agricultural Land', color: '#388E3C' },
+      { type: 'Artificial_hard_shoreline', name: 'Artificial Hard Shoreline', color: '#607D8B' },
+      { type: 'Artificial_pond', name: 'Artificial Pond', color: '#29B6F6' },
+      { type: 'Bare_rock_soil', name: 'Bare Rock/Soil', color: '#795548' },
+      { type: 'Grassland', name: 'Grassland', color: '#8BC34A' },
+      { type: 'Green_urban_area', name: 'Green Urban Area', color: '#4CAF50' },
+      { type: 'Mangrove', name: 'Mangrove', color: '#009688' },
+      { type: 'Marsh_reed_bed', name: 'Marsh/Reed Bed', color: '#00BCD4' },
+      { type: 'Mixed_barren_land', name: 'Mixed Barren Land', color: '#A1887F' },
+      { type: 'Modified_watercourse', name: 'Modified Watercourse', color: '#90CAF9' },
+      { type: 'Natural_rocky_shoreline', name: 'Natural Rocky Shoreline', color: '#5D4037' },
+      { type: 'Natural_watercourse', name: 'Natural Watercourse', color: '#2196F3' },
+      { type: 'Other_urban_area', name: 'Other Urban Area', color: '#9E9E9E' },
+      { type: 'Reservoirs', name: 'Reservoirs', color: '#1565C0' },
+      { type: 'Rural_plantation', name: 'Rural Plantation', color: '#33691E' },
+      { type: 'Seagrass_bed', name: 'Seagrass Bed', color: '#CDDC39' },
+      { type: 'Shrubby_grassland', name: 'Shrubby Grassland', color: '#AED581' },
+      { type: 'Shrubland', name: 'Shrubland', color: '#558B2F' },
+      { type: 'Soft_shore', name: 'Soft Shore', color: '#FFCC80' },
+      { type: 'Woodland', name: 'Woodland', color: '#1B5E20' },
+      { type: 'Woody_shrubland', name: 'Woody Shrubland', color: '#689F38' }
+    ];
+
+    // 儲存每個 Habitat 的 LayerGroup (容器)
+    const habitatGroups = {}; 
+    // 儲存目前使用者勾選要看的 Habitat 類型
+    const activeHabitats = new Set();
+    // 用來儲存 debounce timer
+    let habitatRefreshTimer = null;
+
+    // 2. 建立 UI 面板 (Control)
+    const HabitatControl = L.Control.extend({
+      options: { position: 'topleft' },
+
+      onAdd: function(map) {
+        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-habitat-layers-overlays');
+        
+        container.style.backgroundColor = 'white';
+        container.style.padding = '10px';
+        container.style.maxHeight = '400px';
+        container.style.overflowY = 'auto';
+        container.style.minWidth = '220px';
+        container.style.display = 'none';
+
+        // Header
+        const header = L.DomUtil.create('div', '', container);
+        header.style.display = 'flex';
+        header.style.justifyContent = 'space-between';
+        header.style.marginBottom = '8px';
+        header.style.borderBottom = '1px solid #eee';
+        header.style.paddingBottom = '5px';
+        const title = L.DomUtil.create('strong', '', header);
+        title.innerText = 'Habitat Layers (Dynamic)';
+
+        // Display All Option
+        const allRow = L.DomUtil.create('div', '', container);
+        allRow.style.marginBottom = '8px';
+        allRow.style.paddingBottom = '8px';
+        allRow.style.borderBottom = '1px solid #eee';
+        allRow.style.display = 'flex';
+        allRow.style.alignItems = 'center';
+
+        const allCheckbox = document.createElement('input');
+        allCheckbox.type = 'checkbox';
+        allCheckbox.id = 'chk_display_all';
+        allCheckbox.style.marginRight = '8px';
+        allCheckbox.style.cursor = 'pointer';
+        const allLabel = document.createElement('label');
+        allLabel.htmlFor = 'chk_display_all';
+        allLabel.innerText = 'Display All';
+        allLabel.style.fontSize = '12px';
+        allLabel.style.fontWeight = 'bold';
+        allLabel.style.cursor = 'pointer';
+        allRow.appendChild(allCheckbox);
+        allRow.appendChild(allLabel);
+
+        // Display All Logic
+        allCheckbox.addEventListener('change', (e) => {
+            const isChecked = e.target.checked;
+            habitatConfig.forEach(cfg => {
+                const itemChk = document.getElementById(`chk_${cfg.type}`);
+                if (itemChk && itemChk.checked !== isChecked) {
+                    itemChk.checked = isChecked;
+                    toggleHabitat(cfg, isChecked);
+                }
+            });
+            // 觸發一次重新整理
+            if (isChecked) refreshVisibleHabitats();
+        });
+
+        // Habitat Items
+        habitatConfig.forEach(cfg => {
+          const row = L.DomUtil.create('div', '', container);
+          row.style.marginBottom = '4px';
+          row.style.display = 'flex';
+          row.style.alignItems = 'center';
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.id = `chk_${cfg.type}`;
+          checkbox.style.marginRight = '8px';
+          
+          const label = document.createElement('label');
+          label.htmlFor = `chk_${cfg.type}`;
+          label.innerText = cfg.name;
+          label.style.fontSize = '12px';
+          label.style.cursor = 'pointer';
+          label.style.color = cfg.color;
+          label.style.fontWeight = '500';
+
+          checkbox.addEventListener('change', (e) => {
+            toggleHabitat(cfg, e.target.checked);
+            
+            // Sync Display All Checkbox
+            const allChk = document.getElementById('chk_display_all');
+            if (allChk) {
+                if (!e.target.checked) allChk.checked = false;
+                else {
+                    const allChecked = habitatConfig.every(c => {
+                        const box = document.getElementById(`chk_${c.type}`);
+                        return box && box.checked;
+                    });
+                    if (allChecked) allChk.checked = true;
+                }
+            }
+          });
+
+          row.appendChild(checkbox);
+          row.appendChild(label);
+        });
+
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.on(container, 'mousewheel', L.DomEvent.stopPropagation);
+        return container;
+      }
+    });
+
+    const HabitatToggleBtn = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd: function(map) {
+        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-habitat-toggle');
+        const link = L.DomUtil.create('a', '', container);
+        link.href = '#';
+        link.title = 'Habitats';
+        link.innerHTML = '<i class="fa-solid fa-leaf"></i>';
+        link.style.color = '#2E7D32';
+        L.DomEvent.on(link, 'click', L.DomEvent.stop)
+          .on(link, 'click', () => {
+             const panel = document.querySelector('.leaflet-control-habitat-layers-overlays');
+             if (panel) panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+          });
+        return container;
+      }
+    });
+
+    map.addControl(new HabitatToggleBtn());
+    map.addControl(new HabitatControl());
+
+    // 3. 狀態切換邏輯
+    function toggleHabitat(cfg, isChecked) {
+      if (isChecked) {
+        activeHabitats.add(cfg.type);
+        // 如果該類型的 LayerGroup 還沒建立，現在建立並加入地圖
+        if (!habitatGroups[cfg.type]) {
+          habitatGroups[cfg.type] = L.layerGroup().addTo(map);
+        } else if (!map.hasLayer(habitatGroups[cfg.type])) {
+          habitatGroups[cfg.type].addTo(map);
+        }
+        // 立即載入該 Layer
+        fetchDataForSingleLayer(cfg);
+      } else {
+        activeHabitats.delete(cfg.type);
+        // 移除並清空該 LayerGroup
+        if (habitatGroups[cfg.type]) {
+          habitatGroups[cfg.type].clearLayers();
+          if (map.hasLayer(habitatGroups[cfg.type])) {
+            map.removeLayer(habitatGroups[cfg.type]);
+          }
+        }
+      }
+    }
+
+    // 4. 核心：根據目前地圖範圍下載數據
+    function fetchDataForSingleLayer(cfg) {
+      const currentZoom = map.getZoom();
+      
+      // Zoom 保護：如果 Zoom < 15，清空內容並停止下載
+      if (currentZoom < 15) {
+        if (habitatGroups[cfg.type]) habitatGroups[cfg.type].clearLayers();
+        if (!window._habitatZoomWarned) {
+             console.log(`[Habitat] Map too wide (Zoom ${currentZoom}). Zoom in to 15+ to load data.`);
+             window._habitatZoomWarned = true;
+        }
+        return;
+      }
+      window._habitatZoomWarned = false;
+
+      // 取得目前地圖邊界 (BBOX)
+      const bounds = map.getBounds();
+      // 稍微擴大一點點邊界，確保邊緣的 Polygon 不會被切斷太明顯
+      const south = bounds.getSouth();
+      const west = bounds.getWest();
+      const north = bounds.getNorth();
+      const east = bounds.getEast();
+
+      // 建構動態 Filter
+      const dynamicFilter = `<Filter><Intersects><PropertyName>SHAPE</PropertyName><gml:Envelope srsName='EPSG:4326'><gml:lowerCorner>${south} ${west}</gml:lowerCorner><gml:upperCorner>${north} ${east}</gml:upperCorner></gml:Envelope></Intersects></Filter>`;
+
+      const url = new URL('https://portal.csdi.gov.hk/server/services/common/afcd_rcd_1639382960762_55768/MapServer/WFSServer');
+      url.searchParams.append('service', 'wfs');
+      url.searchParams.append('request', 'GetFeature');
+      url.searchParams.append('typenames', cfg.type);
+      url.searchParams.append('outputFormat', 'geojson');
+      url.searchParams.append('maxFeatures', '2000'); // 因為是局部載入，2000 通常足夠
+      url.searchParams.append('srsName', 'EPSG:4326');
+      url.searchParams.append('filter', dynamicFilter);
+
+      // console.log(`[Habitat] Requesting ${cfg.type} for current view...`);
+
+      fetch(url)
+        .then(r => r.json())
+        .then(data => {
+          // 確保 Group 還在 (可能使用者在下載途中取消勾選)
+          const group = habitatGroups[cfg.type];
+          if (!group || !activeHabitats.has(cfg.type)) return;
+
+          // 清空舊的範圍資料，準備放入新範圍資料
+          group.clearLayers();
+
+          if (!data.features || data.features.length === 0) return;
+
+          // 座標修復邏輯 (同前)
+          let needFlip = false;
+          try {
+             let testCoord = null;
+             const geom = data.features[0].geometry;
+             if (geom.type === 'Polygon') testCoord = geom.coordinates[0][0];
+             else if (geom.type === 'MultiPolygon') testCoord = geom.coordinates[0][0][0];
+
+             if (testCoord && testCoord[0] < 90 && testCoord[1] > 90) {
+                needFlip = true;
+             }
+          } catch(e) {}
+
+          const geoLayer = L.geoJSON(data, {
+            coordsToLatLng: function (coords) {
+                return needFlip ? new L.LatLng(coords[0], coords[1]) : new L.LatLng(coords[1], coords[0]);
+            },
+            style: {
+              color: cfg.color,
+              weight: 1,
+              fillColor: cfg.color,
+              fillOpacity: 0.6
+            },
+            onEachFeature: (feature, l) => {
+               l.bindPopup(`<div class="map-popup-table"><strong>${cfg.name}</strong><br>ID: ${feature.id || 'N/A'}</div>`);
+            }
+          });
+
+          // 將新資料加入 Group
+          group.addLayer(geoLayer);
+          // console.log(`[Habitat] Updated ${cfg.type}: ${data.features.length} features.`);
+        })
+        .catch(err => console.error(`[Habitat] Error fetching ${cfg.type}:`, err));
+    }
+
+    // 5. 重新整理所有已勾選的圖層
+    function refreshVisibleHabitats() {
+      if (activeHabitats.size === 0) return;
+      // console.log('[Habitat] View changed, refreshing active layers...');
+      activeHabitats.forEach(type => {
+        // 找出對應的 config
+        const cfg = habitatConfig.find(c => c.type === type);
+        if (cfg) fetchDataForSingleLayer(cfg);
+      });
+    }
+
+    // 6. 監聽地圖移動事件 (Drag & Zoom)
+    // 使用 Debounce 防止在此頻繁觸發
+    map.on('moveend', () => {
+      if (habitatRefreshTimer) clearTimeout(habitatRefreshTimer);
+      // 延遲 500ms，確定使用者停下來才下載
+      habitatRefreshTimer = setTimeout(refreshVisibleHabitats, 500);
+    });
+
+    // ====================================================================
+
     drawnItems = new L.FeatureGroup().addTo(map);
     const canvasRenderer = L.canvas({ pane: 'annotationPane' });
     drawControl = new L.Control.Draw({
@@ -719,7 +1011,7 @@ export function initMapPopup({
       }
     });
     map.on(L.Draw.Event.CREATED, (e) => {
-  drawnItems.addLayer(e.layer);
+      drawnItems.addLayer(e.layer);
     });
 
     const RouteToggleControl = L.Control.extend({
@@ -818,7 +1110,7 @@ export function initMapPopup({
           .on(clearLink, 'click', (ev) => {
             try {
               ev.preventDefault();
-            } catch (e) {}
+            } catch (e) { }
             showMessageBox({
               message: 'Confirm to clear all text?',
               confirmText: 'Confirm',
@@ -827,13 +1119,13 @@ export function initMapPopup({
                 try {
                   // remove all text markers from map
                   textMarkers.forEach(m => {
-                    try { if (map && m) map.removeLayer(m); } catch (e) {}
+                    try { if (map && m) map.removeLayer(m); } catch (e) { }
                   });
                   textMarkers = [];
                   updateMarkerPointerEvents();
                   // 隱藏 Clear Text button
                   updateTextClearButtonVisibility();
-                } catch (e) {}
+                } catch (e) { }
               }
             });
           });
@@ -907,7 +1199,7 @@ export function initMapPopup({
           .on(link, 'click', () => {
             try {
               showProfessionalPrompt();
-            } catch (e) {}
+            } catch (e) { }
           });
         // hide control immediately if overlays already loaded
         if (overlaysLoaded) {
@@ -918,7 +1210,7 @@ export function initMapPopup({
     });
     const drawToggle = new DrawToggleControl();
     map.addControl(drawToggle);
-    
+
     // Add professional control right after draw control
     const professionalToggle = new ProfessionalControl();
     map.addControl(professionalToggle);
@@ -1178,23 +1470,23 @@ export function initMapPopup({
     if (!map || activeTextInput) return;
     const latlng = marker.getLatLng();
     const point = map.latLngToContainerPoint(latlng);
-  const input = document.createElement('textarea');
-  input.value = marker.text || '';
-  input.className = 'map-text-input';
-  input.rows = 1;
-  input.style.left = `${point.x}px`;
-  input.style.top = `${point.y}px`;
-  map.getContainer().appendChild(input);
-  activeTextInput = input;
-  map.dragging.disable();
-  input.focus();
-  const adjustHeight = () => {
-    input.style.height = 'auto';
-    input.style.height = `${input.scrollHeight}px`;
-  };
-  adjustHeight();
-  input.addEventListener('input', adjustHeight);
-  const finish = () => {
+    const input = document.createElement('textarea');
+    input.value = marker.text || '';
+    input.className = 'map-text-input';
+    input.rows = 1;
+    input.style.left = `${point.x}px`;
+    input.style.top = `${point.y}px`;
+    map.getContainer().appendChild(input);
+    activeTextInput = input;
+    map.dragging.disable();
+    input.focus();
+    const adjustHeight = () => {
+      input.style.height = 'auto';
+      input.style.height = `${input.scrollHeight}px`;
+    };
+    adjustHeight();
+    input.addEventListener('input', adjustHeight);
+    const finish = () => {
       if (!activeTextInput) return;
       const val = input.value.trim();
       map.getContainer().removeChild(input);
@@ -1247,7 +1539,7 @@ export function initMapPopup({
         const orig = evt.originalEvent || evt.srcEvent || {};
         orig.preventDefault?.();
         orig.stopPropagation?.();
-      } catch (e) {}
+      } catch (e) { }
 
       // 建立一個臨時按鈕，Dropdown 會根據按鈕位置來定位選單
       const btn = document.createElement('button');
@@ -1283,27 +1575,27 @@ export function initMapPopup({
       try {
         const first = dropdown.menu.querySelector('.dropdown-item');
         if (first) first.style.color = 'red';
-      } catch (e) {}
+      } catch (e) { }
 
       // 當選單關閉時做清理（移除臨時按鈕與選單 DOM）
       const cleanup = () => {
         try {
           if (dropdown && typeof dropdown.close === 'function') dropdown.close();
-        } catch (e) {}
+        } catch (e) { }
         try {
           if (dropdown && dropdown.menu && dropdown.menu.parentNode) dropdown.menu.parentNode.removeChild(dropdown.menu);
-        } catch (e) {}
-        try { if (btn && btn.parentNode) btn.parentNode.removeChild(btn); } catch (e) {}
+        } catch (e) { }
+        try { if (btn && btn.parentNode) btn.parentNode.removeChild(btn); } catch (e) { }
       };
 
       // 包裝 close 以確保一旦關閉就清理
       try {
         const origClose = dropdown.close.bind(dropdown);
-        dropdown.close = function() {
+        dropdown.close = function () {
           origClose();
           cleanup();
         };
-      } catch (e) {}
+      } catch (e) { }
 
       dropdown.open();
     });
@@ -1368,32 +1660,32 @@ export function initMapPopup({
 
   function fitAllMarkers() {
     if (!map) return;
-    
+
     // 收集所有可見的 markers 的座標
     const allCoords = [];
-    
+
     // 添加主要 markers
     markers.forEach(marker => {
       const latlng = marker.getLatLng();
       allCoords.push([latlng.lat, latlng.lng]);
     });
-    
+
     // 添加 text markers
     textMarkers.forEach(marker => {
       const latlng = marker.getLatLng();
       allCoords.push([latlng.lat, latlng.lng]);
     });
-    
+
     // 添加 survey point markers（如果 clustering manager 存在）
     if (clusterManager && clusterManager.currentVisibleMarkers) {
       clusterManager.currentVisibleMarkers.forEach(marker => {
         try {
           const latlng = marker.getLatLng();
           allCoords.push([latlng.lat, latlng.lng]);
-        } catch (e) {}
+        } catch (e) { }
       });
     }
-    
+
     // 如果有 markers，自動 fit bounds
     if (allCoords.length > 0) {
       try {
@@ -1406,7 +1698,7 @@ export function initMapPopup({
 
   function zoomToCurrentMarker() {
     if (!map) return;
-    
+
     const idx = getCurrentIndex();
     if (idx < 0) {
       // No file selected, show default view
@@ -1414,30 +1706,30 @@ export function initMapPopup({
       map.setView(HK_CENTER, DEFAULT_ZOOM);
       return;
     }
-    
+
     const meta = getFileMetadata(idx);
     const lat = parseFloat(meta.latitude);
     const lon = parseFloat(meta.longitude);
-    
+
     if (isNaN(lat) || isNaN(lon)) {
       // No coordinates for current file, show default view
       const HK_CENTER = [22.28552, 114.15769];
       map.setView(HK_CENTER, DEFAULT_ZOOM);
       return;
     }
-    
+
     // Zoom to current marker
     map.setView([lat, lon], 16, { animate: true });
   }
 
   const DEFAULT_ZOOM = 13;
-  
+
   // 補上缺失的定位函數
   function showDeviceLocation() {
     if (!map) return;
     // 使用 Leaflet 內建的定位功能
     map.locate({ setView: true, maxZoom: 16 });
-    
+
     // 定位成功時顯示
     map.once('locationfound', (e) => {
       const radius = e.accuracy / 2;
@@ -1446,7 +1738,7 @@ export function initMapPopup({
         .openPopup();
       L.circle(e.latlng, radius).addTo(map);
     });
-    
+
     // 定位失敗時 (忽略或顯示錯誤)
     map.once('locationerror', (e) => {
       console.warn("Location access denied or failed:", e.message);
@@ -1474,7 +1766,7 @@ export function initMapPopup({
         }
       }
 
-      showDeviceLocation();	  
+      showDeviceLocation();
       return;
     }
     const meta = getFileMetadata(idx);
@@ -1499,13 +1791,13 @@ export function initMapPopup({
     refreshMarkers();
   }
 
-function togglePopup() {
+  function togglePopup() {
     if (popup.style.display === 'block') {
       if (isMaximized) toggleMaximize();
       if (isMinimized) toggleMinimize();
-      
+
       popup.classList.add('hidden');
-      
+
       setTimeout(() => {
         popup.style.display = 'none';
         document.body.classList.remove('map-open');
@@ -1559,8 +1851,8 @@ function togglePopup() {
       popup.classList.add('animating');
       popup.style.left = '0px';
       popup.style.top = '0px';
-      popup.style.width = `${window.innerWidth -2}px`;
-      popup.style.height = `${window.innerHeight -2}px`;
+      popup.style.width = `${window.innerWidth - 2}px`;
+      popup.style.height = `${window.innerHeight - 2}px`;
       // 在動畫完成後移除 animating class 並重新計算 map 大小
       setTimeout(() => {
         popup.classList.remove('animating');
@@ -1685,7 +1977,7 @@ function togglePopup() {
   let startTop = 0;
   let isMaximized = false;
   let isMinimized = false;
-  
+
   // 儲存 Floating window 的最後狀態
   // compute center defaults based on current popup size
   const centerLeftDefault = Math.max(0, Math.floor((window.innerWidth - popupWidth) / 2));
@@ -1902,20 +2194,20 @@ function togglePopup() {
       resizing = false;
       popup.classList.remove('resizing');
       map?.dragging.enable();
-      
+
       // 只在非最小化和非最大化狀態時更新並儲存 Floating window 狀態
       if (!isMinimized && !isMaximized) {
         floatingState.width = popup.offsetWidth;
         floatingState.height = popup.offsetHeight;
         floatingState.left = popup.offsetLeft;
         floatingState.top = popup.offsetTop;
-        
+
         localStorage.setItem('mapFloatingWidth', floatingState.width);
         localStorage.setItem('mapFloatingHeight', floatingState.height);
         localStorage.setItem('mapFloatingLeft', floatingState.left);
         localStorage.setItem('mapFloatingTop', floatingState.top);
       }
-      
+
       // 使用平滑動畫移動 basemap
       map?.invalidateSize(true);
       document.body.style.cursor = '';
@@ -1935,8 +2227,8 @@ function togglePopup() {
   }
   window.addEventListener('resize', () => {
     if (isMaximized) {
-      popup.style.width = `${window.innerWidth -2}px`;
-      popup.style.height = `${window.innerHeight -2}px`;
+      popup.style.width = `${window.innerWidth - 2}px`;
+      popup.style.height = `${window.innerHeight - 2}px`;
       map?.invalidateSize();
     } else if (isMinimized) {
       popup.style.top = `${window.innerHeight - 362}px`;
