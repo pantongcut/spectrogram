@@ -629,34 +629,58 @@ export function initMapPopup({
     layersControl = L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
     layersControlContainer = layersControl.getContainer();
 
-    // =========== 新增開始: 2.5D Buildings Layer ===========
-    // 檢查 OSMBuildings 是否已加載
+    // =========== 新增開始: 2.5D Buildings Layer (最終定稿版) ===========
     if (typeof OSMBuildings !== 'undefined') {
-      // 創建一個自定義 Leaflet Layer 來封裝 OSMBuildings
-      // 這樣才能讓它在 Layer Control 中被開關
       const OsmBuildingsLayer = L.Layer.extend({
         onAdd: function(map) {
+          // 1. 在建立 OSMBuildings 之前，先記錄地圖容器內現有的元素
+          const container = map.getContainer();
+          const childrenBefore = Array.from(container.children);
+          
+          // 2. 初始化 OSMBuildings
           this._osmb = new OSMBuildings(map);
-          // 載入建築物數據 (使用默認的公共 Key)
           this._osmb.load('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
-          
-          // 設定當前時間以計算陰影 (可選)
           this._osmb.date(new Date());
-          
-          // 設定樣式 (可選)
           this._osmb.style({ wallColor: 'rgb(200, 190, 180)', roofColor: 'rgb(220, 220, 220)', shadows: true });
-        },
-        onRemove: function(map) {
-          if (this._osmb) {
-            this._osmb.destroy(); // 移除圖層
-            this._osmb = null;
+          
+          // 3. 比對找出新產生的 DOM 元素並存入變數
+          const childrenAfter = Array.from(container.children);
+          this._layerElement = childrenAfter.find(el => !childrenBefore.includes(el));
+          
+          // 如果在地圖容器層找不到，嘗試去 overlayPane 找
+          if (!this._layerElement) {
+             const overlayPane = map.getPanes().overlayPane;
+             if (overlayPane.children.length > 0) {
+                 this._layerElement = overlayPane.children[overlayPane.children.length - 1];
+             }
           }
+        },
+
+        onRemove: function(map) {
+          // 1. 停止數據載入
+          if (this._osmb) {
+             if (typeof this._osmb.unload === 'function') {
+               try { this._osmb.unload(); } catch(e) {}
+             }
+             if (typeof this._osmb.destroy === 'function') {
+               try { this._osmb.destroy(); } catch(e) {}
+             }
+          }
+          
+          // 2. 移除我們在 onAdd 時精準捕獲的那個容器元素
+          if (this._layerElement && this._layerElement.parentNode) {
+            this._layerElement.parentNode.removeChild(this._layerElement);
+          }
+
+          // 3. 清除版權文字
+          document.querySelectorAll('.osmb-attribution').forEach(el => el.remove());
+
+          this._osmb = null;
+          this._layerElement = null;
         }
       });
 
       const buildings3D = new OsmBuildingsLayer();
-      
-      // 將其加入到 Overlay (複選框)，這樣可以疊加在任何底圖上
       layersControl.addOverlay(buildings3D, "2.5D Buildings");
     } else {
       console.warn("OSMBuildings script not loaded via HTML.");
@@ -1407,6 +1431,27 @@ export function initMapPopup({
   }
 
   const DEFAULT_ZOOM = 13;
+  
+  // 補上缺失的定位函數
+  function showDeviceLocation() {
+    if (!map) return;
+    // 使用 Leaflet 內建的定位功能
+    map.locate({ setView: true, maxZoom: 16 });
+    
+    // 定位成功時顯示
+    map.once('locationfound', (e) => {
+      const radius = e.accuracy / 2;
+      L.marker(e.latlng).addTo(map)
+        .bindPopup(`You are within ${radius.toFixed(0)} meters from this point`)
+        .openPopup();
+      L.circle(e.latlng, radius).addTo(map);
+    });
+    
+    // 定位失敗時 (忽略或顯示錯誤)
+    map.once('locationerror', (e) => {
+      console.warn("Location access denied or failed:", e.message);
+    });
+  }
 
   function updateMap() {
     const idx = getCurrentIndex();
