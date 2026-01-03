@@ -3651,139 +3651,199 @@ export class BatCallDetector {
 
     // ============================================================
     // STEP 6: Calculate Knee Frequency and Knee Time
+    // [2025 FIXED] Unit Scaling (kHz/ms) for Curvature Calculation
     // ============================================================
-    const frameFrequencies = [];
+    
+    // 1. Time Constraints
+    const searchStartFrame = Math.max(0, newStartFrameIdx);
+    const searchEndFrame = Math.min(spectrogram.length - 1, newEndFrameIdx);
+    const searchDurationFrames = searchEndFrame - searchStartFrame + 1;
 
-    for (let frameIdx = 0; frameIdx < spectrogram.length; frameIdx++) {
-      const framePower = spectrogram[frameIdx];
-      let peakIdx = 0;
-      let maxPower = -Infinity;
-      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-        if (framePower[binIdx] > maxPower) {
-          maxPower = framePower[binIdx];
-          peakIdx = binIdx;
-        }
-      }
-      frameFrequencies.push(freqBins[peakIdx]);
+    // 2. Frequency Constraints (+/- 1kHz Buffer)
+    const constraintMinFreq_Hz = (call.lowFreq_kHz !== null) ? (call.lowFreq_kHz * 1000) : 0;
+    const constraintMaxFreq_Hz = (call.highFreq_kHz !== null) ? (call.highFreq_kHz * 1000)  : freqBins[freqBins.length - 1];
+
+    let minBinIdx = 0;
+    let maxBinIdx = freqBins.length - 1;
+
+    for (let b = 0; b < freqBins.length; b++) {
+      if (freqBins[b] >= constraintMinFreq_Hz) { minBinIdx = b; break; }
+    }
+    for (let b = freqBins.length - 1; b >= 0; b--) {
+      if (freqBins[b] <= constraintMaxFreq_Hz) { maxBinIdx = b; break; }
     }
 
-    const smoothedFrequencies = this.savitzkyGolay(frameFrequencies, 5, 2);
-    const firstDerivatives = [];
-    const firstDerivIndices = []; 
+    console.log(`[Knee Search] Range: Frames ${searchStartFrame}-${searchEndFrame}, Freq ${constraintMinFreq_Hz.toFixed(0)}-${constraintMaxFreq_Hz.toFixed(0)} Hz`);
 
-    for (let i = 0; i < smoothedFrequencies.length - 1; i++) {
-      const freqChange = smoothedFrequencies[i + 1] - smoothedFrequencies[i];
-      const timeDelta = (i + 1 < timeFrames.length) ? (timeFrames[i + 1] - timeFrames[i]) : 0.001;
-      firstDerivatives.push(freqChange / timeDelta);
-      firstDerivIndices.push(i + 1); 
-    }
+    // [MODIFIED] Store frequencies in kHz immediately to avoid scale issues later
+    const contourKHz = []; 
+    const validFrameIndices = []; 
 
-    const secondDerivatives = [];
-    const secondDerivIndices = []; 
+    // 3. Extract Contour
+    if (searchDurationFrames > 2) {
+      for (let frameIdx = searchStartFrame; frameIdx <= searchEndFrame; frameIdx++) {
+        const framePower = spectrogram[frameIdx];
+        let peakIdx = -1;
+        let maxPower = -Infinity;
 
-    for (let i = 0; i < firstDerivatives.length - 1; i++) {
-      const derivChange = firstDerivatives[i + 1] - firstDerivatives[i];
-      const timeDelta = (i + 2 < timeFrames.length) ? (timeFrames[i + 2] - timeFrames[i + 1]) : 0.001;
-      secondDerivatives.push(derivChange / timeDelta);
-      secondDerivIndices.push(i + 2); 
-    }
-
-    const isValidKneeBySlope = (candidateFrameIdx) => {
-      const derivIdx = firstDerivIndices.indexOf(candidateFrameIdx);
-      if (derivIdx < 0 || derivIdx >= firstDerivatives.length) return false;
-      const incomingSlope = derivIdx > 0 ? firstDerivatives[derivIdx - 1] : null;
-      const outgoingSlope = derivIdx < firstDerivatives.length - 1 ? firstDerivatives[derivIdx] : null;
-      if (incomingSlope === null || outgoingSlope === null) return false;
-
-      const STEEP_NEGATIVE_THRESHOLD = -50; 
-      const SLOPE_RATIO_THRESHOLD = 0.7;    
-
-      if (incomingSlope >= STEEP_NEGATIVE_THRESHOLD) return false;
-      const incomingAbsSlope = Math.abs(incomingSlope);
-      const outgoingAbsSlope = Math.abs(outgoingSlope);
-      if (outgoingAbsSlope >= incomingAbsSlope * SLOPE_RATIO_THRESHOLD) return false;
-      if (outgoingSlope < incomingSlope) return false;
-
-      return true;
-    };
-
-    let kneeIdx = -1;
-    let maxCurvature = 0;
-
-    for (let i = 1; i < firstDerivatives.length - 1; i++) {
-      const frameIdx = firstDerivIndices[i]; 
-      if (frameIdx >= secondDerivIndices.length) continue;
-      const df_dt = firstDerivatives[i];
-      const d2f_dt2 = secondDerivatives[i];
-      const denominator = Math.pow(1 + df_dt * df_dt, 1.5);
-      const curvature = Math.abs(d2f_dt2) / (denominator + 1e-10); 
-
-      if (curvature > maxCurvature && isValidKneeBySlope(frameIdx)) {
-        maxCurvature = curvature;
-        kneeIdx = frameIdx;
-      }
-    }
-
-    const derivMean = secondDerivatives.reduce((a, b) => a + b, 0) / Math.max(secondDerivatives.length, 1);
-    const derivStdDev = Math.sqrt(
-      secondDerivatives.reduce((sum, val) => sum + Math.pow(val - derivMean, 2), 0) / Math.max(secondDerivatives.length, 1)
-    );
-    const isWeakCurvature = maxCurvature < derivStdDev * 0.3;
-
-    if (kneeIdx < 0 || isWeakCurvature) {
-      let maxFirstDeriv = 0;
-      let maxDerivIdx = -1;
-      const searchStart = Math.floor(spectrogram.length * 0.3);
-      const searchEnd = Math.floor(spectrogram.length * 0.9);
-
-      for (let i = 0; i < firstDerivatives.length; i++) {
-        const frameIdx = firstDerivIndices[i];
-        if (frameIdx >= searchStart && frameIdx <= searchEnd) {
-          const absDeriv = Math.abs(firstDerivatives[i]);
-          if (absDeriv > maxFirstDeriv && isValidKneeBySlope(frameIdx)) {
-            maxFirstDeriv = absDeriv;
-            maxDerivIdx = frameIdx;
+        for (let binIdx = minBinIdx; binIdx <= maxBinIdx; binIdx++) {
+          if (binIdx < framePower.length) {
+            if (framePower[binIdx] > maxPower) {
+              maxPower = framePower[binIdx];
+              peakIdx = binIdx;
+            }
           }
         }
-      }
-      if (maxDerivIdx >= 0) {
-        kneeIdx = maxDerivIdx;
+
+        if (peakIdx !== -1) {
+          contourKHz.push(freqBins[peakIdx] / 1000); // Store as kHz
+          validFrameIndices.push(frameIdx);
+        }
       }
     }
 
-    let finalKneeIdx = -1;
-    if (kneeIdx >= 0 && kneeIdx >= newStartFrameIdx && kneeIdx <= newEndFrameIdx) {
-      finalKneeIdx = kneeIdx;
-    } else if (peakFrameIdx >= newStartFrameIdx && peakFrameIdx <= newEndFrameIdx) {
-      finalKneeIdx = peakFrameIdx;
-    }
+    if (contourKHz.length < 5) {
+       console.log('[Knee Search] Too few points, skipping.');
+       call.kneeTime_ms = null;
+       call.kneeFreq_kHz = null;
+    } else {
+      // 4. Smoothing (on kHz data)
+      const smoothedKHz = this.savitzkyGolay(contourKHz, 5, 2);
+      const firstDerivatives = [];
+      
+      // Calculate 1st Derivative (Slope in kHz / ms)
+      for (let i = 0; i < smoothedKHz.length - 1; i++) {
+        const freqChange = smoothedKHz[i + 1] - smoothedKHz[i]; // kHz
+        
+        const absFrameIdx_curr = validFrameIndices[i];
+        const absFrameIdx_next = validFrameIndices[i+1];
+        // Time Delta in ms
+        const timeDelta_ms = (timeFrames[absFrameIdx_next] - timeFrames[absFrameIdx_curr]) * 1000; 
+        
+        // Slope unit: kHz/ms
+        firstDerivatives.push(freqChange / (timeDelta_ms > 0 ? timeDelta_ms : 0.001));
+      }
 
-    if (finalKneeIdx >= 0 && finalKneeIdx < frameFrequencies.length && finalKneeIdx < timeFrames.length) {
-      call.kneeFreq_kHz = frameFrequencies[finalKneeIdx] / 1000;
-      const kneeFreqTime_s = timeFrames[finalKneeIdx];
-      const firstFrameTimeInSeconds_knee = timeFrames[0];
-      call.kneeFreq_ms = (kneeFreqTime_s - firstFrameTimeInSeconds_knee) * 1000;  
+      // Calculate 2nd Derivative
+      const secondDerivatives = [];
+      const derivIndices = [];
 
-      if (call.startTime_s !== null) {
-        const rawKneeTime_ms = (timeFrames[finalKneeIdx] - call.startTime_s) * 1000;
-        if (rawKneeTime_ms >= 0 && rawKneeTime_ms <= call.duration_ms) {
-          call.kneeTime_ms = rawKneeTime_ms;
-        } else {
-          call.kneeTime_ms = null;
-          call.kneeFreq_kHz = null;
+      for (let i = 0; i < firstDerivatives.length - 1; i++) {
+        const derivChange = firstDerivatives[i + 1] - firstDerivatives[i];
+        
+        const absFrameIdx_curr = validFrameIndices[i];
+        const absFrameIdx_next2 = validFrameIndices[i+2];
+        const timeDelta_ms = ((timeFrames[absFrameIdx_next2] - timeFrames[absFrameIdx_curr]) * 1000) / 2;
+
+        secondDerivatives.push(derivChange / (timeDelta_ms > 0 ? timeDelta_ms : 0.001));
+        derivIndices.push(i + 1);
+      }
+
+      // [Helper] Validation (Thresholds adjusted for kHz/ms)
+      const isValidKneeBySlope = (localIndex) => {
+        if (localIndex <= 0 || localIndex >= firstDerivatives.length) return false;
+        
+        const incomingSlope = firstDerivatives[localIndex - 1];
+        const outgoingSlope = firstDerivatives[localIndex];
+        
+        if (incomingSlope === null || outgoingSlope === null) return false;
+
+        // Thresholds for kHz/ms units:
+        // Pipistrellus FM sweep can be steep, e.g., dropping 20kHz in 2ms = -10.
+        // So we allow slopes down to -50 (very steep).
+        // But we need to ensure it IS an FM sweep entering (negative slope).
+        
+        const MIN_INCOMING_STEEPNESS = -0.5; // Must be at least this steep to be FM
+        const STEEP_NEGATIVE_THRESHOLD = -100; // Sanity check for glitch
+
+        // 1. Direction check: Must be downward FM (negative slope)
+        if (incomingSlope > 0) return false; 
+
+        // 2. Steepness check: Entering slope must be essentially FM
+        if (incomingSlope > MIN_INCOMING_STEEPNESS) return false; // Too flat, not FM
+
+        // 3. Knee Shape check: Outgoing must be flatter than Incoming
+        // Since both are negative, |Incoming| > |Outgoing|
+        // e.g., Incoming -10, Outgoing -1. |-10| > |-1|.
+        const incomingAbs = Math.abs(incomingSlope);
+        const outgoingAbs = Math.abs(outgoingSlope);
+        
+        if (outgoingAbs >= incomingAbs * 0.8) return false; // Not enough bend
+
+        return true;
+      };
+
+      let bestLocalIdx = -1;
+      let maxCurvature = -1;
+
+      // 5. Find Max Curvature
+      for (let i = 0; i < secondDerivatives.length; i++) {
+        const localFreqIdx = derivIndices[i];
+        const df_dt = firstDerivatives[localFreqIdx-1]; 
+        const d2f_dt2 = secondDerivatives[i];
+        
+        // Math using kHz/ms scales - Result will be non-zero now!
+        const denominator = Math.pow(1 + df_dt * df_dt, 1.5);
+        const curvature = Math.abs(d2f_dt2) / (denominator + 1e-10); 
+
+        if (curvature > maxCurvature && isValidKneeBySlope(localFreqIdx-1)) {
+          maxCurvature = curvature;
+          bestLocalIdx = localFreqIdx;
+        }
+      }
+
+      console.log(`[Knee Search] Max Curvature: ${maxCurvature.toFixed(4)} at Local Index: ${bestLocalIdx}`);
+
+      // Weak Curvature / Fallback
+      // If Curvature is still 0 or very low, it means the line is straight (no knee)
+      if (bestLocalIdx < 0 || maxCurvature < 0.01) {
+        console.log('[Knee Search] No strong knee found via curvature. Using max slope change.');
+        
+        // Fallback: Find the point where slope changes the most (2nd deriv peak)
+        // This is simplified for robustness
+        let maxChange = -1;
+        for (let i = 0; i < secondDerivatives.length; i++) {
+           const change = Math.abs(secondDerivatives[i]);
+           const localIdx = derivIndices[i];
+           // Simple valid check
+           if (change > maxChange && firstDerivatives[localIdx-1] < -0.5) {
+             maxChange = change;
+             bestLocalIdx = localIdx;
+           }
+        }
+      }
+
+      // 6. Map Result
+      let finalKneeIdx = -1;
+      if (bestLocalIdx >= 0 && bestLocalIdx < validFrameIndices.length) {
+        finalKneeIdx = validFrameIndices[bestLocalIdx];
+      }
+
+      // 7. Store
+      if (finalKneeIdx >= 0 && finalKneeIdx < timeFrames.length) {
+        call.kneeFreq_kHz = contourKHz[bestLocalIdx];
+        
+        const kneeFreqTime_s = timeFrames[finalKneeIdx];
+        const firstFrameTimeInSeconds_knee = timeFrames[0];
+        call.kneeFreq_ms = (kneeFreqTime_s - firstFrameTimeInSeconds_knee) * 1000;  
+
+        console.log(`[Knee Search] Found Knee: ${call.kneeFreq_kHz.toFixed(2)}kHz at ${call.kneeFreq_ms.toFixed(2)}ms (Frame ${finalKneeIdx})`);
+
+        if (call.startTime_s !== null) {
+          const rawKneeTime_ms = (timeFrames[finalKneeIdx] - call.startTime_s) * 1000;
+          if (rawKneeTime_ms >= 0 && rawKneeTime_ms <= call.duration_ms) {
+            call.kneeTime_ms = rawKneeTime_ms;
+          } else {
+            call.kneeTime_ms = null; call.kneeFreq_kHz = null;
+          }
         }
       } else {
         call.kneeTime_ms = null;
         call.kneeFreq_kHz = null;
       }
-    } else {
-      call.kneeTime_ms = null;
-      call.kneeFreq_kHz = null;
     }
 
-    // ============================================================
-    // [2025] Apply Time Expansion Correction to Frequency Parameters
-    // ============================================================
+    // Time Expansion Correction
     if (getTimeExpansionMode()) {
       call.applyTimeExpansion(10);
     }
