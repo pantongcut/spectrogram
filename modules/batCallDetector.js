@@ -296,19 +296,31 @@ export class BatCall {
    */
   toAnalysisRecord() {
     return {
-      'Start Time [s]': this.startTime_s?.toFixed(4) || '-',
-      'End Time [s]': this.endTime_s?.toFixed(4) || '-',
+      // [NEW] 檔案中的絕對時間 (用於 Excel Column B & C)
+      'Signal start time': this.startFreqTime_s?.toFixed(4) || '-', 
+      'Signal end time': this.endFreqTime_s?.toFixed(4) || '-',
+      
+      // 相對時間 (Relative to Start = 0.00ms)
       'Duration [ms]': this.duration_ms?.toFixed(2) || '-',
+      
+      // Frequency Parameters
       'Peak Freq [kHz]': this.peakFreq_kHz?.toFixed(2) || '-',
-      'High Freq [kHz]': this.highFreq_kHz?.toFixed(2) || '-',
       'Start Freq [kHz]': this.startFreq_kHz?.toFixed(2) || '-',
       'End Freq [kHz]': this.endFreq_kHz?.toFixed(2) || '-',
+      'High Freq [kHz]': this.highFreq_kHz?.toFixed(2) || '-',
       'Low Freq [kHz]': this.lowFreq_kHz?.toFixed(2) || '-',
       'Knee Freq [kHz]': this.kneeFreq_kHz?.toFixed(2) || '-',
       'Characteristic Freq [kHz]': this.characteristicFreq_kHz?.toFixed(2) || '-',
       'Bandwidth [kHz]': this.bandwidth_kHz?.toFixed(2) || '-',
+      
+      // Time Parameters (Normalized)
+      'Peak Time [ms]': this.peakFreqTime_ms?.toFixed(2) || '-',
+      'Knee Time [ms]': this.kneeFreq_ms?.toFixed(2) || '-',
+      'High Time [ms]': this.highFreqTime_ms?.toFixed(2) || '-',
+      'Low Time [ms]': this.lowFreq_ms?.toFixed(2) || '-',
+      
+      // Other
       'Peak Power [dB]': this.peakPower_dB?.toFixed(1) || '-',
-      'Knee Time [ms]': this.kneeTime_ms?.toFixed(2) || '-',
       'SNR [dB]': this.snr_dB !== null ? (this.snr_dB > 0 ? `+${this.snr_dB.toFixed(1)}` : this.snr_dB.toFixed(1)) : '-',
       'Quality': this.quality || '-',
     };
@@ -3651,17 +3663,22 @@ export class BatCallDetector {
 
     // ============================================================
     // STEP 6: Calculate Knee Frequency and Knee Time
-    // [2025 FIXED] Unit Scaling (kHz/ms) for Curvature Calculation
+    // [2025 FIXED] Search Constraints & Absolute Time Storage
     // ============================================================
     
     // 1. Time Constraints
-    const searchStartFrame = Math.max(0, newStartFrameIdx);
+    // [CRITICAL FIX] Ensure we DO NOT search before the detected Start Frequency
+    let searchStartFrame = Math.max(0, newStartFrameIdx);
+    if (call.startFreqFrameIdx !== null && call.startFreqFrameIdx > searchStartFrame) {
+        searchStartFrame = call.startFreqFrameIdx;
+    }
+
     const searchEndFrame = Math.min(spectrogram.length - 1, newEndFrameIdx);
     const searchDurationFrames = searchEndFrame - searchStartFrame + 1;
 
     // 2. Frequency Constraints (+/- 1kHz Buffer)
-    const constraintMinFreq_Hz = (call.lowFreq_kHz !== null) ? (call.lowFreq_kHz * 1000) : 0;
-    const constraintMaxFreq_Hz = (call.highFreq_kHz !== null) ? (call.highFreq_kHz * 1000)  : freqBins[freqBins.length - 1];
+    const constraintMinFreq_Hz = (call.lowFreq_kHz !== null) ? (call.lowFreq_kHz * 1000) - 1000 : 0;
+    const constraintMaxFreq_Hz = (call.highFreq_kHz !== null) ? (call.highFreq_kHz * 1000) + 1000 : freqBins[freqBins.length - 1];
 
     let minBinIdx = 0;
     let maxBinIdx = freqBins.length - 1;
@@ -3673,9 +3690,8 @@ export class BatCallDetector {
       if (freqBins[b] <= constraintMaxFreq_Hz) { maxBinIdx = b; break; }
     }
 
-    console.log(`[Knee Search] Range: Frames ${searchStartFrame}-${searchEndFrame}, Freq ${constraintMinFreq_Hz.toFixed(0)}-${constraintMaxFreq_Hz.toFixed(0)} Hz`);
+    // console.log(`[Knee Search] Range: Frames ${searchStartFrame}-${searchEndFrame}, Freq ${constraintMinFreq_Hz.toFixed(0)}-${constraintMaxFreq_Hz.toFixed(0)} Hz`);
 
-    // [MODIFIED] Store frequencies in kHz immediately to avoid scale issues later
     const contourKHz = []; 
     const validFrameIndices = []; 
 
@@ -3813,34 +3829,82 @@ export class BatCallDetector {
         }
       }
 
-      // 6. Map Result
-      let finalKneeIdx = -1;
-      if (bestLocalIdx >= 0 && bestLocalIdx < validFrameIndices.length) {
-        finalKneeIdx = validFrameIndices[bestLocalIdx];
-      }
+    // 6. Map Result (Mapping back to Absolute Frame)
+    let finalKneeIdx = -1;
+    if (typeof bestLocalIdx !== 'undefined' && bestLocalIdx >= 0 && bestLocalIdx < validFrameIndices.length) {
+      finalKneeIdx = validFrameIndices[bestLocalIdx];
+    }
 
-      // 7. Store
-      if (finalKneeIdx >= 0 && finalKneeIdx < timeFrames.length) {
-        call.kneeFreq_kHz = contourKHz[bestLocalIdx];
+    // 7. Store Result (Absolute Time for now, Step 7 will normalize it)
+    if (finalKneeIdx >= 0 && finalKneeIdx < timeFrames.length) {
+      call.kneeFreq_kHz = contourKHz[bestLocalIdx];
+      
+      // Store the Frame Index! This is crucial for accurate Step 7 normalization
+      call.kneeFrameIdx = finalKneeIdx; 
+
+      // Temporary relative time (relative to Window Start)
+      const kneeFreqTime_s = timeFrames[finalKneeIdx];
+      const firstFrameTimeInSeconds_knee = timeFrames[0];
+      call.kneeFreq_ms = (kneeFreqTime_s - firstFrameTimeInSeconds_knee) * 1000;
+      call.kneeTime_ms = call.kneeFreq_ms;
+
+      // console.log(`[Knee Search] Found Knee: ${call.kneeFreq_kHz.toFixed(2)}kHz at Frame ${finalKneeIdx}`);
+    } else {
+      call.kneeTime_ms = null;
+      call.kneeFreq_kHz = null;
+      call.kneeFrameIdx = null;
+    }
+    }
+
+    // ============================================================
+    // STEP 7: [2025 NEW] Time Normalization (Start Freq = 0.00ms)
+    // 強制重置所有時間參數，以 Start Frequency 的 Frame 為起點
+    // ============================================================
+    if (call.startFreqFrameIdx !== null && call.startFreqFrameIdx < timeFrames.length) {
         
-        const kneeFreqTime_s = timeFrames[finalKneeIdx];
-        const firstFrameTimeInSeconds_knee = timeFrames[0];
-        call.kneeFreq_ms = (kneeFreqTime_s - firstFrameTimeInSeconds_knee) * 1000;  
+        // 基準時間點 (Start Frequency 發生的絕對時間)
+        const t0_s = timeFrames[call.startFreqFrameIdx];
 
-        console.log(`[Knee Search] Found Knee: ${call.kneeFreq_kHz.toFixed(2)}kHz at ${call.kneeFreq_ms.toFixed(2)}ms (Frame ${finalKneeIdx})`);
+        // Helper: 計算相對於 Start 的毫秒數
+        // 如果 targetFrame < startFrame，結果會是 0 (避免負數)，或者保留負數(如果那是真實的Pre-start signal)
+        // 根據您的要求， Start = 0.00ms，所以我們允許負數嗎？通常 Start 就是起點，不應有負數。
+        // 但如果 Peak 發生在 Start 之前(理論上不應該，除非 Start 定義錯誤)，這裡會如實反映。
+        const normalizeTime = (frameIdx) => {
+            if (frameIdx === null || frameIdx === undefined) return null;
+            const t_target = timeFrames[frameIdx];
+            return (t_target - t0_s) * 1000;
+        };
 
-        if (call.startTime_s !== null) {
-          const rawKneeTime_ms = (timeFrames[finalKneeIdx] - call.startTime_s) * 1000;
-          if (rawKneeTime_ms >= 0 && rawKneeTime_ms <= call.duration_ms) {
-            call.kneeTime_ms = rawKneeTime_ms;
-          } else {
-            call.kneeTime_ms = null; call.kneeFreq_kHz = null;
-          }
+        // 1. Reset Start Time -> 0.00 ms
+        call.startFreq_ms = 0.00;
+
+        // 2. Adjust Peak Time
+        if (peakFrameIdx !== null) {
+            call.peakFreqTime_ms = normalizeTime(peakFrameIdx);
         }
-      } else {
-        call.kneeTime_ms = null;
-        call.kneeFreq_kHz = null;
-      }
+
+        // 3. Adjust High Freq Time
+        if (call.highFreqFrameIdx !== null) {
+            call.highFreqTime_ms = normalizeTime(call.highFreqFrameIdx);
+        }
+
+        // 4. Adjust End/Low Freq Time
+        if (call.endFrameIdx_forLowFreq !== null) {
+            const relTime = normalizeTime(call.endFrameIdx_forLowFreq);
+            call.endFreq_ms = relTime;
+            call.lowFreq_ms = relTime;
+        }
+
+        // 5. Adjust Knee Time
+        if (call.kneeFrameIdx !== null && call.kneeFrameIdx !== undefined) {
+            call.kneeFreq_ms = normalizeTime(call.kneeFrameIdx);
+            call.kneeTime_ms = call.kneeFreq_ms;
+        }
+        
+        // 6. Adjust Duration (Ensure consistency)
+        if (call.endFreq_ms !== null) {
+            call.duration_ms = call.endFreq_ms - call.startFreq_ms; // effectively endFreq_ms
+        }
     }
 
     // Time Expansion Correction

@@ -255,7 +255,7 @@ export function showCallAnalysisPopup({
         batCallConfig.highpassFilterFreq_kHz = detector.calculateAutoHighpassFilterFreq(peakFreq);
       }
       
-      // Apply merged configuration
+      // [FIXED] 使用合併配置
       detector.config = { 
         ...detector.config, 
         ...batCallConfig
@@ -304,7 +304,6 @@ export function showCallAnalysisPopup({
 
       // 3. DETECT CALLS (Auto-create ROI & Call Segment)
       // 使用 detectCalls 讓 Detector 在選取範圍內自動尋找能量符合的 Call Segment
-      // 這會過濾掉選取框內的靜音部分，並精確鎖定 Start/End Time
       const calls = await detector.detectCalls(
         audioDataForDetection,
         sampleRate,
@@ -379,27 +378,22 @@ export function showCallAnalysisPopup({
         }
       }
       
-      // [CRITICAL FIX] 處理偵測結果與時間偏移校正
+      // [CRITICAL FIX] 處理偵測結果與時間顯示
       if (calls.length > 0) {
-        // 如果偵測到多個 Call（選取範圍太大），取持續時間最長或能量最強的（這裡取第一個）
         const call = calls[0];
         
-        // 校正時間：detector 返回的時間是相對於 audioData (slice) 的 0 秒
-        // 必須加上 selection.startTime 才能對應到整個檔案的真實時間
+        // 1. 修正絕對時間 (Seconds) - 用於 "Start Time" / "End Time" (檔案時間)
         const offset = selection.startTime;
-
-        // 注意：Duration 是相對值，不需要加 offset
         if (call.startTime_s !== null) call.startTime_s += offset;
         if (call.endTime_s !== null) call.endTime_s += offset;
         
-        // 頻率特徵點的發生時間也需要校正
-        if (call.peakFreqTime_ms !== null) call.peakFreqTime_ms = (call.peakFreqTime_ms / 1000 + offset) * 1000;
-        if (call.highFreqTime_ms !== null) call.highFreqTime_ms = (call.highFreqTime_ms / 1000 + offset) * 1000;
-        if (call.lowFreq_ms !== null) call.lowFreq_ms = (call.lowFreq_ms / 1000 + offset) * 1000;
-        if (call.startFreq_ms !== null) call.startFreq_ms = (call.startFreq_ms / 1000 + offset) * 1000;
-        if (call.endFreq_ms !== null) call.endFreq_ms = (call.endFreq_ms / 1000 + offset) * 1000;
-        if (call.characteristicFreq_ms !== null) call.characteristicFreq_ms = (call.characteristicFreq_ms / 1000 + offset) * 1000;
-        if (call.kneeFreq_ms !== null) call.kneeFreq_ms = (call.kneeFreq_ms / 1000 + offset) * 1000;
+        // 2. [2025 FIX] 保持相對時間 (Milliseconds) - 用於參數表格顯示
+        // 我們移除了之前在這裡加上 offset 的代碼
+        // 因為 batCallDetector 已經在 Step 7 將這些值標準化為 (相對於 Start Freq = 0ms)
+        // 所以這裡不需要做任何動作，直接使用 detector 返回的相對數值即可。
+        
+        // 舊代碼已刪除:
+        // if (call.peakFreqTime_ms !== null) call.peakFreqTime_ms = ...
         
         // 存儲最新檢測到的 call 對象到 popup 上
         popup.__latestDetectedCall = call;
@@ -407,7 +401,7 @@ export function showCallAnalysisPopup({
       } else {
         // 如果沒有偵測到符合閾值的 call，顯示空白或 fallback
         popup.__latestDetectedCall = null;
-        updateParametersDisplay(popup, null, peakFreq); // 傳入 peakFreq 作為 fallback 顯示
+        updateParametersDisplay(popup, null, peakFreq);
       }
     } catch (err) {
       console.error('Bat call detection error:', err);
