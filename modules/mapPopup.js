@@ -60,8 +60,8 @@ export function initMapPopup({
   }
   let popupWidth = parseInt(localStorage.getItem('mapPopupWidth'), 10);
   let popupHeight = parseInt(localStorage.getItem('mapPopupHeight'), 10);
-  if (isNaN(popupWidth) || popupWidth <= 0) popupWidth = 600;
-  if (isNaN(popupHeight) || popupHeight <= 0) popupHeight = 600;
+  if (isNaN(popupWidth) || popupWidth <= 0) popupWidth = 800;
+  if (isNaN(popupHeight) || popupHeight <= 0) popupHeight = 800;
   popup.style.width = `${popupWidth}px`;
   popup.style.height = `${popupHeight}px`;
 
@@ -774,39 +774,40 @@ export function initMapPopup({
       { type: 'Woody_shrubland', name: 'Woody Shrubland', color: '#689F38' }
     ];
 
-    // 儲存每個 Habitat 的 LayerGroup (容器)
-    const habitatGroups = {}; 
-    // 儲存目前使用者勾選要看的 Habitat 類型
-    const activeHabitats = new Set();
-    // 用來儲存 debounce timer
-    let habitatRefreshTimer = null;
-
-    // 2. 建立 UI 面板 (Control)
+    // ==========================================================
+    // 2. 建立合併後的 Habitat Control (仿造原生 Layers Control 行為)
+    // ==========================================================
     const HabitatControl = L.Control.extend({
-      options: { position: 'topleft' },
+      // 改為 topright，這樣它會自動排在原有的 Layers Control 下方
+      options: { position: 'topright' },
 
       onAdd: function(map) {
-        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-habitat-layers-overlays');
+        // 1. 建立主容器，加上 'leaflet-control-layers' 讓它長得像原生控制項
+        // 加上 'leaflet-habitat-control' 用於我們自定義的 CSS
+        const container = L.DomUtil.create('div', 'leaflet-control leaflet-bar leaflet-control-layers leaflet-habitat-control');
         
-        container.style.backgroundColor = 'white';
-        container.style.padding = '10px';
-        container.style.maxHeight = '400px';
-        container.style.overflowY = 'auto';
-        container.style.minWidth = '220px';
-        container.style.display = 'none';
-
+        // 2. 建立 Toggle 按鈕 (顯示 Leaf Icon)
+        const toggle = L.DomUtil.create('a', 'leaflet-control-layers-toggle', container);
+        toggle.href = '#';
+        toggle.title = 'Habitat Layers';
+        toggle.innerHTML = '<i class="fa-solid fa-leaf" style="color: #2E7D32; font-size: 18px;"></i>';
+        
+        // 3. 建立內容面板 (初始隱藏，Hover 時顯示)
+        const section = L.DomUtil.create('div', 'leaflet-control-layers-list leaflet-control-habitat-layers-overlays', container);
+        
+        // --- 內容構建開始 (原本的 UI 邏輯) ---
         // Header
-        const header = L.DomUtil.create('div', '', container);
+        const header = L.DomUtil.create('div', '', section);
         header.style.display = 'flex';
         header.style.justifyContent = 'space-between';
         header.style.marginBottom = '8px';
         header.style.borderBottom = '1px solid #eee';
         header.style.paddingBottom = '5px';
         const title = L.DomUtil.create('strong', '', header);
-        title.innerText = 'Habitat Layers (Dynamic)';
+        title.innerText = 'Habitat Layers (AFCD 2021)';
 
         // Display All Option
-        const allRow = L.DomUtil.create('div', '', container);
+        const allRow = L.DomUtil.create('div', '', section);
         allRow.style.marginBottom = '8px';
         allRow.style.paddingBottom = '8px';
         allRow.style.borderBottom = '1px solid #eee';
@@ -820,7 +821,7 @@ export function initMapPopup({
         allCheckbox.style.cursor = 'pointer';
         const allLabel = document.createElement('label');
         allLabel.htmlFor = 'chk_display_all';
-        allLabel.innerText = 'Display All';
+        allLabel.innerText = 'Display All Habitats';
         allLabel.style.fontSize = '12px';
         allLabel.style.fontWeight = 'bold';
         allLabel.style.cursor = 'pointer';
@@ -830,39 +831,30 @@ export function initMapPopup({
         // Display All Logic
         allCheckbox.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
-            
             habitatConfig.forEach((cfg, index) => {
                 const itemChk = document.getElementById(`chk_${cfg.type}`);
-                
                 if (itemChk && itemChk.checked !== isChecked) {
                     itemChk.checked = isChecked;
-                    
-                    const delay = isChecked ? index * 200 : 0; // 改為 200ms 間隔加快一點體驗
-                    
+                    const delay = isChecked ? index * 200 : 0;
                     if (isChecked) {
-                        // [重要] 預先啟動 Loading Bar
                         startLoading();
-                        
                         setTimeout(() => {
-                            // 再次檢查
                             if (itemChk.checked === isChecked) {
-                                toggleHabitat(cfg, isChecked, true); // 傳入 true (isPreloading)
+                                toggleHabitat(cfg, isChecked, true);
                             } else {
-                                // 如果使用者在等待期間反悔了，必須把剛剛預借的 Loading 扣掉
                                 stopLoading();
                             }
                         }, delay);
                     } else {
-                        // 取消勾選不需要延遲
                         toggleHabitat(cfg, isChecked, false);
                     }
                 }
             });
         });
 
-        // Habitat Items
+        // Habitat Items Loop
         habitatConfig.forEach(cfg => {
-          const row = L.DomUtil.create('div', '', container);
+          const row = L.DomUtil.create('div', '', section);
           row.style.marginBottom = '4px';
           row.style.display = 'flex';
           row.style.alignItems = 'center';
@@ -900,33 +892,43 @@ export function initMapPopup({
           row.appendChild(checkbox);
           row.appendChild(label);
         });
+        // --- 內容構建結束 ---
 
+        // 4. 事件處理：Hover 效果
+        // 當滑鼠進入容器 -> 加入 expanded class (Leaflet CSS 會自動隱藏 toggle 並顯示 list)
+        L.DomEvent.on(container, 'mouseenter', () => {
+             container.classList.add('leaflet-control-layers-expanded');
+        });
+        
+        // 當滑鼠離開容器 -> 移除 expanded class
+        L.DomEvent.on(container, 'mouseleave', () => {
+             container.classList.remove('leaflet-control-layers-expanded');
+        });
+
+        // 防止地圖操作穿透
         L.DomEvent.disableClickPropagation(container);
         L.DomEvent.on(container, 'mousewheel', L.DomEvent.stopPropagation);
+        
+        // 手機版相容性 (點擊也能展開)
+        if (L.Browser.touch) {
+            L.DomEvent.on(toggle, 'click', (e) => {
+                L.DomEvent.stop(e);
+                if (container.classList.contains('leaflet-control-layers-expanded')) {
+                    container.classList.remove('leaflet-control-layers-expanded');
+                } else {
+                    container.classList.add('leaflet-control-layers-expanded');
+                }
+            });
+        }
+
         return container;
       }
     });
 
-    const HabitatToggleBtn = L.Control.extend({
-      options: { position: 'topleft' },
-      onAdd: function(map) {
-        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-habitat-toggle');
-        const link = L.DomUtil.create('a', '', container);
-        link.href = '#';
-        link.title = 'Habitats';
-        link.innerHTML = '<i class="fa-solid fa-leaf"></i>';
-        link.style.color = '#2E7D32';
-        L.DomEvent.on(link, 'click', L.DomEvent.stop)
-          .on(link, 'click', () => {
-             const panel = document.querySelector('.leaflet-control-habitat-layers-overlays');
-             if (panel) panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-          });
-        return container;
-      }
-    });
-
-    map.addControl(new HabitatToggleBtn());
+    // 只需要添加這一個 Control
     map.addControl(new HabitatControl());
+    
+    // 移除舊的 map.addControl(new HabitatToggleBtn()); 的程式碼
 
     // 3. 狀態切換邏輯
     // 新增參數 isPreloading

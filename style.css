@@ -3175,3 +3175,38 @@ input.tag-button.editing {
     0% { transform: translateX(-100%); }
     100% { transform: translateX(200%); }
 }
+
+/* 自定義 Habitat Control 的樣式 */
+.leaflet-habitat-control .leaflet-control-layers-toggle {
+    background-image: none !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+}
+
+/* 確保展開時列表有足夠寬度 */
+.leaflet-habitat-control.leaflet-control-layers-expanded .leaflet-control-layers-list {
+    display: block;
+    padding: 6px 10px;
+}
+
+.leaflet-habitat-control .leaflet-control-layers-list {
+    display: none; /* 預設隱藏列表 */
+}
+
+.leaflet-touch .leaflet-bar a:first-child {
+    border-radius: 3px !important;
+}
+
+.leaflet-touch .leaflet-bar a:last-child {
+    border-radius: 3px !important;
+}
+
+/* 確保內容不被壓縮 */
+.leaflet-control-habitat-layers-overlays {
+    min-width: 200px;
+    max-height: 600px;
+    overflow-y: auto; 
+}
