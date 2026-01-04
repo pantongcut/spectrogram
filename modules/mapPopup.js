@@ -629,48 +629,71 @@ export function initMapPopup({
     layersControl = L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
     layersControlContainer = layersControl.getContainer();
 
-    // =========== 新增開始: 2.5D Buildings Layer (最終定稿版) ===========
+    // =========== 新增開始: 2.5D Buildings Layer (Safe Mode) ===========
     if (typeof OSMBuildings !== 'undefined') {
       const OsmBuildingsLayer = L.Layer.extend({
         onAdd: function (map) {
-          // 1. 在建立 OSMBuildings 之前，先記錄地圖容器內現有的元素
-          const container = map.getContainer();
-          const childrenBefore = Array.from(container.children);
+          try {
+            const container = map.getContainer();
+            const childrenBefore = Array.from(container.children);
 
-          // 2. 初始化 OSMBuildings
-          this._osmb = new OSMBuildings(map);
-          this._osmb.load('https://{s}.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json');
-          this._osmb.date(new Date());
-          this._osmb.style({ wallColor: 'rgb(200, 190, 180)', roofColor: 'rgb(220, 220, 220)', shadows: true });
+            this._osmb = new OSMBuildings(map);
+            
+            // === 修改重點：更換 Proxy 服務 ===
+            // 原本的 corsproxy.io 被擋 (403)，改用 api.allorigins.win
+            // 注意：這裡同樣不使用 encodeURIComponent，讓 OSMBuildings 自動替換 {z}/{x}/{y}
+            
+            // 方案 A: 使用 AllOrigins (推薦，支援 raw 輸出)
+            const tileUrl = 'https://api.allorigins.win/raw?url=' + 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
+            
+            // 如果方案 A 還是失敗，你可以註解掉上面那行，改用下面的 方案 B 或 C：
+            
+            // 方案 B: ThingProxy (備用)
+            // const tileUrl = 'https://thingproxy.freeboard.io/fetch/' + 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
+            
+            // 方案 C: CodeTabs (備用，適合 API 數據)
+            // const tileUrl = 'https://api.codetabs.com/v1/proxy?quest=' + 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
 
-          // 3. 比對找出新產生的 DOM 元素並存入變數
-          const childrenAfter = Array.from(container.children);
-          this._layerElement = childrenAfter.find(el => !childrenBefore.includes(el));
+            this._osmb.load(tileUrl);
+            this._osmb.date(new Date());
+            this._osmb.style({ wallColor: 'rgb(200, 190, 180)', roofColor: 'rgb(220, 220, 220)', shadows: true });
 
-          // 如果在地圖容器層找不到，嘗試去 overlayPane 找
-          if (!this._layerElement) {
-            const overlayPane = map.getPanes().overlayPane;
-            if (overlayPane.children.length > 0) {
-              this._layerElement = overlayPane.children[overlayPane.children.length - 1];
+            const childrenAfter = Array.from(container.children);
+            this._layerElement = childrenAfter.find(el => !childrenBefore.includes(el));
+
+            if (!this._layerElement) {
+              const overlayPane = map.getPanes().overlayPane;
+              if (overlayPane.children.length > 0) {
+                this._layerElement = overlayPane.children[overlayPane.children.length - 1];
+              }
             }
+            
+            console.log('[OSMBuildings] Layer initialized via Proxy.');
+          } catch (e) {
+            console.error('[OSMBuildings] Initialization failed.', e);
+            this._osmb = null;
           }
         },
 
         onRemove: function (map) {
-          // 1. 停止數據載入
-          if (this._osmb) {
+          if (!this._osmb) return;
+
+          try {
+            // 1. 停止數據載入
             if (typeof this._osmb.unload === 'function') {
-              try { this._osmb.unload(); } catch (e) { }
+               this._osmb.unload();
             }
             if (typeof this._osmb.destroy === 'function') {
-              try { this._osmb.destroy(); } catch (e) { }
+               this._osmb.destroy();
             }
-          }
+          } catch(e) { console.warn('[OSMBuildings] Error during cleanup:', e); }
 
           // 2. 移除我們在 onAdd 時精準捕獲的那個容器元素
-          if (this._layerElement && this._layerElement.parentNode) {
-            this._layerElement.parentNode.removeChild(this._layerElement);
-          }
+          try {
+            if (this._layerElement && this._layerElement.parentNode) {
+              this._layerElement.parentNode.removeChild(this._layerElement);
+            }
+          } catch(e) {}
 
           // 3. 清除版權文字
           document.querySelectorAll('.osmb-attribution').forEach(el => el.remove());
