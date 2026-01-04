@@ -749,6 +749,9 @@ export function initMapPopup({
     // =========== NEW: Dynamic Habitat Layers (Load on View Change) ===========
     console.log('[Habitat] Initializing Dynamic Habitat Control...');
 
+    const activeHabitats = new Set();
+    const habitatGroups = {};
+
     // 1. 設定清單
     const habitatConfig = [
       { type: 'Agricultural_land', name: 'Agricultural Land', color: '#388E3C' },
@@ -1089,6 +1092,7 @@ export function initMapPopup({
     }
 
     // 6. 監聽地圖移動事件 (Drag & Zoom)
+    let habitatRefreshTimer = null; 
     // 使用 Debounce 防止在此頻繁觸發
     map.on('moveend', () => {
       if (habitatRefreshTimer) clearTimeout(habitatRefreshTimer);
