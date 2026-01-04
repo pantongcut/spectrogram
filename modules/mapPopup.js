@@ -67,9 +67,35 @@ export function initMapPopup({
 
   let map = null;
   let markers = [];
-  // track survey markers whose tooltip was pinned (should remain visible)
-  let pinnedSurveyMarkers = new Set();
+  let activeLoadingRequests = 0; // 計算目前正在進行的請求數量
+  let loadingBarEl = null; // 保存 loading bar DOM 元素的引用
   let polylines = [];
+
+  // 開始讀取時呼叫
+  function startLoading() {
+    activeLoadingRequests++;
+    updateLoadingBarState();
+  }
+
+  // 結束讀取時呼叫 (成功或失敗都算)
+  function stopLoading() {
+    if (activeLoadingRequests > 0) {
+      activeLoadingRequests--;
+    }
+    updateLoadingBarState();
+  }
+
+  // 根據請求數量決定是否顯示 Loading Bar
+  function updateLoadingBarState() {
+    if (!loadingBarEl) return;
+
+    if (activeLoadingRequests > 0) {
+      loadingBarEl.style.display = 'block';
+    } else {
+      activeLoadingRequests = 0;
+      loadingBarEl.style.display = 'none';
+    }
+  }
   let routeBtn = null;
   let routeToggleBtn = null;
   let routeBtnGroup = null;
@@ -423,7 +449,12 @@ export function initMapPopup({
 
   function createMap(lat, lon) {
     map = L.map(mapDiv).setView([lat, lon], 13);
-    // ensure pinned survey markers remain visible even if other clicks close tooltips/popups
+    
+    // 獲取 Loading Bar 元素的引用並重置狀態
+    loadingBarEl = mapDiv.querySelector('.map-loading-bar');
+    activeLoadingRequests = 0;
+    updateLoadingBarState();
+    
     map.on('click', () => {
       try {
         // 如果地圖正在被使用者拖曳，則不要自動重新開啟 pinned tooltip/popup
@@ -639,21 +670,8 @@ export function initMapPopup({
 
             this._osmb = new OSMBuildings(map);
             
-            // === 修改重點：更換 Proxy 服務 ===
-            // 原本的 corsproxy.io 被擋 (403)，改用 api.allorigins.win
-            // 注意：這裡同樣不使用 encodeURIComponent，讓 OSMBuildings 自動替換 {z}/{x}/{y}
-            
-            // 方案 A: 使用 AllOrigins (推薦，支援 raw 輸出)
             const tileUrl = 'https://api.allorigins.win/raw?url=' + 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
             
-            // 如果方案 A 還是失敗，你可以註解掉上面那行，改用下面的 方案 B 或 C：
-            
-            // 方案 B: ThingProxy (備用)
-            // const tileUrl = 'https://thingproxy.freeboard.io/fetch/' + 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
-            
-            // 方案 C: CodeTabs (備用，適合 API 數據)
-            // const tileUrl = 'https://api.codetabs.com/v1/proxy?quest=' + 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
-
             this._osmb.load(tileUrl);
             this._osmb.date(new Date());
             this._osmb.style({ wallColor: 'rgb(200, 190, 180)', roofColor: 'rgb(220, 220, 220)', shadows: true });
@@ -812,15 +830,34 @@ export function initMapPopup({
         // Display All Logic
         allCheckbox.addEventListener('change', (e) => {
             const isChecked = e.target.checked;
-            habitatConfig.forEach(cfg => {
+            
+            habitatConfig.forEach((cfg, index) => {
                 const itemChk = document.getElementById(`chk_${cfg.type}`);
+                
                 if (itemChk && itemChk.checked !== isChecked) {
                     itemChk.checked = isChecked;
-                    toggleHabitat(cfg, isChecked);
+                    
+                    const delay = isChecked ? index * 200 : 0; // 改為 200ms 間隔加快一點體驗
+                    
+                    if (isChecked) {
+                        // [重要] 預先啟動 Loading Bar
+                        startLoading();
+                        
+                        setTimeout(() => {
+                            // 再次檢查
+                            if (itemChk.checked === isChecked) {
+                                toggleHabitat(cfg, isChecked, true); // 傳入 true (isPreloading)
+                            } else {
+                                // 如果使用者在等待期間反悔了，必須把剛剛預借的 Loading 扣掉
+                                stopLoading();
+                            }
+                        }, delay);
+                    } else {
+                        // 取消勾選不需要延遲
+                        toggleHabitat(cfg, isChecked, false);
+                    }
                 }
             });
-            // 觸發一次重新整理
-            if (isChecked) refreshVisibleHabitats();
         });
 
         // Habitat Items
@@ -892,20 +929,19 @@ export function initMapPopup({
     map.addControl(new HabitatControl());
 
     // 3. 狀態切換邏輯
-    function toggleHabitat(cfg, isChecked) {
+    // 新增參數 isPreloading
+    function toggleHabitat(cfg, isChecked, isPreloading = false) {
       if (isChecked) {
         activeHabitats.add(cfg.type);
-        // 如果該類型的 LayerGroup 還沒建立，現在建立並加入地圖
         if (!habitatGroups[cfg.type]) {
           habitatGroups[cfg.type] = L.layerGroup().addTo(map);
         } else if (!map.hasLayer(habitatGroups[cfg.type])) {
           habitatGroups[cfg.type].addTo(map);
         }
-        // 立即載入該 Layer
-        fetchDataForSingleLayer(cfg);
+        // 將 isPreloading 傳遞下去
+        fetchDataForSingleLayer(cfg, isPreloading);
       } else {
         activeHabitats.delete(cfg.type);
-        // 移除並清空該 LayerGroup
         if (habitatGroups[cfg.type]) {
           habitatGroups[cfg.type].clearLayers();
           if (map.hasLayer(habitatGroups[cfg.type])) {
@@ -916,12 +952,15 @@ export function initMapPopup({
     }
 
     // 4. 核心：根據目前地圖範圍下載數據
-    function fetchDataForSingleLayer(cfg) {
+    // 新增參數 isPreloading: 如果為 true，代表外部已經呼叫過 startLoading()，這裡就不用再呼叫
+    function fetchDataForSingleLayer(cfg, isPreloading = false) {
       const currentZoom = map.getZoom();
       
-      // Zoom 保護：如果 Zoom < 17，清空內容並停止下載
+      // Zoom 保護 (如果因為 Zoom 停止載入，且外部已經計數，這裡要負責扣掉)
       if (currentZoom < 17) {
         if (habitatGroups[cfg.type]) habitatGroups[cfg.type].clearLayers();
+        if (isPreloading) stopLoading(); // [重要] 抵銷外部的計數
+        
         if (!window._habitatZoomWarned) {
              console.log(`[Habitat] Map too wide (Zoom ${currentZoom}). Zoom in to 17+ to load data.`);
              window._habitatZoomWarned = true;
@@ -930,15 +969,17 @@ export function initMapPopup({
       }
       window._habitatZoomWarned = false;
 
-      // 取得目前地圖邊界 (BBOX)
+      // 如果不是預先載入 (單點擊)，則在這裡開始計數
+      if (!isPreloading) {
+          startLoading();
+      }
+
       const bounds = map.getBounds();
-      // 稍微擴大一點點邊界，確保邊緣的 Polygon 不會被切斷太明顯
       const south = bounds.getSouth();
       const west = bounds.getWest();
       const north = bounds.getNorth();
       const east = bounds.getEast();
 
-      // 建構動態 Filter
       const dynamicFilter = `<Filter><Intersects><PropertyName>SHAPE</PropertyName><gml:Envelope srsName='EPSG:4326'><gml:lowerCorner>${south} ${west}</gml:lowerCorner><gml:upperCorner>${north} ${east}</gml:upperCorner></gml:Envelope></Intersects></Filter>`;
 
       const url = new URL('https://portal.csdi.gov.hk/server/services/common/afcd_rcd_1639382960762_55768/MapServer/WFSServer');
@@ -946,67 +987,102 @@ export function initMapPopup({
       url.searchParams.append('request', 'GetFeature');
       url.searchParams.append('typenames', cfg.type);
       url.searchParams.append('outputFormat', 'geojson');
-      url.searchParams.append('maxFeatures', '2000'); // 因為是局部載入，2000 通常足夠
+      url.searchParams.append('maxFeatures', '2000');
       url.searchParams.append('srsName', 'EPSG:4326');
       url.searchParams.append('filter', dynamicFilter);
 
-      // console.log(`[Habitat] Requesting ${cfg.type} for current view...`);
+      const attemptFetch = (retriesLeft) => {
+        // 如果使用者中途取消勾選
+        if (!activeHabitats.has(cfg.type)) {
+            stopLoading(); // [重要] 抵銷計數
+            return;
+        }
 
-      fetch(url)
-        .then(r => r.json())
-        .then(data => {
-          // 確保 Group 還在 (可能使用者在下載途中取消勾選)
-          const group = habitatGroups[cfg.type];
-          if (!group || !activeHabitats.has(cfg.type)) return;
+        fetch(url)
+          .then(r => {
+              if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+              return r.json();
+          })
+          .then(data => {
+            // 成功：停止 Loading
+            stopLoading();
 
-          // 清空舊的範圍資料，準備放入新範圍資料
-          group.clearLayers();
+            const group = habitatGroups[cfg.type];
+            if (!group || !activeHabitats.has(cfg.type)) return;
 
-          if (!data.features || data.features.length === 0) return;
+            group.clearLayers();
 
-          // 座標修復邏輯 (同前)
-          let needFlip = false;
-          try {
-             let testCoord = null;
-             const geom = data.features[0].geometry;
-             if (geom.type === 'Polygon') testCoord = geom.coordinates[0][0];
-             else if (geom.type === 'MultiPolygon') testCoord = geom.coordinates[0][0][0];
+            if (!data.features || data.features.length === 0) return;
 
-             if (testCoord && testCoord[0] < 90 && testCoord[1] > 90) {
-                needFlip = true;
-             }
-          } catch(e) {}
+            let needFlip = false;
+            try {
+               let testCoord = null;
+               const geom = data.features[0].geometry;
+               if (geom.type === 'Polygon') testCoord = geom.coordinates[0][0];
+               else if (geom.type === 'MultiPolygon') testCoord = geom.coordinates[0][0][0];
 
-          const geoLayer = L.geoJSON(data, {
-            coordsToLatLng: function (coords) {
-                return needFlip ? new L.LatLng(coords[0], coords[1]) : new L.LatLng(coords[1], coords[0]);
-            },
-            style: {
-              color: cfg.color,
-              weight: 1,
-              fillColor: cfg.color,
-              fillOpacity: 0.6
-            },
-            onEachFeature: (feature, l) => {
-               l.bindPopup(`<div class="map-popup-table"><strong>${cfg.name}</strong><br>ID: ${feature.id || 'N/A'}</div>`);
-            }
+               if (testCoord && testCoord[0] < 90 && testCoord[1] > 90) {
+                  needFlip = true;
+               }
+            } catch(e) {}
+
+            const geoLayer = L.geoJSON(data, {
+              coordsToLatLng: function (coords) {
+                  return needFlip ? new L.LatLng(coords[0], coords[1]) : new L.LatLng(coords[1], coords[0]);
+              },
+              style: {
+                color: cfg.color,
+                weight: 1,
+                fillColor: cfg.color,
+                fillOpacity: 0.6
+              },
+              onEachFeature: (feature, l) => {
+                 l.bindPopup(`<div class="map-popup-table"><strong>${cfg.name}</strong><br>ID: ${feature.id || 'N/A'}</div>`);
+              }
+            });
+
+            group.addLayer(geoLayer);
+          })
+          .catch(err => {
+              // 錯誤處理
+              if (retriesLeft > 0 && activeHabitats.has(cfg.type)) {
+                  console.warn(`[Habitat] Failed to fetch ${cfg.type}. Retrying in 1.5s... (${retriesLeft} attempts left)`);
+                  // [重要] 重試期間不呼叫 stopLoading，讓 Bar 保持顯示
+                  setTimeout(() => {
+                      attemptFetch(retriesLeft - 1);
+                  }, 1500);
+              } else {
+                  console.error(`[Habitat] Final Error fetching ${cfg.type}:`, err);
+                  // 最終失敗：停止 Loading
+                  stopLoading();
+              }
           });
+      };
 
-          // 將新資料加入 Group
-          group.addLayer(geoLayer);
-          // console.log(`[Habitat] Updated ${cfg.type}: ${data.features.length} features.`);
-        })
-        .catch(err => console.error(`[Habitat] Error fetching ${cfg.type}:`, err));
+      attemptFetch(2);
     }
 
     // 5. 重新整理所有已勾選的圖層
     function refreshVisibleHabitats() {
       if (activeHabitats.size === 0) return;
-      // console.log('[Habitat] View changed, refreshing active layers...');
-      activeHabitats.forEach(type => {
-        // 找出對應的 config
+      
+      Array.from(activeHabitats).forEach((type, index) => {
         const cfg = habitatConfig.find(c => c.type === type);
-        if (cfg) fetchDataForSingleLayer(cfg);
+        
+        if (cfg) {
+            // [重要] 預先啟動 Loading Bar
+            startLoading();
+            
+            setTimeout(() => {
+                if (activeHabitats.has(type)) {
+                    // 傳入 true (isPreloading)
+                    fetchDataForSingleLayer(cfg, true);
+                } else {
+                    // 使用者在等待期間取消了該圖層，抵銷計數
+                    stopLoading();
+                }
+            }, index * 200);
+        }
       });
     }
 
