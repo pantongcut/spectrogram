@@ -3206,7 +3206,7 @@ input.tag-button.editing {
 
 /* 確保內容不被壓縮 */
 .leaflet-control-habitat-layers-overlays {
-    min-width: 200px;
+    min-width: 150px;
     max-height: 600px;
     overflow-y: auto; 
 }

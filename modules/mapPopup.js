@@ -1042,7 +1042,7 @@ export function initMapPopup({
                 fillOpacity: 0.6
               },
               onEachFeature: (feature, l) => {
-                 l.bindPopup(`<div class="map-popup-table"><strong>${cfg.name}</strong><br>ID: ${feature.id || 'N/A'}</div>`);
+                 l.bindPopup(`<div class="map-popup-table"><strong>${cfg.name}</strong></div>`);
               }
             });
 
@@ -1052,19 +1052,17 @@ export function initMapPopup({
               // 錯誤處理
               if (retriesLeft > 0 && activeHabitats.has(cfg.type)) {
                   console.warn(`[Habitat] Failed to fetch ${cfg.type}. Retrying in 1.5s... (${retriesLeft} attempts left)`);
-                  // [重要] 重試期間不呼叫 stopLoading，讓 Bar 保持顯示
                   setTimeout(() => {
                       attemptFetch(retriesLeft - 1);
                   }, 1500);
               } else {
-                  console.error(`[Habitat] Final Error fetching ${cfg.type}:`, err);
-                  // 最終失敗：停止 Loading
+                  console.warn(`[Habitat] Final Error fetching ${cfg.type}:`, err);
                   stopLoading();
               }
           });
       };
 
-      attemptFetch(2);
+      attemptFetch(3);
     }
 
     // 5. 重新整理所有已勾選的圖層
