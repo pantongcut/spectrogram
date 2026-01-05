@@ -345,6 +345,41 @@ export function initMapPopup({
   const mapDropOverlay = document.getElementById('map-drop-overlay');
   let dropCounter = 0;
 
+  // =========== NEW: 通用浮動訊息 (Generic Map Floating Message) ===========
+  let floatingMsgEl = null;
+  let floatingMsgTimer = null;
+
+  function createFloatingMessage() {
+    if (!mapDiv) return;
+    // 檢查是否已存在
+    if (document.getElementById('map-floating-msg-container')) return;
+
+    floatingMsgEl = document.createElement('div');
+    floatingMsgEl.id = 'map-floating-msg-container';
+    floatingMsgEl.className = 'map-floating-message'; // 使用 CSS 定義的樣式
+    
+    mapDiv.appendChild(floatingMsgEl);
+  }
+
+  // 通用顯示函數：text 為要顯示的文字
+  function showFloatingMessage(text) {
+    if (!floatingMsgEl) createFloatingMessage();
+    
+    if (floatingMsgEl) {
+      floatingMsgEl.innerText = text; // 設定動態文字
+      floatingMsgEl.style.display = 'block';
+      
+      // 清除舊的 timer
+      if (floatingMsgTimer) clearTimeout(floatingMsgTimer);
+      
+      // 3秒後自動消失
+      floatingMsgTimer = setTimeout(() => {
+        floatingMsgEl.style.display = 'none';
+      }, 3000);
+    }
+  }
+  // =================================================================
+
   let ctrlPressed = false;
   let markerPointerSuppressed = false; // 當拖動/縮放期間暫時抑制 marker tooltip
 
@@ -450,6 +485,9 @@ export function initMapPopup({
   function createMap(lat, lon) {
     map = L.map(mapDiv).setView([lat, lon], 13);
     
+    // 確保訊息元素已被建立
+    createFloatingMessage();
+
     // 獲取 Loading Bar 元素的引用並重置狀態
     loadingBarEl = mapDiv.querySelector('.map-loading-bar');
     activeLoadingRequests = 0;
@@ -957,24 +995,23 @@ export function initMapPopup({
     }
 
     // 4. 核心：根據目前地圖範圍下載數據
-    // 新增參數 isPreloading: 如果為 true，代表外部已經呼叫過 startLoading()，這裡就不用再呼叫
     function fetchDataForSingleLayer(cfg, isPreloading = false) {
       const currentZoom = map.getZoom();
       
-      // Zoom 保護 (如果因為 Zoom 停止載入，且外部已經計數，這裡要負責扣掉)
+      // --- 修改點 1: Zoom 保護 (使用通用訊息函數) ---
       if (currentZoom < 17) {
         if (habitatGroups[cfg.type]) habitatGroups[cfg.type].clearLayers();
-        if (isPreloading) stopLoading(); // [重要] 抵銷外部的計數
+        if (isPreloading) stopLoading(); 
         
         if (!window._habitatZoomWarned) {
-             console.log(`[Habitat] Map too wide (Zoom ${currentZoom}). Zoom in to 17+ to load data.`);
+             // 顯示 Zoom 警告
+             showFloatingMessage('Zoom in to Level 17+ to view habitat data');
              window._habitatZoomWarned = true;
         }
         return;
       }
       window._habitatZoomWarned = false;
 
-      // 如果不是預先載入 (單點擊)，則在這裡開始計數
       if (!isPreloading) {
           startLoading();
       }
@@ -1017,7 +1054,12 @@ export function initMapPopup({
 
             group.clearLayers();
 
-            if (!data.features || data.features.length === 0) return;
+            if (!data.features || data.features.length === 0) {
+                if (!isPreloading) {
+                    showFloatingMessage(`No ${cfg.name} found in current view.`);
+                }
+                return;
+            }
 
             let needFlip = false;
             try {
@@ -1058,6 +1100,9 @@ export function initMapPopup({
               } else {
                   console.warn(`[Habitat] Final Error fetching ${cfg.type}:`, err);
                   stopLoading();
+                  if (!isPreloading) {
+                     showFloatingMessage(`Error loading ${cfg.name}.`);
+                  }
               }
           });
       };
