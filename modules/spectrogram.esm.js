@@ -571,27 +571,25 @@ destroy() {
         this.fftData = null;
         this.powerSpectrum = null;
         
-        // [FIX] 安全釋放 WASM 記憶體 (Safe Release)
-        // 即使 release_memory 崩潰，也要確保 _wasmEngine 被設為 null，
-        // 這樣 JavaScript 端的垃圾回收器 (GC) 才能回收這個大對象。
+        // [FIX - MEMORY LEAK] 必須清空 Peak 數據陣列
+        // 這些陣列包含成千上萬個 JS 小物件，如果不設為 null，
+        // 它們會因為閉包或懸垂引用而一直留在記憶體中
+        this.peakBandArrayPerChannel = null;
+
+        this.buffer = null;
+        
         if (this._wasmEngine) {
-            try {
-                if (typeof this._wasmEngine.release_memory === 'function') {
-                    // console.log('🗑️ [Spectrogram] Soft-releasing WASM memory');
-                    this._wasmEngine.release_memory();
-                } else if (typeof this._wasmEngine.free === 'function') {
-                    this._wasmEngine.free();
-                }
-            } catch (e) {
-                // 忽略 "memory access out of bounds" 等錯誤
-                // 這種錯誤通常發生在 WASM 記憶體已經被外部重置或 detach 時
-                // 這時候我們不需要做任何事，直接讓 JS 引用斷開即可
-                console.warn('⚠️ [Spectrogram] WASM cleanup warning (safe to ignore):', e.message);
-            } finally {
-                // CRITICAL: 無論如何都要切斷引用
-                this._wasmEngine = null;
+        try {
+            // 強制調用 free()，不要調用 release_memory()
+            if (typeof this._wasmEngine.free === 'function') {
+                this._wasmEngine.free();
             }
+        } catch (e) {
+            console.warn('⚠️ [Spectrogram] WASM cleanup warning:', e.message);
+        } finally {
+            this._wasmEngine = null;
         }
+    }
         
         // Clean up event listeners
         if (this._colorBarClickHandler) {
@@ -1383,6 +1381,12 @@ destroy() {
         
         // Wait for WASM to be ready
         await this._wasmReady;
+        
+        // [FIX - MEMORY LEAK] 如果在等待期間插件已被銷毀，立即停止
+        // 防止異步計算在 destroy 之後仍然回來寫入數據
+        if (!this.wrapper || !this._wasmEngine) {
+            return null;
+        }
         
         const currentFilterBankKey = `${this.scale}:${n}:${this.frequencyMin}:${this.frequencyMax}`;
         

@@ -1421,12 +1421,10 @@ class u extends a {
                         // 加載每個通道的數據到 WASM
                         for (let ch = 0; ch < numChannels; ch++) {
                             const channelData = this.decodedData.getChannelData(ch);
-                            // Create a copy to avoid Rust aliasing issues
-                            // WASM requires exclusive ownership of the data
-                            let channelDataCopy = new Float32Array(channelData);
-                            this._wasmWaveformEngine.load_channel(ch, channelDataCopy);
-                            // [FIX] Release the temporary buffer immediately for faster GC
-                            channelDataCopy = null;
+                            // [FIX - MEMORY LEAK] 直接傳遞 channelData，不要複製
+                            // WASM 綁定函數 (passArrayF32ToWasm0) 內部已經會執行一次 .set() 複製到 WASM 記憶體
+                            // 在這裡手動複製會導致瞬間 RAM 消耗加倍（原始 + 複製），給 GC 造成巨大壓力
+                            this._wasmWaveformEngine.load_channel(ch, channelData);
                         }
                         
                         // Audio data loaded to WaveformEngine
@@ -1632,6 +1630,9 @@ class u extends a {
         this.unsubscribePlayerEvents(),
         this.timer.destroy(),
         this.renderer.destroy(),
+        // [FIX - MEMORY LEAK] 確保釋放 WaveformEngine 的 WASM 內存
+        // 如果 WaveSurfer 實例被銷毀，這個 Rust 對象必須被 free
+        this._wasmWaveformEngine && typeof this._wasmWaveformEngine.free === 'function' && (t = this._wasmWaveformEngine, t.free ? (t.free(), this._wasmWaveformEngine = null) : null),
         super.destroy()
     }
 }

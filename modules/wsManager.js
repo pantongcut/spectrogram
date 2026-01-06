@@ -104,8 +104,14 @@ export function replacePlugin(
     if (plugin) {
       if (typeof plugin.destroy === 'function') plugin.destroy();
       plugin = null;
+      
+      // [FIX] 確保 analysisWasmEngine 也是用 free() 而不僅僅是檢查
       if (analysisWasmEngine) {
-        try { if (typeof analysisWasmEngine.free === 'function') analysisWasmEngine.free(); } 
+        try { 
+            if (typeof analysisWasmEngine.free === 'function') {
+                analysisWasmEngine.free(); 
+            }
+        } 
         catch (err) { console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err); }
         analysisWasmEngine = null;
       }
