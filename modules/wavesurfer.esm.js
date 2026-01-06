@@ -1633,6 +1633,8 @@ class u extends a {
         // [FIX - MEMORY LEAK] 確保釋放 WaveformEngine 的 WASM 內存
         // 如果 WaveSurfer 實例被銷毀，這個 Rust 對象必須被 free
         this._wasmWaveformEngine && typeof this._wasmWaveformEngine.free === 'function' && (t = this._wasmWaveformEngine, t.free ? (t.free(), this._wasmWaveformEngine = null) : null),
+        this.decodedData = null;
+        this.audioData = null;
         super.destroy()
     }
 }

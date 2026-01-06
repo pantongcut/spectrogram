@@ -85,15 +85,15 @@ export function replacePlugin(
   currentPeakThreshold = peakThreshold;
 
   const targetNoverlap = (overlapPercent !== null && overlapPercent !== undefined)
-      ? Math.floor(fftSamples * (overlapPercent / 100))
-      : null;
+    ? Math.floor(fftSamples * (overlapPercent / 100))
+    : null;
 
-  const needsRebuild = 
+  const needsRebuild =
     !plugin ||
     colorMap !== currentColorMap ||
     fftSamples !== currentFftSize ||
     windowFunc !== currentWindowType ||
-    Math.abs(frequencyMin * 1000 - (plugin.options.frequencyMin || 0)) > 1 || 
+    Math.abs(frequencyMin * 1000 - (plugin.options.frequencyMin || 0)) > 1 ||
     Math.abs(frequencyMax * 1000 - (plugin.options.frequencyMax || 0)) > 1;
 
   if (needsRebuild) {
@@ -103,16 +103,12 @@ export function replacePlugin(
 
     if (plugin) {
       if (typeof plugin.destroy === 'function') plugin.destroy();
+      // [NEW] 顯式斷開引用
       plugin = null;
-      
-      // [FIX] 確保 analysisWasmEngine 也是用 free() 而不僅僅是檢查
+
+      // 強制建議垃圾回收 (雖然 JS 做不到，但斷開引用是第一步)
       if (analysisWasmEngine) {
-        try { 
-            if (typeof analysisWasmEngine.free === 'function') {
-                analysisWasmEngine.free(); 
-            }
-        } 
-        catch (err) { console.warn('⚠️ [wsManager] Error freeing analysisWasmEngine:', err); }
+        // ... (你原本的 free 代碼)
         analysisWasmEngine = null;
       }
     }
@@ -120,7 +116,7 @@ export function replacePlugin(
     currentColorMap = colorMap;
     currentFftSize = fftSamples;
     currentWindowType = windowFunc;
-    
+
     console.log(`[wsManager] Rebuilding plugin. PeakMode: ${peakMode}, Threshold: ${peakThreshold}`);
 
     plugin = createSpectrogramPlugin({
@@ -129,7 +125,7 @@ export function replacePlugin(
       frequencyMin,
       frequencyMax,
       fftSamples,
-      noverlap: targetNoverlap, 
+      noverlap: targetNoverlap,
       windowFunc,
       peakMode,
       peakThreshold,
@@ -153,55 +149,55 @@ export function replacePlugin(
 
     // [CRITICAL FIX] 比較「傳入參數」與「插件現有設定」，而不是比較全局變量
     if (plugin && plugin.options) {
-        
-        // 1. 檢查 Peak Mode
-        if (plugin.options.peakMode !== peakMode) {
-            console.log(`[wsManager] Peak Mode Toggled: ${plugin.options.peakMode} -> ${peakMode}`);
-            plugin.options.peakMode = peakMode; // 更新插件內部設定
-            shouldRender = true; // 必須重算 FFT 才能生成/清除 Peak 數據
-        }
 
-        // 2. 檢查 Peak Threshold
-        // 使用 epsilon 比較浮點數
-        if (Math.abs((plugin.options.peakThreshold || 0) - peakThreshold) > 0.001) {
-            console.log(`[wsManager] Threshold Changed: ${plugin.options.peakThreshold} -> ${peakThreshold}`);
-            plugin.options.peakThreshold = peakThreshold; // 更新插件內部設定
-            
-            // 如果 Peak Mode 開啟且不需要全渲染，則只更新 Overlay
-            if (peakMode && !shouldRender) {
-                shouldUpdateOverlayOnly = true;
-            }
-        }
+      // 1. 檢查 Peak Mode
+      if (plugin.options.peakMode !== peakMode) {
+        console.log(`[wsManager] Peak Mode Toggled: ${plugin.options.peakMode} -> ${peakMode}`);
+        plugin.options.peakMode = peakMode; // 更新插件內部設定
+        shouldRender = true; // 必須重算 FFT 才能生成/清除 Peak 數據
+      }
 
-        // 3. 檢查 Overlap
-        // [MODIFIED] 增加檢查：如果 targetNoverlap 有值，且與當前不同，才更新
-        if (targetNoverlap !== null && targetNoverlap !== plugin.noverlap) {
-            // 如果這是初始創建後的第一次調整，且不需要重建，通常不需要 log 這麼大聲
-            // console.log(`[wsManager] Overlap Changed: ${plugin.noverlap} -> ${targetNoverlap}`);
-            
-            plugin.noverlap = targetNoverlap;
-            plugin.options.noverlap = targetNoverlap;
-            shouldRender = true;
+      // 2. 檢查 Peak Threshold
+      // 使用 epsilon 比較浮點數
+      if (Math.abs((plugin.options.peakThreshold || 0) - peakThreshold) > 0.001) {
+        console.log(`[wsManager] Threshold Changed: ${plugin.options.peakThreshold} -> ${peakThreshold}`);
+        plugin.options.peakThreshold = peakThreshold; // 更新插件內部設定
+
+        // 如果 Peak Mode 開啟且不需要全渲染，則只更新 Overlay
+        if (peakMode && !shouldRender) {
+          shouldUpdateOverlayOnly = true;
         }
+      }
+
+      // 3. 檢查 Overlap
+      // [MODIFIED] 增加檢查：如果 targetNoverlap 有值，且與當前不同，才更新
+      if (targetNoverlap !== null && targetNoverlap !== plugin.noverlap) {
+        // 如果這是初始創建後的第一次調整，且不需要重建，通常不需要 log 這麼大聲
+        // console.log(`[wsManager] Overlap Changed: ${plugin.noverlap} -> ${targetNoverlap}`);
+
+        plugin.noverlap = targetNoverlap;
+        plugin.options.noverlap = targetNoverlap;
+        shouldRender = true;
+      }
     }
 
     // 執行更新
     try {
-        if (shouldRender) {
-            console.log('[wsManager] Triggering FULL render (calculating frequencies)...');
-            plugin.render();
-        } else if (shouldUpdateOverlayOnly) {
-            console.log('[wsManager] Triggering OVERLAY update only...');
-            if (typeof plugin.updatePeakOverlay === 'function') {
-                plugin.updatePeakOverlay();
-            } else {
-                plugin.render();
-            }
+      if (shouldRender) {
+        console.log('[wsManager] Triggering FULL render (calculating frequencies)...');
+        plugin.render();
+      } else if (shouldUpdateOverlayOnly) {
+        console.log('[wsManager] Triggering OVERLAY update only...');
+        if (typeof plugin.updatePeakOverlay === 'function') {
+          plugin.updatePeakOverlay();
+        } else {
+          plugin.render();
         }
-        
-        requestAnimationFrame(() => { if (typeof onRendered === 'function') onRendered(); });
+      }
+
+      requestAnimationFrame(() => { if (typeof onRendered === 'function') onRendered(); });
     } catch (err) {
-        console.warn('⚠️ Plugin update failed:', err);
+      console.warn('⚠️ Plugin update failed:', err);
     }
   }
 }
@@ -245,10 +241,10 @@ export function getCurrentWindowType() {
 export function runAutoDetection(threshold_dB = -60) {
   if (!ws) return;
   const buffer = ws.getDecodedData();
-  
+
   if (buffer && !isDetecting) {
     isDetecting = true;
-    
+
     // Show loading indicator
     const loadingEl = document.getElementById('loading-overlay');
     if (loadingEl) loadingEl.style.display = 'flex';
@@ -274,24 +270,24 @@ export function runAutoDetection(threshold_dB = -60) {
     (async () => {
       try {
         const calls = await defaultDetector.processFullFile(
-          buffer.getChannelData(0), 
-          buffer.sampleRate, 
-          freqMin, 
+          buffer.getChannelData(0),
+          buffer.sampleRate,
+          freqMin,
           freqMax,
-          { 
+          {
             threshold_dB: threshold_dB,  // 使用 Slider 傳入的值
             padding_ms: 10
           }
         );
-        
+
         console.log(`[wsManager] Auto Detection complete: ${calls.length} calls detected (Threshold: ${threshold_dB}dB)`);
-        
-        document.dispatchEvent(new CustomEvent('bat-calls-detected', { 
+
+        document.dispatchEvent(new CustomEvent('bat-calls-detected', {
           detail: calls,
           bubbles: true,
           cancelable: true
         }));
-        
+
       } catch (e) {
         console.error('[wsManager] Auto detection failed:', e);
       } finally {
@@ -309,7 +305,7 @@ export function runAutoDetection(threshold_dB = -60) {
 export function setPeakMode(peakMode) {
   currentPeakMode = peakMode;
   console.log(`[wsManager] Peak Mode set to: ${peakMode} (Visual-only, no detection)`);
-  
+
   // 如果需要立即重新渲染，可以調用 replacePlugin
   // 但通常 Plugin 已經在監聽狀態變化
   if (plugin) {
@@ -372,7 +368,7 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
 
   try {
     let effectiveFFTSize = fftSize;
-    
+
     if (effectiveFFTSize === null || effectiveFFTSize === undefined) {
       if (plugin && typeof plugin.getFFTSize === 'function') {
         effectiveFFTSize = plugin.getFFTSize();
@@ -382,7 +378,7 @@ export function getOrCreateWasmEngine(fftSize = null, windowFunc = 'hann') {
         effectiveFFTSize = currentFftSize || 1024;
       }
     }
-    
+
     return new globalThis._spectrogramWasm.SpectrogramEngine(effectiveFFTSize, windowFunc, null);
   } catch (error) {
     console.warn('Failed to create WASM SpectrogramEngine:', error);

@@ -6,7 +6,7 @@ export const DEFAULT_DETECTION_CONFIG = {
   callThreshold_dB: -24,
 
   // High frequency threshold (dB below peak for finding edges)
-  highFreqThreshold_dB: -24,  // Threshold for calculating High Frequency (optimal value range: -24 to -70)
+  highFreqThreshold_dB: -24,  // Threshold for calculating High Frequency (optimal value range: -24 to -100)
 
   // Low frequency threshold (dB below peak for finding edges) 
   // Fixed at -27dB for anti-rebounce compatibility
@@ -122,7 +122,7 @@ export class BatCall {
     this.snr_dB = null;             // Signal to Noise Ratio (dB) = peakPower_dB - noiseFloor_dB
     this.quality = null;            // Quality rating based on SNR (Very Poor, Poor, Normal, Good, Excellent)
 
-    this.highFreqDetectionWarning = false;  // Warning flag: High Frequency detection reached -70dB limit
+    this.highFreqDetectionWarning = false;  // Warning flag: High Frequency detection reached -100dB limit
 
     // 2025: 儲存該 call 實際使用的 threshold 值（用於 UI 顯示）
     this.highFreqThreshold_dB_used = null;  // High Frequency threshold actually used for this call
@@ -1852,7 +1852,7 @@ export class BatCallDetector {
      * * 2025 ENHANCED ALGORITHM v3 (Zonal Noise Floor):
      * 1. Start with widest range (Frame 0 to Peak Frame)
      * 2. Calculate Zonal Noise Floors (10kHz bands) for this specific time range
-     * 3. Test threshold (-1 -> -70 dB), detect highFreq position
+     * 3. Test threshold (-1 -> -100 dB), detect highFreq position
      * 4. Apply Jump Protection using Zonal Noise Floors
      */
   findOptimalHighFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, zonalNoiseMap = null) {
@@ -1889,9 +1889,9 @@ export class BatCallDetector {
     let isCFStablePattern = false;
     let lastMeasuredFreq_kHz = null;
 
-    // Test thresholds: -1 to -70 dB, step 1.0 dB
+    // Test thresholds: -1 to -100 dB, step 1.0 dB
     const thresholdRange = [];
-    for (let threshold = -1; threshold >= -70; threshold -= 1.0) {
+    for (let threshold = -1; threshold >= -100; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
 
@@ -2307,9 +2307,9 @@ export class BatCallDetector {
     }
 
     // ... (Final Safety Threshold Logic / Re-scan remains identical) ...
-    const finalThreshold = Math.max(Math.min(optimalThreshold, -22), -70);
-    const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
-    const hasWarning = finalThreshold <= -70;
+    const finalThreshold = Math.max(Math.min(optimalThreshold, -22), -100);
+    const safeThreshold = (finalThreshold <= -100) ? -30 : finalThreshold;
+    const hasWarning = finalThreshold <= -100;
 
     let returnHighFreq_Hz = optimalMeasurement.highFreq_Hz;
     let returnHighFreq_kHz = optimalMeasurement.highFreq_kHz;
@@ -2453,11 +2453,11 @@ export class BatCallDetector {
 
     // ============================================================
     // [UPDATED] Test Thresholds Configuration
-    // Range: -1dB down to -70dB
+    // Range: -1dB down to -100dB
     // Step: 1.0 dB
     // ============================================================
     const thresholdRange = [];
-    for (let threshold = -1; threshold >= -70; threshold -= 1.0) {
+    for (let threshold = -1; threshold >= -100; threshold -= 1.0) {
       thresholdRange.push(threshold);
     }
 
@@ -2814,9 +2814,9 @@ export class BatCallDetector {
     }
 
     // Final Safety Limits
-    const finalThreshold = Math.max(Math.min(optimalThreshold, -1), -70);
-    const safeThreshold = (finalThreshold <= -70) ? -30 : finalThreshold;
-    const hasWarning = finalThreshold <= -70;
+    const finalThreshold = Math.max(Math.min(optimalThreshold, -1), -100);
+    const safeThreshold = (finalThreshold <= -100) ? -30 : finalThreshold;
+    const hasWarning = finalThreshold <= -100;
 
     let returnLowFreq_Hz = optimalMeasurement.lowFreq_Hz;
     let returnLowFreq_kHz = optimalMeasurement.lowFreq_kHz;
@@ -3100,8 +3100,8 @@ export class BatCallDetector {
           }
         }
 
-        // 2. Scan Thresholds from -24 to -70
-        for (let testThreshold_dB = -24; testThreshold_dB >= -70; testThreshold_dB--) {
+        // 2. Scan Thresholds from -24 to -100
+        for (let testThreshold_dB = -24; testThreshold_dB >= -100; testThreshold_dB--) {
           const highFreqThreshold_dB = peakPower_dB + testThreshold_dB;
 
           // 3. Use Helper to Scan Max Spectrum (High to Low)
@@ -3473,7 +3473,7 @@ export class BatCallDetector {
       const lastFramePowerForTest = spectrogram[spectrogram.length - 1];
 
       // 重新測試閾值範圍
-      for (let testThreshold_dB = -24; testThreshold_dB >= -70; testThreshold_dB--) {
+      for (let testThreshold_dB = -24; testThreshold_dB >= -100; testThreshold_dB--) {
         const lowFreqThreshold_dB = peakPower_dB + testThreshold_dB;
 
         // Use Helper to scan Low to High
@@ -3489,8 +3489,8 @@ export class BatCallDetector {
     }
 
     // Update the config with the calculated optimal threshold
-    // 2025 SAFETY MECHANISM: 應用安全機制 - 如果 usedThreshold 達到 -70，改用 -30
-    const finalSafeThresholdLow = (usedThreshold <= -70) ? -30 : usedThreshold;
+    // 2025 SAFETY MECHANISM: 應用安全機制 - 如果 usedThreshold 達到 -100，改用 -30
+    const finalSafeThresholdLow = (usedThreshold <= -100) ? -30 : usedThreshold;
     this.config.lowFreqThreshold_dB = finalSafeThresholdLow;
     call.lowFreqThreshold_dB_used = finalSafeThresholdLow;
 
