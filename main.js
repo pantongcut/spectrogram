@@ -40,6 +40,7 @@ import { initAutoIdPanel } from './modules/autoIdPanel.js';
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
 import { initPeakControl, isPeakModeActive, getPeakThreshold } from './modules/peakControl.js';
 import { initAutoDetectionControl } from './modules/autoDetectionControl.js';
+import { initCallSummaryTable } from './modules/callSummaryTable.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
 const spectrogramHeight = 800;
@@ -818,6 +819,11 @@ document.addEventListener('bat-calls-detected', (e) => {
   } else {
     console.warn('[Main] freqHoverControl not initialized or addAutoSelections not available');
   }
+  
+  // [NEW] Update Call Summary Table with detected calls
+  if (callSummaryTableControl && typeof callSummaryTableControl.updateTable === 'function') {
+    callSummaryTableControl.updateTable(calls);
+  }
 });
 
 function updateProgressLine(time) {
@@ -1544,6 +1550,7 @@ document.body.classList.toggle('settings-open', isOpen);
 initExport({ buttonId: 'exportBtn' });
 initTrashProgram();
 initMapPopup();
+const callSummaryTableControl = initCallSummaryTable();
 
 // 初始化 Peak Control
 initPeakControl({

@@ -169,6 +169,9 @@
           <button id="runAutoDetectBtn" class="primary-btn">
             <i class="fa-solid fa-play"></i> Run Detection
           </button>
+          <button id="viewTableBtn" class="secondary-btn" title="View Summary Table">
+            <i class="fa-solid fa-table"></i> Table
+          </button>
           <button id="exportCallsBtn" class="secondary-btn" title="Export Results to Excel">
             <i class="fa-solid fa-file-export"></i> Export
           </button>
@@ -397,6 +400,17 @@
       <div id="copy-coord-message" class="map-floating-message">The coordinates have been copied to the clipboard</div>
     </div>
   </div>
+
+  <div id="callSummaryPopup" class="map-popup" style="display:none; width: 1000px; height: 300px;">
+    <div class="popup-drag-bar">
+      <span class="popup-title">Call Summary Table</span>
+      <button class="popup-min-btn" title="Minimize"><i class="fa-solid fa-window-minimize"></i></button>
+      <button class="popup-max-btn" title="Maximize"><i class="fa-regular fa-square"></i></button>
+      <button class="popup-close-btn" title="Close">&times;</button>
+    </div>
+    <div id="callSummaryTableContainer"></div>
+  </div>
+
   <script type="module" src="./main.js"></script>
   </div>
 </body>

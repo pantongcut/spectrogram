@@ -775,7 +775,7 @@ input[type="range"]#peakThresholdSlider {
   column-gap: 12px;
   row-gap: 5px;
   padding: 8px 12px;
-  width: 560px;
+  width: 320px;
   background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -3226,4 +3226,69 @@ input.tag-button.editing {
     min-width: 150px;
     max-height: 600px;
     overflow-y: auto; 
+}
+
+/* ============================================================
+   Call Summary Table Styles
+   ============================================================ */
+#callSummaryTableContainer {
+  height: calc(100% - 30px);
+  overflow: auto;
+  padding: 0;
+  background-color: var(--bg-secondary);
+}
+
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: 'Noto Sans HK', sans-serif;
+}
+
+.summary-table th {
+  position: sticky;
+  top: 0;
+  background-color: #e0e0e0;
+  color: #000000;
+  padding: 4px 8px;
+  border: 1px solid #999;
+  text-align: left;
+  z-index: 1;
+  font-weight: 600;
+}
+
+/* Explicit: White background and Black text for cells - override all themes */
+.summary-table td {
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  white-space: nowrap;
+}
+
+.summary-table tbody tr:hover td {
+  background-color: #f0f0f0 !important;
+}
+
+#callSummaryPopup {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  resize: both;
+  overflow: hidden;
+}
+
+#callSummaryPopup.minimized #callSummaryTableContainer {
+  display: none;
+}
+
+#callSummaryPopup.minimized {
+  resize: none;
 }
