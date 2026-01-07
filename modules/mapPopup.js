@@ -802,7 +802,7 @@ export function initMapPopup({
       console.warn('Esri Leaflet plugin not loaded.');
     }
 
-    // =========== 新增開始: 2.5D Buildings Layer (Safe Mode) ===========
+    // =========== 新增開始: 2.5D Buildings Layer ===========
     if (typeof OSMBuildings !== 'undefined') {
       const OsmBuildingsLayer = L.Layer.extend({
         onAdd: function (map) {
@@ -812,7 +812,7 @@ export function initMapPopup({
 
             this._osmb = new OSMBuildings(map);
             
-            const tileUrl = 'https://api.allorigins.win/raw?url=' + 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
+            const tileUrl = 'https://a.data.osmbuildings.org/0.2/59fcc2e8/tile/{z}/{x}/{y}.json';
             
             this._osmb.load(tileUrl);
             this._osmb.date(new Date());
