@@ -827,9 +827,17 @@ function createPopupWindow() {
       <td class="param-label">Knee Freq:</td>
       <td class="param-value knee-freq">-</td>
       <td class="param-unit">kHz</td>
+      <td class="param-label">Heel Freq:</td>
+      <td class="param-value heel-freq">-</td>
+      <td class="param-unit">kHz</td>
+    </tr>
+    <tr>
       <td class="param-label">Bandwidth:</td>
       <td class="param-value bandwidth">-</td>
       <td class="param-unit">kHz</td>
+      <td class="param-label">Duration:</td>
+      <td class="param-value duration">-</td>
+      <td class="param-unit">ms</td>
     </tr>    
     <tr>
       <td class="param-label">Start Time:</td>
@@ -859,8 +867,8 @@ function createPopupWindow() {
       <td class="param-label">Knee Time:</td>
       <td class="param-value knee-time">-</td>
       <td class="param-unit">ms</td>    
-      <td class="param-label">Duration:</td>
-      <td class="param-value duration">-</td>
+      <td class="param-label">Heel Time:</td>
+      <td class="param-value heel-time">-</td>
       <td class="param-unit">ms</td>
     </tr>
     <tr>
@@ -1260,16 +1268,18 @@ function updateParametersDisplay(popup, batCall, peakFreqFallback = null) {
   const highFreqEl = paramPanel.querySelector('.high-freq');
   const highFreqWarningIcon = paramPanel.querySelector('.high-freq-warning');
   const kneeFreqEl = paramPanel.querySelector('.knee-freq');
+  // [NEW]
+  const heelFreqEl = paramPanel.querySelector('.heel-freq'); 
   const charFreqEl = paramPanel.querySelector('.char-freq');
   const bandwidthEl = paramPanel.querySelector('.bandwidth');
   const durationEl = paramPanel.querySelector('.duration');
   const kneeTimeEl = paramPanel.querySelector('.knee-time');
+  // [NEW]
+  const heelTimeEl = paramPanel.querySelector('.heel-time');
   const snrEl = paramPanel.querySelector('.snr');
   const qualityEl = paramPanel.querySelector('.quality');
   
-  // ============================================================
-  // 2025: All time value elements are now in the same merged table
-  // ============================================================
+  // Time Values
   const startFreqTimeEl = paramPanel.querySelector('.startfreq-time');
   const endFreqTimeEl = paramPanel.querySelector('.endfreq-time');
   const highFreqTimeEl = paramPanel.querySelector('.highfreq-time');
@@ -1279,23 +1289,22 @@ function updateParametersDisplay(popup, batCall, peakFreqFallback = null) {
   
   if (batCall) {
     peakFreqEl.textContent = batCall.peakFreq_kHz?.toFixed(2) || '-';
-    // Display startFreq_kHz calculated from -24dB threshold (Rule a/b applied)
     startFreqEl.textContent = batCall.startFreq_kHz?.toFixed(2) || '-';
-    // Display endFreq_kHz calculated from last frame using -27dB threshold
     endFreqEl.textContent = batCall.endFreq_kHz?.toFixed(2) || '-';
-    // Display lowFreq_kHz (may be optimized to use Start Frequency if lower)
     lowFreqEl.textContent = batCall.lowFreq_kHz?.toFixed(2) || '-';
-    // Display High Freq (warning suppressed - using -30dB safety mechanism)
     highFreqEl.textContent = batCall.highFreq_kHz?.toFixed(2) || '-';
-    // Display Low Freq (warning suppressed - using -30dB safety mechanism)
-    lowFreqEl.textContent = batCall.lowFreq_kHz?.toFixed(2) || '-';
+    // [NEW]
+    if (heelFreqEl) heelFreqEl.textContent = batCall.heelFreq_kHz?.toFixed(2) || '-';
+
     kneeFreqEl.textContent = batCall.kneeFreq_kHz?.toFixed(2) || '-';
     charFreqEl.textContent = batCall.characteristicFreq_kHz?.toFixed(2) || '-';
     bandwidthEl.textContent = batCall.bandwidth_kHz?.toFixed(2) || '-';
     durationEl.textContent = batCall.duration_ms?.toFixed(2) || '-';
     kneeTimeEl.textContent = batCall.kneeTime_ms?.toFixed(2) || '-';
+    // [NEW]
+    if (heelTimeEl) heelTimeEl.textContent = batCall.heelFreq_ms?.toFixed(2) || '-';
     
-    // Display SNR value with + prefix if positive
+    // Display SNR
     if (batCall.snr_dB !== null && batCall.snr_dB !== undefined) {
       snrEl.textContent = batCall.snr_dB > 0 ? `+${batCall.snr_dB.toFixed(1)}` : batCall.snr_dB.toFixed(1);
       snrEl.className = 'param-value snr';
@@ -1304,7 +1313,7 @@ function updateParametersDisplay(popup, batCall, peakFreqFallback = null) {
       snrEl.className = 'param-value snr';
     }
     
-    // Display quality with appropriate color
+    // Display quality
     if (batCall.quality !== null && batCall.quality !== undefined) {
       qualityEl.textContent = batCall.quality;
       qualityEl.className = 'param-value quality quality-' + batCall.quality.toLowerCase().replace(/\s+/g, '-');
@@ -1313,70 +1322,36 @@ function updateParametersDisplay(popup, batCall, peakFreqFallback = null) {
       qualityEl.className = 'param-value quality';
     }
     
-    // ============================================================
-    // Display Time Values for Frequency Parameters (2 decimal places)
-    // All in merged table now
-    // ============================================================
-    if (startFreqTimeEl) {
-      startFreqTimeEl.textContent = batCall.startFreq_ms !== null && batCall.startFreq_ms !== undefined 
-        ? batCall.startFreq_ms.toFixed(2) 
-        : '-';
-    }
-    
-    if (endFreqTimeEl) {
-      endFreqTimeEl.textContent = batCall.endFreq_ms !== null && batCall.endFreq_ms !== undefined 
-        ? batCall.endFreq_ms.toFixed(2) 
-        : '-';
-    }
-    
-    if (highFreqTimeEl) {
-      highFreqTimeEl.textContent = batCall.highFreqTime_ms !== null && batCall.highFreqTime_ms !== undefined 
-        ? batCall.highFreqTime_ms.toFixed(2) 
-        : '-';
-    }
-    
-    if (lowFreqTimeEl) {
-      lowFreqTimeEl.textContent = batCall.lowFreq_ms !== null && batCall.lowFreq_ms !== undefined 
-        ? batCall.lowFreq_ms.toFixed(2) 
-        : '-';
-    }
-    
-    if (peakFreqTimeEl) {
-      peakFreqTimeEl.textContent = batCall.peakFreqTime_ms !== null && batCall.peakFreqTime_ms !== undefined 
-        ? batCall.peakFreqTime_ms.toFixed(2) 
-        : '-';
-    }
-    
-    if (charFreqTimeEl) {
-      charFreqTimeEl.textContent = batCall.characteristicFreq_ms !== null && batCall.characteristicFreq_ms !== undefined 
-        ? batCall.characteristicFreq_ms.toFixed(2) 
-        : '-';
-    }
+    // Time Values Update
+    if (startFreqTimeEl) startFreqTimeEl.textContent = batCall.startFreq_ms?.toFixed(2) || '-';
+    if (endFreqTimeEl) endFreqTimeEl.textContent = batCall.endFreq_ms?.toFixed(2) || '-';
+    if (highFreqTimeEl) highFreqTimeEl.textContent = batCall.highFreqTime_ms?.toFixed(2) || '-';
+    if (lowFreqTimeEl) lowFreqTimeEl.textContent = batCall.lowFreq_ms?.toFixed(2) || '-';
+    if (peakFreqTimeEl) peakFreqTimeEl.textContent = batCall.peakFreqTime_ms?.toFixed(2) || '-';
+    if (charFreqTimeEl) charFreqTimeEl.textContent = batCall.characteristicFreq_ms?.toFixed(2) || '-';
   } else {
-    // 只顯示 peak freq，其他為空
+    // Reset to '-'
     peakFreqEl.textContent = peakFreqFallback?.toFixed(2) || '-';
     startFreqEl.textContent = '-';
     endFreqEl.textContent = '-';
     lowFreqEl.textContent = '-';
     highFreqEl.textContent = '-';
-    // Reset warning icon and color
-    if (highFreqWarningIcon) {
-      highFreqWarningIcon.style.display = 'none';
-    }
-    highFreqEl.style.color = '#0066cc';  // Blue color for normal state
+    if (highFreqWarningIcon) highFreqWarningIcon.style.display = 'none';
+    highFreqEl.style.color = '#0066cc';
     kneeFreqEl.textContent = '-';
+    // [NEW]
+    if (heelFreqEl) heelFreqEl.textContent = '-';
     charFreqEl.textContent = '-';
     bandwidthEl.textContent = '-';
     durationEl.textContent = '-';
     kneeTimeEl.textContent = '-';
+    // [NEW]
+    if (heelTimeEl) heelTimeEl.textContent = '-';
     snrEl.textContent = '-';
     snrEl.className = 'param-value snr';
     qualityEl.textContent = '-';
     qualityEl.className = 'param-value quality';
     
-    // ============================================================
-    // 2025: Clear Time Values when no call data (merged into single table)
-    // ============================================================
     if (startFreqTimeEl) startFreqTimeEl.textContent = '-';
     if (endFreqTimeEl) endFreqTimeEl.textContent = '-';
     if (highFreqTimeEl) highFreqTimeEl.textContent = '-';

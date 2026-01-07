@@ -109,6 +109,10 @@ export class BatCall {
     this.kneeFreq_ms = null;        // Knee frequency time (ms) - absolute time of knee frequency in selection area
     this.kneeTime_ms = null;        // Knee time (ms) - time at CF-FM transition [deprecated in favor of kneeFreq_ms]
 
+    this.heelFreq_kHz = null;       // Heel frequency (kHz) - QCF/CF to FM transition
+    this.heelFreq_ms = null;        // Absolute time of heel
+    this.heelFrameIdx = null;       // Frame index of heel
+
     this.bandwidth_kHz = null;      // Bandwidth = highFreq - lowFreq
 
     this.Flow = null;               // Low frequency boundary (Hz) - from detection range
@@ -205,6 +209,9 @@ export class BatCall {
     if (this.kneeFreq_kHz !== null) {
       this.kneeFreq_kHz *= factor;
     }
+    if (this.heelFreq_kHz !== null) {
+      this.heelFreq_kHz *= factor;
+    }
     if (this.bandwidth_kHz !== null) {
       this.bandwidth_kHz *= factor;
     }
@@ -247,6 +254,9 @@ export class BatCall {
     }
     if (this.kneeFreq_ms !== null) {
       this.kneeFreq_ms /= factor;
+    }
+    if (this.heelFreq_ms !== null) {
+      this.heelFreq_ms /= factor;
     }
     if (this.kneeTime_ms !== null) {
       this.kneeTime_ms /= factor;
@@ -297,12 +307,12 @@ export class BatCall {
   toAnalysisRecord() {
     return {
       // [NEW] 檔案中的絕對時間 (用於 Excel Column B & C)
-      'Signal start time': this.startFreqTime_s?.toFixed(4) || '-', 
+      'Signal start time': this.startFreqTime_s?.toFixed(4) || '-',
       'Signal end time': this.endFreqTime_s?.toFixed(4) || '-',
-      
+
       // 相對時間 (Relative to Start = 0.00ms)
       'Duration [ms]': this.duration_ms?.toFixed(2) || '-',
-      
+
       // Frequency Parameters
       'Peak Freq [kHz]': this.peakFreq_kHz?.toFixed(2) || '-',
       'Start Freq [kHz]': this.startFreq_kHz?.toFixed(2) || '-',
@@ -310,15 +320,17 @@ export class BatCall {
       'High Freq [kHz]': this.highFreq_kHz?.toFixed(2) || '-',
       'Low Freq [kHz]': this.lowFreq_kHz?.toFixed(2) || '-',
       'Knee Freq [kHz]': this.kneeFreq_kHz?.toFixed(2) || '-',
+      'Heel Freq [kHz]': this.heelFreq_kHz?.toFixed(2) || '-',
       'Characteristic Freq [kHz]': this.characteristicFreq_kHz?.toFixed(2) || '-',
       'Bandwidth [kHz]': this.bandwidth_kHz?.toFixed(2) || '-',
-      
+
       // Time Parameters (Normalized)
       'Peak Time [ms]': this.peakFreqTime_ms?.toFixed(2) || '-',
       'Knee Time [ms]': this.kneeFreq_ms?.toFixed(2) || '-',
+      'Heel Time [ms]': this.heelFreq_ms?.toFixed(2) || '-',
       'High Time [ms]': this.highFreqTime_ms?.toFixed(2) || '-',
       'Low Time [ms]': this.lowFreq_ms?.toFixed(2) || '-',
-      
+
       // Other
       'Peak Power [dB]': this.peakPower_dB?.toFixed(1) || '-',
       'SNR [dB]': this.snr_dB !== null ? (this.snr_dB > 0 ? `+${this.snr_dB.toFixed(1)}` : this.snr_dB.toFixed(1)) : '-',
@@ -594,9 +606,9 @@ export class BatCallDetector {
       let { powerMatrix, timeFrames, freqBins, freqResolution } = spec;
 
       const roiZonalNoiseMap = this.calculateZonalNoiseFloors(
-        powerMatrix, 
-        freqBins, 
-        0, 
+        powerMatrix,
+        freqBins,
+        0,
         Math.min(5, powerMatrix.length - 1) // 取前 5 frames
       );
 
@@ -710,7 +722,7 @@ export class BatCallDetector {
 
       for (const segment of keptCandidates) {
         const call = new BatCall();
-        
+
         // Padding Logic (Same as detectCalls)
         const pad_ms = 5;
         const timePerFrame = timeFrames[1] - timeFrames[0];
@@ -772,7 +784,7 @@ export class BatCallDetector {
         // [FIX] Check if call was discarded during measurement
         // ============================================================
         if (call.isDiscarded) {
-             continue;
+          continue;
         }
 
         // Classify
@@ -789,7 +801,7 @@ export class BatCallDetector {
         call.endTime_s += timeOffset_s;
         if (call.startFreqTime_s !== null) call.startFreqTime_s += timeOffset_s;
         if (call.endFreqTime_s !== null) call.endFreqTime_s += timeOffset_s;
-        
+
         allCalls.push(call);
       }
 
@@ -1060,7 +1072,7 @@ export class BatCallDetector {
 
         // 設定起始點：總長度 - 5ms的Frame數 (確保只取最後一段)
         startFrameIdx = Math.max(0, totalNoiseFrames - framesFor5ms);
-        
+
         // Debug Log (Optional)
         // console.log(`[Detector] Noise Map Source: Last 5ms (Frames ${startFrameIdx} - ${totalNoiseFrames-1})`);
       }
@@ -1217,12 +1229,12 @@ export class BatCallDetector {
       try {
         const snrResult = this.calculateRMSbasedSNR(
           call,
-          call.spectrogram, 
+          call.spectrogram,
           freqBins,
           0,                             // signalStartIdx (相對於 slice，通常是開頭)
           call.endFrameIdx_forLowFreq,   // signalEndIdx (相對於 slice)
-          flowKHz, 
-          fhighKHz, 
+          flowKHz,
+          fhighKHz,
           options.noiseSpectrogram
         );
 
@@ -1260,7 +1272,7 @@ export class BatCallDetector {
   generateSpectrogramWasm(audioData, sampleRate, flowKHz, fhighKHz) {
     // [OPTIMIZED] Removed redundant check and fallback logic.
     // This method now purely attempts WASM calculation and returns null on failure.
-    
+
     try {
       // 1. Get the actual FFT size from WASM engine
       const effectiveFFTSize = this.wasmEngine.get_fft_size();
@@ -1401,7 +1413,7 @@ export class BatCallDetector {
     // Avoids calling function and Math.cos() thousands of times
     const windowWeights = new Float32Array(fftSize);
     const twoPiOverLen = (2 * Math.PI) / (fftSize - 1);
-    
+
     for (let i = 0; i < fftSize; i++) {
       if (windowType === 'hann' || windowType === 'hanning') {
         windowWeights[i] = 0.5 * (1 - Math.cos(twoPiOverLen * i));
@@ -1435,7 +1447,7 @@ export class BatCallDetector {
       // ============================================================
       // In-Place Processing: Windowing & DC Removal
       // ============================================================
-      
+
       // 1. Apply Window (In-place)
       for (let i = 0; i < fftSize; i++) {
         processingBuffer[i] = processingBuffer[i] * windowWeights[i];
@@ -1462,10 +1474,10 @@ export class BatCallDetector {
 
       for (let i = 0; i < numBins; i++) {
         const freqHz = freqBins[i];
-        
+
         // Pass the prepared buffer to Goertzel
         const energy = this.goertzelEnergy(processingBuffer, freqHz, sampleRate);
-        
+
         // Convert to dB
         const rms = Math.sqrt(energy);
         const psd = (rms * rms) / fftSize;
@@ -1678,7 +1690,7 @@ export class BatCallDetector {
       // B. 底噪截斷檢查
       if (minDbSoFar < absoluteNoiseFloorDb && currentDb < absoluteNoiseFloorDb + 2) {
         if (DEBUG) {
-            console.log(`[Oscillogram] Hit Noise Floor (${dbValues[i].toFixed(1)}dB). Cutting.`);
+          console.log(`[Oscillogram] Hit Noise Floor (${dbValues[i].toFixed(1)}dB). Cutting.`);
         }
         return sampleIndices[minDbIndex];
       }
@@ -1693,10 +1705,10 @@ export class BatCallDetector {
         if (minDbSoFar > -32) {
           if (DEBUG && !hasLoggedSkip) {
             logSummary.push({
-                Step: 'SKIP Rebounce',
-                Details: `Low ${minDbSoFar.toFixed(1)}dB > -32dB`,
-                Value: '(Signal Body)',
-                Note: 'Suppressing repeats...'
+              Step: 'SKIP Rebounce',
+              Details: `Low ${minDbSoFar.toFixed(1)}dB > -32dB`,
+              Value: '(Signal Body)',
+              Note: 'Suppressing repeats...'
             });
             hasLoggedSkip = true;
           }
@@ -1724,33 +1736,33 @@ export class BatCallDetector {
 
             // 1. 加入 CUT 事件詳情
             logSummary.push({
-                Step: 'CUT: Detected',
-                Details: 'Rebounce verified',
-                Value: `Diff: +${diff.toFixed(1)}dB`,
-                Note: 'Threshold met'
+              Step: 'CUT: Detected',
+              Details: 'Rebounce verified',
+              Value: `Diff: +${diff.toFixed(1)}dB`,
+              Note: 'Threshold met'
             });
 
             // 2. 加入數據詳情
             logSummary.push({
-                Step: '   Low Point',
-                Details: `${minDbSoFar.toFixed(1)}dB`,
-                Value: `@ Index ${minDbIndex}`,
-                Note: ''
+              Step: '   Low Point',
+              Details: `${minDbSoFar.toFixed(1)}dB`,
+              Value: `@ Index ${minDbIndex}`,
+              Note: ''
             });
 
             logSummary.push({
-                Step: '   Rebounce To',
-                Details: `${currentDb.toFixed(1)}dB`,
-                Value: `@ Index ${i}`,
-                Note: ''
+              Step: '   Rebounce To',
+              Details: `${currentDb.toFixed(1)}dB`,
+              Value: `@ Index ${i}`,
+              Note: ''
             });
 
             // 3. 加入最終動作 (整合了原本外部的 AutoDetect Refine 資訊)
             logSummary.push({
-                Step: 'ACTION',
-                Details: `Trimming ${pointsTrimmed} pts`,
-                Value: `Cut: ${cutMs.toFixed(2)}ms`, // <--- 這裡整合了 Cut ms
-                Note: 'Applying Cut'
+              Step: 'ACTION',
+              Details: `Trimming ${pointsTrimmed} pts`,
+              Value: `Cut: ${cutMs.toFixed(2)}ms`, // <--- 這裡整合了 Cut ms
+              Note: 'Applying Cut'
             });
 
             // 4. 輸出表格
@@ -1758,7 +1770,7 @@ export class BatCallDetector {
             console.table(logSummary);
             console.groupEnd();
           }
-          
+
           // 返回反彈發生前的那個谷底
           return sampleIndices[minDbIndex];
         }
@@ -1791,7 +1803,7 @@ export class BatCallDetector {
     // Original logic bins by Math.floor(val).
     // We map dB values to array indices. 
     // Range covered: -120dB to +20dB (Sufficient for standard audio)
-    const HIST_MIN = -120; 
+    const HIST_MIN = -120;
     const HIST_MAX = 20;
     const HIST_RANGE = HIST_MAX - HIST_MIN + 1;
 
@@ -1855,11 +1867,11 @@ export class BatCallDetector {
 
       // Iterate through the dB range for this zone
       const offset = z * HIST_RANGE;
-      
+
       // [CONSISTENCY CHECK 2] Loop from Low dB to High dB
       for (let i = 0; i < HIST_RANGE; i++) {
         const count = histograms[offset + i];
-        
+
         if (count > 0) hasData = true;
 
         // Tie-breaker Logic:
@@ -1948,7 +1960,7 @@ export class BatCallDetector {
 
     // [Fallback] 如果沒有傳入 map，為了兼容性，在此處計算一次 (但不建議)
     if (!zonalNoiseMap) {
-       zonalNoiseMap = this.calculateZonalNoiseFloors(spectrogram, freqBins, 0, Math.min(peakFrameIdx, spectrogram.length - 1));
+      zonalNoiseMap = this.calculateZonalNoiseFloors(spectrogram, freqBins, 0, Math.min(peakFrameIdx, spectrogram.length - 1));
     }
 
     for (const testThreshold_dB of thresholdRange) {
@@ -2144,7 +2156,7 @@ export class BatCallDetector {
           else if (jumpDiff > 1.5) {
             // [OPTIMIZED] Use Pre-calculated Zonal Noise Map
             const zoneKey = Math.floor(currentHighFreq_kHz / 10) * 10;
-            
+
             // Get raw noise floor from MAP directly
             let specificNoiseFloor_dB = zonalNoiseMap[zoneKey] !== undefined ? zonalNoiseMap[zoneKey] : -100;
 
@@ -2167,7 +2179,7 @@ export class BatCallDetector {
                 }
               }
               summaryLog.push(logRow);
-              break; 
+              break;
             }
           }
         }
@@ -2269,13 +2281,13 @@ export class BatCallDetector {
           // [OPTIMIZED] Use Pre-calculated Map
           const zoneKey = Math.floor(currFreq_kHz / 10) * 10;
           let specificNoiseFloor_dB = zonalNoiseMap[zoneKey] !== undefined ? zonalNoiseMap[zoneKey] : -100;
-          
+
           specificNoiseFloor_dB = Math.max(specificNoiseFloor_dB, -115);
 
           const currentPower_dB = validMeasurements[i].highFreqPower_dB;
 
           if (currentPower_dB !== null && currentPower_dB <= specificNoiseFloor_dB) {
-             // Mark in summary
+            // Mark in summary
             const targetRow = summaryLog.find(r => r['Thr (dB)'] === validMeasurements[i].threshold);
             if (targetRow) {
               targetRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
@@ -2474,7 +2486,7 @@ export class BatCallDetector {
 
     // [Fallback]
     if (!zonalNoiseMap) {
-        zonalNoiseMap = this.calculateZonalNoiseFloors(spectrogram, freqBins, validPeakFrameIdx, searchEndFrame);
+      zonalNoiseMap = this.calculateZonalNoiseFloors(spectrogram, freqBins, validPeakFrameIdx, searchEndFrame);
     }
 
     // ============================================================
@@ -2661,19 +2673,19 @@ export class BatCallDetector {
         // 動作：立即廢棄整個 Call Segment
         // ============================================================
         if (lowFreq_Hz <= 10000) {
-            console.warn(`%c[Noise Reject] Low Freq ${lowFreq_Hz.toFixed(0)}Hz <= 10kHz at ${testThreshold_dB}dB. Discarding Call Segment.`, 'color: red; font-weight: bold; background: #ffeaea; padding: 2px;');
-            
-            // 回傳無效數據，強制外部邏輯放棄此 Call
-            return {
-                threshold: testThreshold_dB,
-                lowFreq_Hz: null,
-                lowFreq_kHz: null,
-                endFreq_Hz: null,
-                endFreq_kHz: null,
-                lowFreqFrameIdx: null,
-                warning: true,
-                discard: true // 標記為廢棄
-            };
+          console.warn(`%c[Noise Reject] Low Freq ${lowFreq_Hz.toFixed(0)}Hz <= 10kHz at ${testThreshold_dB}dB. Discarding Call Segment.`, 'color: red; font-weight: bold; background: #ffeaea; padding: 2px;');
+
+          // 回傳無效數據，強制外部邏輯放棄此 Call
+          return {
+            threshold: testThreshold_dB,
+            lowFreq_Hz: null,
+            lowFreq_kHz: null,
+            endFreq_Hz: null,
+            endFreq_kHz: null,
+            lowFreqFrameIdx: null,
+            warning: true,
+            discard: true // 標記為廢棄
+          };
         }
         // ============================================================
 
@@ -2726,7 +2738,7 @@ export class BatCallDetector {
             // [OPTIMIZED] Use Pre-calculated Map
             const zoneKey = Math.floor(currentLowFreq_kHz / 10) * 10;
             const specificNoiseFloor_dB = zonalNoiseMap[zoneKey] !== undefined ? zonalNoiseMap[zoneKey] : -100;
-            
+
             logRow['Noise (dB)'] = specificNoiseFloor_dB.toFixed(2);
 
             if (currentLowFreqPower_dB > specificNoiseFloor_dB) {
@@ -2745,7 +2757,7 @@ export class BatCallDetector {
                 }
               }
               summaryLog.push(logRow);
-              break; 
+              break;
             }
           }
         }
@@ -2915,7 +2927,7 @@ export class BatCallDetector {
     };
   }
 
-// ============================================================
+  // ============================================================
   // HELPER METHODS (NEW)
   // 用於減少重複的數學運算與頻譜掃描邏輯
   // ============================================================
@@ -2928,8 +2940,8 @@ export class BatCallDetector {
     // 簡單的線性插值公式
     // neighbor 是 binIdx +/- 1，由調用者決定傳入誰
     const powerRatio = (thisPower - threshold_dB) / (thisPower - neighborPower);
-    
-    return powerRatio; 
+
+    return powerRatio;
   }
 
   /**
@@ -3048,7 +3060,7 @@ export class BatCallDetector {
       const peakTimeInSeconds = timeFrames[peakFrameIdx];
       const firstFrameTimeInSeconds = timeFrames[0];
       call.peakFreqTime_ms = (peakTimeInSeconds - firstFrameTimeInSeconds) * 1000;
-      call.peakFrameIdx = peakFrameIdx; 
+      call.peakFrameIdx = peakFrameIdx;
     }
 
     // Auto HPF Setup
@@ -3064,33 +3076,33 @@ export class BatCallDetector {
     // 蝙蝠 (Sweep) = 瞬時窄頻；噪音 (Click) = 瞬時寬頻。
     // ============================================================
     if (spectrogram.length > 0) {
-        const peakFrameData = spectrogram[peakFrameIdx];
-        const threshold_dB = peakPower_dB - 12; // 檢查 Peak 下方 12dB 的寬度
-        
-        let minBin = peakFrameData.length;
-        let maxBin = 0;
-        let activeBinCount = 0;
+      const peakFrameData = spectrogram[peakFrameIdx];
+      const threshold_dB = peakPower_dB - 12; // 檢查 Peak 下方 12dB 的寬度
 
-        for (let b = 0; b < peakFrameData.length; b++) {
-            if (peakFrameData[b] > threshold_dB) {
-                if (b < minBin) minBin = b;
-                if (b > maxBin) maxBin = b;
-                activeBinCount++;
-            }
+      let minBin = peakFrameData.length;
+      let maxBin = 0;
+      let activeBinCount = 0;
+
+      for (let b = 0; b < peakFrameData.length; b++) {
+        if (peakFrameData[b] > threshold_dB) {
+          if (b < minBin) minBin = b;
+          if (b > maxBin) maxBin = b;
+          activeBinCount++;
         }
+      }
 
-        if (maxBin >= minBin) {
-            const instBandwidth_Hz = (maxBin - minBin) * freqResolution;
-            const instBandwidth_kHz = instBandwidth_Hz / 1000;
+      if (maxBin >= minBin) {
+        const instBandwidth_Hz = (maxBin - minBin) * freqResolution;
+        const instBandwidth_kHz = instBandwidth_Hz / 1000;
 
-            // 閾值：如果單一 Frame 內能量橫跨超過 20kHz，判定為垂直噪音
-            if (instBandwidth_kHz > 20.0) {
-                console.warn(`%c[Noise Reject] Vertical Click Detected! Instant BW: ${instBandwidth_kHz.toFixed(1)}kHz. Discarding early.`, 
-                'color: red; font-weight: bold;');
-                call.isDiscarded = true;
-                return; // <--- 立即停止
-            }
+        // 閾值：如果單一 Frame 內能量橫跨超過 20kHz，判定為垂直噪音
+        if (instBandwidth_kHz > 20.0) {
+          console.warn(`%c[Noise Reject] Vertical Click Detected! Instant BW: ${instBandwidth_kHz.toFixed(1)}kHz. Discarding early.`,
+            'color: red; font-weight: bold;');
+          call.isDiscarded = true;
+          return; // <--- 立即停止
         }
+      }
     }
 
     // ============================================================
@@ -3110,14 +3122,14 @@ export class BatCallDetector {
       peakPower_dB,
       peakFrameIdx,
       roughEndFrameIdx,
-      zonalNoiseMap 
+      zonalNoiseMap
     );
 
     // 檢查是否為噪音 (觸底 10kHz)
     if (resultLow.discard) {
-        call.isDiscarded = true;
-        // console.log('[Noise Reject] Call discarded by Low Freq check (<10kHz).');
-        return; // <--- 立即停止，不執行 High Freq 和其他測量
+      call.isDiscarded = true;
+      // console.log('[Noise Reject] Call discarded by Low Freq check (<10kHz).');
+      return; // <--- 立即停止，不執行 High Freq 和其他測量
     }
 
     // 暫存 Low Freq 結果，稍後整合
@@ -3159,66 +3171,66 @@ export class BatCallDetector {
 
     // --- High Freq Safety Re-scan ---
     if (resultHigh.highFreq_kHz !== null && resultHigh.highFreq_kHz < (peakFreq_Hz / 1000)) {
-        const peakFreq_kHz = peakFreq_Hz / 1000;
-        
-        // Pre-calculate Max Spectrum ONCE
-        const numBins = spectrogram[0].length;
-        const testMaxSpectrum = new Float32Array(numBins).fill(-Infinity);
-        const testFrameIndexForBin = new Uint16Array(numBins);
+      const peakFreq_kHz = peakFreq_Hz / 1000;
 
-        for (let f = 0; f <= finalSearchLimitFrameFromAuto; f++) {
-          const frame = spectrogram[f];
-          for (let b = 0; b < frame.length; b++) {
-            if (frame[b] > testMaxSpectrum[b]) {
-              testMaxSpectrum[b] = frame[b];
-              testFrameIndexForBin[b] = f;
-            }
+      // Pre-calculate Max Spectrum ONCE
+      const numBins = spectrogram[0].length;
+      const testMaxSpectrum = new Float32Array(numBins).fill(-Infinity);
+      const testFrameIndexForBin = new Uint16Array(numBins);
+
+      for (let f = 0; f <= finalSearchLimitFrameFromAuto; f++) {
+        const frame = spectrogram[f];
+        for (let b = 0; b < frame.length; b++) {
+          if (frame[b] > testMaxSpectrum[b]) {
+            testMaxSpectrum[b] = frame[b];
+            testFrameIndexForBin[b] = f;
           }
         }
+      }
 
-        // Scan Thresholds from -24 to -100
-        for (let testThreshold_dB = -24; testThreshold_dB >= -100; testThreshold_dB--) {
-          const highFreqThreshold_dB = peakPower_dB + testThreshold_dB;
-          const scanRes = this._scanSpectrumForFrequency(testMaxSpectrum, freqBins, highFreqThreshold_dB, 'HighToLow');
+      // Scan Thresholds from -24 to -100
+      for (let testThreshold_dB = -24; testThreshold_dB >= -100; testThreshold_dB--) {
+        const highFreqThreshold_dB = peakPower_dB + testThreshold_dB;
+        const scanRes = this._scanSpectrumForFrequency(testMaxSpectrum, freqBins, highFreqThreshold_dB, 'HighToLow');
 
-          if (scanRes && (scanRes.freq_Hz / 1000) >= peakFreq_kHz) {
-            safeHighFreqHz = scanRes.freq_Hz;
-            safeHighFreq_kHz = scanRes.freq_Hz / 1000;
-            safeHighFreqBinIdx = scanRes.binIdx;
-            safeHighFreqFrameIdx = testFrameIndexForBin[scanRes.binIdx];
-            usedThresholdHigh = testThreshold_dB;
-            break; 
-          }
+        if (scanRes && (scanRes.freq_Hz / 1000) >= peakFreq_kHz) {
+          safeHighFreqHz = scanRes.freq_Hz;
+          safeHighFreq_kHz = scanRes.freq_Hz / 1000;
+          safeHighFreqBinIdx = scanRes.binIdx;
+          safeHighFreqFrameIdx = testFrameIndexForBin[scanRes.binIdx];
+          usedThresholdHigh = testThreshold_dB;
+          break;
         }
+      }
     }
 
     // 設定 High Frequency 參數
     this.config.highFreqThreshold_dB = usedThresholdHigh;
     call.highFreqThreshold_dB_used = usedThresholdHigh;
-    
+
     // Assign Result
     let highFreq_Hz = 0;
     if (safeHighFreq_kHz !== null) {
       call.highFreq_kHz = safeHighFreq_kHz;
       call.highFreqFrameIdx = safeHighFreqFrameIdx;
       highFreq_Hz = safeHighFreqHz;
-      
+
       // Calculate Time
       if (safeHighFreqFrameIdx < timeFrames.length) {
-         call.highFreqTime_ms = (timeFrames[safeHighFreqFrameIdx] - timeFrames[0]) * 1000;
+        call.highFreqTime_ms = (timeFrames[safeHighFreqFrameIdx] - timeFrames[0]) * 1000;
       }
     } else {
       // Fallback
-       highFreq_Hz = fhighKHz * 1000;
-       call.highFreq_kHz = fhighKHz;
-       call.highFreqFrameIdx = 0;
-       call.highFreqTime_ms = 0;
+      highFreq_Hz = fhighKHz * 1000;
+      call.highFreq_kHz = fhighKHz;
+      call.highFreqFrameIdx = 0;
+      call.highFreqTime_ms = 0;
     }
 
     // ============================================================
     // STEP 2.5: Start Frequency & Time Boundary Tracing
     // ============================================================
-    
+
     // Recalculate Time Boundaries based on used High Threshold
     const highThreshold_dB = peakPower_dB + usedThresholdHigh;
     let newStartFrameIdx = 0;
@@ -3230,7 +3242,7 @@ export class BatCallDetector {
       }
       if (frameHasSignal) { newStartFrameIdx = frameIdx; break; }
     }
-    
+
     if (newStartFrameIdx < timeFrames.length) {
       call.startTime_s = timeFrames[newStartFrameIdx];
     }
@@ -3248,11 +3260,11 @@ export class BatCallDetector {
       performStartFreqTracing = true;
       startFreqThreshold_dB = peakPower_dB - 35;
     } else {
-       // Simple check if high freq point is strong enough to trace
-       if (safeHighFreqFrameIdx < spectrogram.length) {
-           const p = spectrogram[safeHighFreqFrameIdx][safeHighFreqBinIdx];
-           if (p < (peakPower_dB - 30) || p < -80) performStartFreqTracing = false;
-       }
+      // Simple check if high freq point is strong enough to trace
+      if (safeHighFreqFrameIdx < spectrogram.length) {
+        const p = spectrogram[safeHighFreqFrameIdx][safeHighFreqBinIdx];
+        if (p < (peakPower_dB - 30) || p < -80) performStartFreqTracing = false;
+      }
     }
 
     if (performStartFreqTracing && safeHighFreqFrameIdx > 0) {
@@ -3262,39 +3274,39 @@ export class BatCallDetector {
       const numBins = freqBins.length;
 
       for (let f = safeHighFreqFrameIdx - 1; f >= 0; f--) {
-          const framePower = spectrogram[f];
-          const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
-          const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
+        const framePower = spectrogram[f];
+        const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
+        const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
 
-          let bestBin = -1;
-          let bestPower = -Infinity;
+        let bestBin = -1;
+        let bestPower = -Infinity;
 
-          for (let b = searchMinBin; b <= searchMaxBin; b++) {
-            if (framePower[b] > bestPower) {
-              bestPower = framePower[b];
-              bestBin = b;
+        for (let b = searchMinBin; b <= searchMaxBin; b++) {
+          if (framePower[b] > bestPower) {
+            bestPower = framePower[b];
+            bestBin = b;
+          }
+        }
+
+        if (bestPower > startFreqThreshold_dB) {
+          currentTrackBinIdx = bestBin;
+          validStartBinIdx = bestBin;
+          validStartFrameIdx = f;
+          validStartFreq_Hz = freqBins[bestBin];
+
+          // Linear Interpolation
+          if (bestBin > 0 && bestBin < numBins - 1) {
+            const prevP = framePower[bestBin - 1];
+            const nextP = framePower[bestBin + 1];
+            if (bestPower > prevP && bestPower > nextP) {
+              const ratio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
+              const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
+              validStartFreq_Hz = freqBins[bestBin] + (ratio * freqDiff * (prevP < nextP ? 1 : -1));
             }
           }
-
-          if (bestPower > startFreqThreshold_dB) {
-            currentTrackBinIdx = bestBin;
-            validStartBinIdx = bestBin;
-            validStartFrameIdx = f;
-            validStartFreq_Hz = freqBins[bestBin];
-            
-            // Linear Interpolation
-            if (bestBin > 0 && bestBin < numBins - 1) {
-              const prevP = framePower[bestBin - 1];
-              const nextP = framePower[bestBin + 1];
-              if (bestPower > prevP && bestPower > nextP) {
-                const ratio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
-                const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
-                validStartFreq_Hz = freqBins[bestBin] + (ratio * freqDiff * (prevP < nextP ? 1 : -1));
-              }
-            }
-          } else {
-            break; // Gap found
-          }
+        } else {
+          break; // Gap found
+        }
       }
     }
 
@@ -3317,24 +3329,24 @@ export class BatCallDetector {
     call.lowFreqThreshold_dB_used = usedThresholdLow;
     call.lowFreq_kHz = safeLowFreq_kHz;
     call.endFreq_kHz = safeEndFreq_kHz;
-    
+
     // Update Low Freq Time/Frame based on resultLow
     if (resultLow.lowFreqFrameIdx !== null) {
-        call.lowFreqFrameIdx = resultLow.lowFreqFrameIdx;
-        call.endFrameIdx_forLowFreq = resultLow.lowFreqFrameIdx;
-        if (resultLow.lowFreqFrameIdx < timeFrames.length) {
-            call.endFreqTime_s = timeFrames[resultLow.lowFreqFrameIdx];
-            call.lowFreq_ms = (call.endFreqTime_s - timeFrames[0]) * 1000;
-            call.endFreq_ms = call.lowFreq_ms;
-            
-            // Update End Time Boundary
-            call.endTime_s = timeFrames[Math.min(resultLow.lowFreqFrameIdx + 1, timeFrames.length - 1)];
-        }
+      call.lowFreqFrameIdx = resultLow.lowFreqFrameIdx;
+      call.endFrameIdx_forLowFreq = resultLow.lowFreqFrameIdx;
+      if (resultLow.lowFreqFrameIdx < timeFrames.length) {
+        call.endFreqTime_s = timeFrames[resultLow.lowFreqFrameIdx];
+        call.lowFreq_ms = (call.endFreqTime_s - timeFrames[0]) * 1000;
+        call.endFreq_ms = call.lowFreq_ms;
+
+        // Update End Time Boundary
+        call.endTime_s = timeFrames[Math.min(resultLow.lowFreqFrameIdx + 1, timeFrames.length - 1)];
+      }
     }
-    
+
     // Duration Update
     if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
-        call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
+      call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
     }
 
     // Optimization: Compare Low with Start
@@ -3352,7 +3364,7 @@ export class BatCallDetector {
     let characteristicFreq_FrameIdx = 0;
 
     if (lastPercentStart < charFreqSearchEnd) {
-      const frameFrequencies = []; 
+      const frameFrequencies = [];
       let timeFrameDelta_ms = (timeFrames.length > 1) ? (timeFrames[1] - timeFrames[0]) * 1000 : 0;
 
       for (let frameIdx = Math.max(0, lastPercentStart); frameIdx <= charFreqSearchEnd; frameIdx++) {
@@ -3381,18 +3393,18 @@ export class BatCallDetector {
           charFreqFrameIdx = i;
         }
       }
-      
+
       if (charFreqFrameIdx < frameFrequencies.length) {
-          characteristicFreq_Hz = frameFrequencies[charFreqFrameIdx].freq_Hz;
-          characteristicFreq_FrameIdx = frameFrequencies[charFreqFrameIdx].frameIdx;
+        characteristicFreq_Hz = frameFrequencies[charFreqFrameIdx].freq_Hz;
+        characteristicFreq_FrameIdx = frameFrequencies[charFreqFrameIdx].frameIdx;
       }
     }
 
     call.characteristicFreq_kHz = characteristicFreq_Hz / 1000;
     if (characteristicFreq_FrameIdx < timeFrames.length) {
-      call.characteristicFreq_ms = (timeFrames[characteristicFreq_FrameIdx] - timeFrames[0]) * 1000; 
+      call.characteristicFreq_ms = (timeFrames[characteristicFreq_FrameIdx] - timeFrames[0]) * 1000;
     }
-    
+
     // Validate Characteristic Freq
     if (call.characteristicFreq_kHz < call.lowFreq_kHz) call.characteristicFreq_kHz = call.lowFreq_kHz;
     else if (call.characteristicFreq_kHz > call.peakFreq_kHz) call.characteristicFreq_kHz = call.peakFreq_kHz;
@@ -3404,22 +3416,22 @@ export class BatCallDetector {
 
     // Secondary Noise Check (Time Tilt - Vertical Streak)
     if (call.bandwidth_kHz !== null && call.highFreqTime_ms !== null && call.lowFreq_ms !== null) {
-        const timeTilt_ms = Math.abs(call.lowFreq_ms - call.highFreqTime_ms);
-        if (call.bandwidth_kHz > 20 && timeTilt_ms < 1.5) {
-            console.warn(`%c[Noise Reject] Vertical Click (Secondary)! BW: ${call.bandwidth_kHz.toFixed(1)}kHz. Discarding.`, 'color: red; background: #ffeaea;');
-            call.isDiscarded = true;
-            return;
-        }
+      const timeTilt_ms = Math.abs(call.lowFreq_ms - call.highFreqTime_ms);
+      if (call.bandwidth_kHz > 20 && timeTilt_ms < 1.5) {
+        console.warn(`%c[Noise Reject] Vertical Click (Secondary)! BW: ${call.bandwidth_kHz.toFixed(1)}kHz. Discarding.`, 'color: red; background: #ffeaea;');
+        call.isDiscarded = true;
+        return;
+      }
     }
 
     // ============================================================
     // STEP 6: Calculate Knee Frequency and Knee Time (FULL CODE)
     // ============================================================
-    
+
     // 1. Time Constraints
     let searchStartFrame = Math.max(0, newStartFrameIdx);
     if (call.startFreqFrameIdx !== null && call.startFreqFrameIdx > searchStartFrame) {
-        searchStartFrame = call.startFreqFrameIdx;
+      searchStartFrame = call.startFreqFrameIdx;
     }
 
     // Use rough end frame derived from low freq result or spectrogram end
@@ -3440,8 +3452,8 @@ export class BatCallDetector {
       if (freqBins[b] <= constraintMaxFreq_Hz) { maxBinIdx = b; break; }
     }
 
-    const contourKHz = []; 
-    const validFrameIndices = []; 
+    const contourKHz = [];
+    const validFrameIndices = [];
 
     // 3. Extract Contour
     if (searchDurationFrames > 2) {
@@ -3467,23 +3479,23 @@ export class BatCallDetector {
     }
 
     if (contourKHz.length < 5) {
-       // console.log('[Knee Search] Too few points, skipping.');
-       call.kneeTime_ms = null;
-       call.kneeFreq_kHz = null;
+      // console.log('[Knee Search] Too few points, skipping.');
+      call.kneeTime_ms = null;
+      call.kneeFreq_kHz = null;
     } else {
       // 4. Smoothing (on kHz data)
       const smoothedKHz = this.savitzkyGolay(contourKHz, 5, 2);
       const firstDerivatives = [];
-      
+
       // Calculate 1st Derivative (Slope in kHz / ms)
       for (let i = 0; i < smoothedKHz.length - 1; i++) {
         const freqChange = smoothedKHz[i + 1] - smoothedKHz[i]; // kHz
-        
+
         const absFrameIdx_curr = validFrameIndices[i];
-        const absFrameIdx_next = validFrameIndices[i+1];
+        const absFrameIdx_next = validFrameIndices[i + 1];
         // Time Delta in ms
-        const timeDelta_ms = (timeFrames[absFrameIdx_next] - timeFrames[absFrameIdx_curr]) * 1000; 
-        
+        const timeDelta_ms = (timeFrames[absFrameIdx_next] - timeFrames[absFrameIdx_curr]) * 1000;
+
         // Slope unit: kHz/ms
         firstDerivatives.push(freqChange / (timeDelta_ms > 0 ? timeDelta_ms : 0.001));
       }
@@ -3494,9 +3506,9 @@ export class BatCallDetector {
 
       for (let i = 0; i < firstDerivatives.length - 1; i++) {
         const derivChange = firstDerivatives[i + 1] - firstDerivatives[i];
-        
+
         const absFrameIdx_curr = validFrameIndices[i];
-        const absFrameIdx_next2 = validFrameIndices[i+2];
+        const absFrameIdx_next2 = validFrameIndices[i + 2];
         const timeDelta_ms = ((timeFrames[absFrameIdx_next2] - timeFrames[absFrameIdx_curr]) * 1000) / 2;
 
         secondDerivatives.push(derivChange / (timeDelta_ms > 0 ? timeDelta_ms : 0.001));
@@ -3506,16 +3518,16 @@ export class BatCallDetector {
       // [Helper] Validation (Thresholds adjusted for kHz/ms)
       const isValidKneeBySlope = (localIndex) => {
         if (localIndex <= 0 || localIndex >= firstDerivatives.length) return false;
-        
+
         const incomingSlope = firstDerivatives[localIndex - 1];
         const outgoingSlope = firstDerivatives[localIndex];
-        
+
         if (incomingSlope === null || outgoingSlope === null) return false;
-        
+
         const MIN_INCOMING_STEEPNESS = -0.5; // Must be at least this steep to be FM
 
         // 1. Direction check: Must be downward FM (negative slope)
-        if (incomingSlope > 0) return false; 
+        if (incomingSlope > 0) return false;
 
         // 2. Steepness check: Entering slope must be essentially FM
         if (incomingSlope > MIN_INCOMING_STEEPNESS) return false; // Too flat, not FM
@@ -3523,7 +3535,7 @@ export class BatCallDetector {
         // 3. Knee Shape check: Outgoing must be flatter than Incoming
         const incomingAbs = Math.abs(incomingSlope);
         const outgoingAbs = Math.abs(outgoingSlope);
-        
+
         if (outgoingAbs >= incomingAbs * 0.8) return false; // Not enough bend
 
         return true;
@@ -3535,14 +3547,14 @@ export class BatCallDetector {
       // 5. Find Max Curvature
       for (let i = 0; i < secondDerivatives.length; i++) {
         const localFreqIdx = derivIndices[i];
-        const df_dt = firstDerivatives[localFreqIdx-1]; 
+        const df_dt = firstDerivatives[localFreqIdx - 1];
         const d2f_dt2 = secondDerivatives[i];
-        
+
         // Math using kHz/ms scales
         const denominator = Math.pow(1 + df_dt * df_dt, 1.5);
-        const curvature = Math.abs(d2f_dt2) / (denominator + 1e-10); 
+        const curvature = Math.abs(d2f_dt2) / (denominator + 1e-10);
 
-        if (curvature > maxCurvature && isValidKneeBySlope(localFreqIdx-1)) {
+        if (curvature > maxCurvature && isValidKneeBySlope(localFreqIdx - 1)) {
           maxCurvature = curvature;
           bestLocalIdx = localFreqIdx;
         }
@@ -3555,64 +3567,139 @@ export class BatCallDetector {
         // Fallback: Find the point where slope changes the most (2nd deriv peak)
         let maxChange = -1;
         for (let i = 0; i < secondDerivatives.length; i++) {
-           const change = Math.abs(secondDerivatives[i]);
-           const localIdx = derivIndices[i];
-           if (change > maxChange && firstDerivatives[localIdx-1] < -0.5) {
-             maxChange = change;
-             bestLocalIdx = localIdx;
-           }
+          const change = Math.abs(secondDerivatives[i]);
+          const localIdx = derivIndices[i];
+          if (change > maxChange && firstDerivatives[localIdx - 1] < -0.5) {
+            maxChange = change;
+            bestLocalIdx = localIdx;
+          }
         }
       }
 
-        // 6. Map Result (Mapping back to Absolute Frame)
-        let finalKneeIdx = -1;
-        if (typeof bestLocalIdx !== 'undefined' && bestLocalIdx >= 0 && bestLocalIdx < validFrameIndices.length) {
+      // 6. Map Result (Mapping back to Absolute Frame)
+      let finalKneeIdx = -1;
+      if (typeof bestLocalIdx !== 'undefined' && bestLocalIdx >= 0 && bestLocalIdx < validFrameIndices.length) {
         finalKneeIdx = validFrameIndices[bestLocalIdx];
-        }
+      }
 
-        // 7. Store Result
-        if (finalKneeIdx >= 0 && finalKneeIdx < timeFrames.length) {
+      // 7. Store Result
+      if (finalKneeIdx >= 0 && finalKneeIdx < timeFrames.length) {
         call.kneeFreq_kHz = contourKHz[bestLocalIdx];
-        call.kneeFrameIdx = finalKneeIdx; 
-        
+        call.kneeFrameIdx = finalKneeIdx;
+
         // Store temp absolute time
         call.kneeFreq_ms = (timeFrames[finalKneeIdx] - timeFrames[0]) * 1000;
         call.kneeTime_ms = call.kneeFreq_ms;
-        } else {
+      } else {
         call.kneeTime_ms = null;
         call.kneeFreq_kHz = null;
         call.kneeFrameIdx = null;
+      }
+
+      // ============================================================
+      // STEP 6.5: Calculate Heel Frequency (QCF/CF -> FM)
+      // ============================================================
+      // Heel Logic: Start Flat (Slope > -0.5) -> End Steep (Slope < -0.5)
+      // We reuse the same derivatives calculated for Knee
+
+      const isValidHeelBySlope = (localIndex) => {
+        if (localIndex <= 0 || localIndex >= firstDerivatives.length) return false;
+
+        const incomingSlope = firstDerivatives[localIndex - 1]; // Left side
+        const outgoingSlope = firstDerivatives[localIndex];     // Right side
+
+        if (incomingSlope === null || outgoingSlope === null) return false;
+
+        // 1. Definition: Heel is the start of the drop.
+        // Incoming (Left) should be relatively flat (CF/QCF)
+        // Values are usually negative (downward), so "flatter" means closer to 0 (e.g., > -0.5 or > -0.2)
+        const MAX_INCOMING_STEEPNESS = -0.5;
+
+        // 2. Outgoing (Right) must be steeper (FM)
+        // Must be steeper than incoming
+        const MIN_OUTGOING_STEEPNESS = -0.5; // Must drop faster than this
+
+        // Check 1: Incoming is flatish
+        if (incomingSlope < MAX_INCOMING_STEEPNESS) return false; // Too steep already
+
+        // Check 2: Outgoing is steep
+        if (outgoingSlope > MIN_OUTGOING_STEEPNESS) return false; // Too flat, not dropping
+
+        // Check 3: Corner Shape (Outgoing is significantly steeper than Incoming)
+        if (Math.abs(outgoingSlope) < Math.abs(incomingSlope) * 1.5) return false;
+
+        return true;
+      };
+
+      let bestHeelLocalIdx = -1;
+      let maxHeelCurvature = -1;
+
+      // Scan for Max Curvature that satisfies Heel condition
+      for (let i = 0; i < secondDerivatives.length; i++) {
+        const localFreqIdx = derivIndices[i];
+        const df_dt = firstDerivatives[localFreqIdx - 1];
+        const d2f_dt2 = secondDerivatives[i];
+
+        // Curvature Formula
+        const denominator = Math.pow(1 + df_dt * df_dt, 1.5);
+        const curvature = Math.abs(d2f_dt2) / (denominator + 1e-10);
+
+        if (curvature > maxHeelCurvature && isValidHeelBySlope(localFreqIdx - 1)) {
+          maxHeelCurvature = curvature;
+          bestHeelLocalIdx = localFreqIdx;
         }
+      }
+
+      // Map Heel Result
+      let finalHeelIdx = -1;
+      if (bestHeelLocalIdx >= 0 && bestHeelLocalIdx < validFrameIndices.length) {
+        finalHeelIdx = validFrameIndices[bestHeelLocalIdx];
+      }
+
+      // Store Heel Result
+      if (finalHeelIdx >= 0 && finalHeelIdx < timeFrames.length) {
+        call.heelFreq_kHz = contourKHz[bestHeelLocalIdx];
+        call.heelFrameIdx = finalHeelIdx;
+
+        // Store temp absolute time (relative to ROI start)
+        call.heelFreq_ms = (timeFrames[finalHeelIdx] - timeFrames[0]) * 1000;
+      } else {
+        call.heelFreq_ms = null;
+        call.heelFreq_kHz = null;
+        call.heelFrameIdx = null;
+      }
     }
 
     // ============================================================
     // STEP 7: Time Normalization (Start Freq = 0.00ms)
     // ============================================================
     if (call.startFreqFrameIdx !== null && call.startFreqFrameIdx < timeFrames.length) {
-        const t0_s = timeFrames[call.startFreqFrameIdx];
-        const normalizeTime = (frameIdx) => {
-            if (frameIdx === null || frameIdx === undefined) return null;
-            const t_target = timeFrames[frameIdx];
-            return (t_target - t0_s) * 1000;
-        };
+      const t0_s = timeFrames[call.startFreqFrameIdx];
+      const normalizeTime = (frameIdx) => {
+        if (frameIdx === null || frameIdx === undefined) return null;
+        const t_target = timeFrames[frameIdx];
+        return (t_target - t0_s) * 1000;
+      };
 
-        call.startFreq_ms = 0.00;
+      call.startFreq_ms = 0.00;
 
-        if (peakFrameIdx !== null) call.peakFreqTime_ms = normalizeTime(peakFrameIdx);
-        if (call.highFreqFrameIdx !== null) call.highFreqTime_ms = normalizeTime(call.highFreqFrameIdx);
-        if (call.endFrameIdx_forLowFreq !== null) {
-            const relTime = normalizeTime(call.endFrameIdx_forLowFreq);
-            call.endFreq_ms = relTime;
-            call.lowFreq_ms = relTime;
-        }
-        if (call.kneeFrameIdx !== null) {
-            call.kneeFreq_ms = normalizeTime(call.kneeFrameIdx);
-            call.kneeTime_ms = call.kneeFreq_ms;
-        }
-        
-        if (call.endFreq_ms !== null) {
-            call.duration_ms = call.endFreq_ms - call.startFreq_ms; 
-        }
+      if (peakFrameIdx !== null) call.peakFreqTime_ms = normalizeTime(peakFrameIdx);
+      if (call.highFreqFrameIdx !== null) call.highFreqTime_ms = normalizeTime(call.highFreqFrameIdx);
+      if (call.endFrameIdx_forLowFreq !== null) {
+        const relTime = normalizeTime(call.endFrameIdx_forLowFreq);
+        call.endFreq_ms = relTime;
+        call.lowFreq_ms = relTime;
+      }
+      if (call.kneeFrameIdx !== null) {
+        call.kneeFreq_ms = normalizeTime(call.kneeFrameIdx);
+        call.kneeTime_ms = call.kneeFreq_ms;
+      }
+      if (call.heelFrameIdx !== null) {
+        call.heelFreq_ms = normalizeTime(call.heelFrameIdx);
+      }
+      if (call.endFreq_ms !== null) {
+        call.duration_ms = call.endFreq_ms - call.startFreq_ms;
+      }
     }
 
     // Time Expansion Correction

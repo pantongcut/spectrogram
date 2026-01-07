@@ -372,6 +372,7 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
     "High Freq (kHz)", "High Freq Time (ms)", 
     "Peak Freq (kHz)", "Peak Freq Time (ms)", 
     "Knee Freq (kHz)", "Knee Freq Time (ms)", 
+    "Heel Freq (kHz)", "Heel Freq Time (ms)",
     "Char Freq (kHz)", "Char Freq Time (ms)", 
     
     // Other Freqs
@@ -410,6 +411,10 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
       // Knee Freq Pair
       fmt(call.kneeFreq_kHz, 2),
       fmt(call.kneeFreq_ms, 2),
+
+      // Heel Freq Pair
+      fmt(call.heelFreq_kHz, 2),
+      fmt(call.heelFreq_ms, 2),
       
       // Char Freq Pair
       fmt(call.characteristicFreq_kHz, 2),

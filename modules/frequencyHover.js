@@ -733,6 +733,10 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
           <td class="value"><span class="fknee">-</span> kHz</td>
         </tr>
         <tr>
+          <td class="label">Freq.Heel:</td>
+          <td class="value"><span class="fheel">-</span> kHz</td>
+        </tr>
+        <tr>
           <td class="label">Bandwidth:</td>
           <td class="value"><span class="bandwidth">${dispBandwidth}</span> kHz</td>
         </tr>
@@ -1084,7 +1088,7 @@ function createBtnGroup(sel, isShortSelection = false) {
     const timeDiv = timeExp ? 10 : 1;
     
     // Default values
-    let dispStart = '-'; // NEW
+    let dispStart = '-'; 
     let dispFhigh = '-';
     let dispFlow = '-';
     let dispBandwidth = '-';
@@ -1093,6 +1097,7 @@ function createBtnGroup(sel, isShortSelection = false) {
     let dispPeak = '-';
     let dispChar = '-';
     let dispKnee = '-';
+    let dispHeel = '-';
 
     // Populate with batCall data if available
     // 這裡的值現在會與 Popup 完全一致，因為計算邏輯與參數已同步
@@ -1105,6 +1110,7 @@ function createBtnGroup(sel, isShortSelection = false) {
       if (call.peakFreq_kHz != null) dispPeak = (call.peakFreq_kHz * freqMul).toFixed(2);
       if (call.characteristicFreq_kHz != null) dispChar = (call.characteristicFreq_kHz * freqMul).toFixed(2);
       if (call.kneeFreq_kHz != null) dispKnee = (call.kneeFreq_kHz * freqMul).toFixed(2);
+      if (call.heelFreq_kHz != null) dispHeel = (call.heelFreq_kHz * freqMul).toFixed(2);
       if (call.bandwidth_kHz != null) dispBandwidth = (call.bandwidth_kHz * freqMul).toFixed(2);
       if (call.duration_ms != null) dispDurationMs = (call.duration_ms / timeDiv).toFixed(2);
       
@@ -1130,12 +1136,13 @@ function createBtnGroup(sel, isShortSelection = false) {
 
     const q = (selector) => tooltip.querySelector(selector);
     
-    if (q('.fstart')) q('.fstart').textContent = dispStart; // NEW
+    if (q('.fstart')) q('.fstart').textContent = dispStart;
     if (q('.fhigh')) q('.fhigh').textContent = dispFhigh;
     if (q('.flow')) q('.flow').textContent = dispFlow;
     if (q('.fpeak')) q('.fpeak').textContent = dispPeak;
     if (q('.fchar')) q('.fchar').textContent = dispChar;
     if (q('.fknee')) q('.fknee').textContent = dispKnee;
+    if (q('.fheel')) q('.fheel').textContent = dispHeel;
     if (q('.bandwidth')) q('.bandwidth').textContent = dispBandwidth;
     if (q('.duration')) q('.duration').textContent = dispDurationMs;
   }
