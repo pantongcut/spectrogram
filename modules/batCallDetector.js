@@ -3083,8 +3083,8 @@ export class BatCallDetector {
             const instBandwidth_Hz = (maxBin - minBin) * freqResolution;
             const instBandwidth_kHz = instBandwidth_Hz / 1000;
 
-            // 閾值：如果單一 Frame 內能量橫跨超過 15kHz，判定為垂直噪音
-            if (instBandwidth_kHz > 15.0) {
+            // 閾值：如果單一 Frame 內能量橫跨超過 20kHz，判定為垂直噪音
+            if (instBandwidth_kHz > 20.0) {
                 console.warn(`%c[Noise Reject] Vertical Click Detected! Instant BW: ${instBandwidth_kHz.toFixed(1)}kHz. Discarding early.`, 
                 'color: red; font-weight: bold;');
                 call.isDiscarded = true;
