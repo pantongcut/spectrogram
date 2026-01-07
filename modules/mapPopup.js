@@ -698,6 +698,15 @@ export function initMapPopup({
     // =========== 修改: Country Park (Dynamic Simplify Factor) ===========
     
     if (L.esri) {
+
+      const toTitleCase = (str) => {
+        if (!str) return '';
+        return str.toLowerCase().replace(/(?:^|\s|\(|\[)\w/g, (match) => match.toUpperCase());
+      };
+
+      // ============================================================
+      // 1. Country Park (MapServer/94)
+      // ============================================================
       const countryParkCodes = "CODE in ('ACP','CWBCP','KSCP','KTCP','LTCP','LNECP','LNCP','LSCP','LRCP','LFSCP','MOSCP','PSLCP','PCECP','PCCP','PFLCP','RNCP','SKECP','SKWCP','SKWCPW','SOCP','SMCP','TLCP','TMSCP','TTCP','TTCPQB')";
 
       const cpLayer = L.esri.featureLayer({
@@ -718,15 +727,48 @@ export function initMapPopup({
       });
 
       cpLayer.bindPopup(function (layer) {
-        return L.Util.template(
-          '<div class="map-popup-table"><strong>{NAME_ENG}</strong><br>{NAME_CHT}</div>', 
-          layer.feature.properties
-        );
+        const props = layer.feature.properties;
+        const nameEng = toTitleCase(props.NAME || ''); // 轉為 Title Case
+        const nameCht = props.C_NAME || '';            // 注意這裡有底線 C_NAME
+        
+        return `<div class="map-popup-table"><strong>${nameEng}</strong><br>${nameCht}</div>`;
       });
 
       layersControl.addOverlay(cpLayer, "Country Park");
 
-      // =========== 新增: 監聽 Zoom Level 來改變 simplifyFactor ===========
+      // ============================================================
+      // 2. Special Area (MapServer/93)
+      // ============================================================
+      const specialAreaCodes = "CP_NO in ('1005','1006','1007','1012','1022','1024','1035','1053','1047','1048','1050')";
+
+      const saLayer = L.esri.featureLayer({
+        url: 'https://www.map.gov.hk/arcgis2/rest/services/rGeoInfoMap/rgeo_highlight_d00/MapServer/93',
+        where: specialAreaCodes,
+        idField: 'OBJECTID', 
+        style: function () {
+          return {
+            color: '#005205ff',
+            weight: 2,
+            fillOpacity: 0.3,
+            fillColor: '#005205ff'
+          };
+        },
+        simplifyFactor: 0.5,
+        precision: 5,
+      });
+
+      saLayer.bindPopup(function (layer) {
+        const props = layer.feature.properties;
+        const nameEng = toTitleCase(props.ENAME || '');
+        const nameCht = props.CNAME || '';
+        
+        return `<div class="map-popup-table"><strong>${nameEng}</strong><br>${nameCht}</div>`;
+      });
+
+      layersControl.addOverlay(saLayer, "Special Area");
+      
+
+      // =========== 監聽 Zoom Level 來改變 simplifyFactor ===========
       map.on('zoomend', () => {
         // 只有當圖層在顯示中才進行計算，節省效能
         if (!map.hasLayer(cpLayer)) return;
