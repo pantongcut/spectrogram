@@ -656,15 +656,11 @@ export function initMapPopup({
       { attribution: false, maxZoom: 20, minZoom: 0, crossOrigin: 'anonymous' }
     );
 
-    // separate label layer is required for the imagery group so that
-    // changing basemaps does not inadvertently remove the shared label layer
     const hkImageryLabel = L.tileLayer(
       'https://mapapi.geodata.gov.hk/gs/api/v1.0.0/xyz/label/hk/en/wgs84/{z}/{x}/{y}.png',
       { attribution: false, maxZoom: 20, minZoom: 0, crossOrigin: 'anonymous' }
     );
 
-
-    // Google Terrain
     const googleTerrain = L.tileLayer(
       'https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}',
       {
@@ -698,6 +694,71 @@ export function initMapPopup({
 
     layersControl = L.control.layers(baseLayers, null, { position: 'topright' }).addTo(map);
     layersControlContainer = layersControl.getContainer();
+
+    // =========== 修改: Country Park (Dynamic Simplify Factor) ===========
+    
+    if (L.esri) {
+      const countryParkCodes = "CODE in ('ACP','CWBCP','KSCP','KTCP','LTCP','LNECP','LNCP','LSCP','LRCP','LFSCP','MOSCP','PSLCP','PCECP','PCCP','PFLCP','RNCP','SKECP','SKWCP','SKWCPW','SOCP','SMCP','TLCP','TMSCP','TTCP','TTCPQB')";
+
+      const cpLayer = L.esri.featureLayer({
+        url: 'https://www.map.gov.hk/arcgis2/rest/services/rGeoInfoMap/rgeo_highlight_d00/MapServer/94',
+        where: countryParkCodes,
+        idField: 'OBJECTID_1',
+        style: function () {
+          return {
+            color: '#388E3C',
+            weight: 2,
+            fillOpacity: 0.3,
+            fillColor: '#388E3C'
+          };
+        },
+        // 初始設定 (預設一個中間值)
+        simplifyFactor: 0.5, 
+        precision: 5,
+      });
+
+      cpLayer.bindPopup(function (layer) {
+        return L.Util.template(
+          '<div class="map-popup-table"><strong>{NAME_ENG}</strong><br>{NAME_CHT}</div>', 
+          layer.feature.properties
+        );
+      });
+
+      layersControl.addOverlay(cpLayer, "Country Park");
+
+      // =========== 新增: 監聽 Zoom Level 來改變 simplifyFactor ===========
+      map.on('zoomend', () => {
+        // 只有當圖層在顯示中才進行計算，節省效能
+        if (!map.hasLayer(cpLayer)) return;
+
+        const z = map.getZoom();
+        let newFactor = 0.5; // 預設值
+
+        // 自定義邏輯：
+        if (z >= 16) {
+          newFactor = 0; // Zoom 16+: 關閉簡化，顯示最原始數據 (最精細)
+        } else if (z >= 14) {
+          newFactor = 0.2; // Zoom 14-15: 低簡化 (精細)
+        } else if (z >= 12) {
+          newFactor = 0.3; // Zoom 12-13: 中等簡化
+        } else {
+          newFactor = 0.5; // Zoom < 12: 高度簡化 (效能優先，形狀會比較起角)
+        }
+
+        // 只有當數值真的改變時，才執行 refresh (因為 refresh 會閃爍)
+        if (cpLayer.options.simplifyFactor !== newFactor) {
+          console.log(`[MapPopup] Updating simplifyFactor to ${newFactor} (Zoom: ${z})`);
+          cpLayer.options.simplifyFactor = newFactor;
+          
+          // 強制重繪：這會清空目前的 tile cache 並用新參數重新 fetch
+          cpLayer.refresh();
+        }
+      });
+      // =================================================================
+
+    } else {
+      console.warn('Esri Leaflet plugin not loaded.');
+    }
 
     // =========== 新增開始: 2.5D Buildings Layer (Safe Mode) ===========
     if (typeof OSMBuildings !== 'undefined') {
