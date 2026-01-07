@@ -746,9 +746,6 @@ export class BatCallDetector {
 
             const frameDiff = safeEndFrame - (newEndFrame + 1);
 
-            // [DEBUG LOG] 這裡一定會印出來
-            console.log(`%c[AutoDetect Refine] Cut ${cutMs.toFixed(2)}ms`, 'color: #e67e22; font-weight: bold');
-
             // 更新 safeEndFrame
             safeEndFrame = Math.min(powerMatrix.length - 1, newEndFrame + 1);
           }
@@ -770,6 +767,13 @@ export class BatCallDetector {
 
         // Run Detailed Measurement
         this.measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution, roiZonalNoiseMap);
+
+        // ============================================================
+        // [FIX] Check if call was discarded during measurement
+        // ============================================================
+        if (call.isDiscarded) {
+             continue;
+        }
 
         // Classify
         call.Flow = call.lowFreq_kHz * 1000;
@@ -1601,24 +1605,18 @@ export class BatCallDetector {
 
   /**
    * [2025 NEW] 利用 Oscillogram (時域波形) 精修叫聲結尾
-   * 目的：防止 Spectrogram 拖尾、去除回聲 (Rebounce)、精準切割
-   * 邏輯：蝙蝠叫聲尾端能量應為單調衰減。若偵測到能量在衰減後顯著回升，視為回聲並截斷。
-   * 
-   * @param {Float32Array} audioData - 原始音訊數據
-   * @param {number} sampleRate - 取樣率
-   * @param {number} startSample - 初步判定 (Spectrogram) 的開始點
-   * @param {number} endSample - 初步判定 (Spectrogram) 的結束點 (含 Padding)
-   * @returns {number} 精修後的結束點 Sample Index
+   * 優化版：使用 console.table 整合輸出 Summary
    */
   refineEndUsingOscillogram(audioData, sampleRate, startSample, endSample) {
     const DEBUG = true; // 開啟 Debug 模式
+    const logSummary = []; // 用於收集 Log 的陣列
 
     // 1. 安全邊界檢查
     const safeStart = Math.max(0, startSample);
     const safeEnd = Math.min(audioData.length, endSample);
 
     if (safeEnd - safeStart < sampleRate * 0.0005) {
-      if (DEBUG) console.log(`[Oscillogram] Segment too short (<0.5ms), skipping.`);
+      // if (DEBUG) console.log(`[Oscillogram] Segment too short (<0.5ms), skipping.`);
       return endSample;
     }
 
@@ -1631,7 +1629,7 @@ export class BatCallDetector {
     const hopSize = Math.floor(windowSize / 2);
     const absoluteNoiseFloorDb = -60;
 
-    // 3. 計算 RMS Envelope - 改用 Float32Array 存儲 dB 值以減少內存分配
+    // 3. 計算 RMS Envelope
     const maxSteps = Math.ceil((safeEnd - safeStart - windowSize) / hopSize) + 1;
     const dbValues = new Float32Array(maxSteps);
     const sampleIndices = new Uint32Array(maxSteps);
@@ -1665,6 +1663,7 @@ export class BatCallDetector {
     // 4. 掃描邏輯
     let minDbSoFar = peakRms;
     let minDbIndex = peakIndex;
+    let hasLoggedSkip = false; // 用於表格顯示控制
 
     for (let i = peakIndex + 1; i < stepCount; i++) {
       const currentDb = dbValues[i];
@@ -1673,11 +1672,14 @@ export class BatCallDetector {
       if (currentDb < minDbSoFar) {
         minDbSoFar = currentDb;
         minDbIndex = i;
+        hasLoggedSkip = false; // 重置 Skip 標記，以便記錄新的低點事件
       }
 
       // B. 底噪截斷檢查
       if (minDbSoFar < absoluteNoiseFloorDb && currentDb < absoluteNoiseFloorDb + 2) {
-        if (DEBUG) console.log(`[Oscillogram] CUT: Hit Noise Floor at point ${i} (${dbValues[i].toFixed(1)}dB)`);
+        if (DEBUG) {
+            console.log(`[Oscillogram] Hit Noise Floor (${dbValues[i].toFixed(1)}dB). Cutting.`);
+        }
         return sampleIndices[minDbIndex];
       }
 
@@ -1686,13 +1688,17 @@ export class BatCallDetector {
       if (diff > rebounceThreshold_dB) {
 
         // ============================================================
-        // 強信號保護機制
-        // 如果最低點 (Low Point) 依然很強 (> -32dB)，視為叫聲本體
-        // 忽略此處的 "Rebounce" 判定，防止腰斬具有振幅調變的叫聲
+        // 強信號保護機制 (收集到表格)
         // ============================================================
         if (minDbSoFar > -32) {
-          if (DEBUG) {
-            console.log(`[Oscillogram] SKIP Rebounce: Low point ${minDbSoFar.toFixed(1)}dB > -32dB (Signal Body).`);
+          if (DEBUG && !hasLoggedSkip) {
+            logSummary.push({
+                Step: 'SKIP Rebounce',
+                Details: `Low ${minDbSoFar.toFixed(1)}dB > -32dB`,
+                Value: '(Signal Body)',
+                Note: 'Suppressing repeats...'
+            });
+            hasLoggedSkip = true;
           }
           continue;
         }
@@ -1711,18 +1717,53 @@ export class BatCallDetector {
 
         if (isSustained) {
           if (DEBUG) {
-            console.log(`%c[Oscillogram] CUT: Rebounce Detected!`, 'color: red');
-            console.log(`   Low Point: ${minDbSoFar.toFixed(1)}dB @ ${minDbIndex}`);
-            console.log(`   Rebounce to: ${currentDb.toFixed(1)}dB @ ${i} (Diff: +${diff.toFixed(1)}dB)`);
-            console.log(`   Cut Action: Trimming ${(stepCount - minDbIndex)} envelope points.`);
+            // 計算將被切除的時間長度 (用於顯示)
+            const cutSamples = endSample - sampleIndices[minDbIndex];
+            const cutMs = (cutSamples / sampleRate) * 1000;
+            const pointsTrimmed = stepCount - minDbIndex;
+
+            // 1. 加入 CUT 事件詳情
+            logSummary.push({
+                Step: 'CUT: Detected',
+                Details: 'Rebounce verified',
+                Value: `Diff: +${diff.toFixed(1)}dB`,
+                Note: 'Threshold met'
+            });
+
+            // 2. 加入數據詳情
+            logSummary.push({
+                Step: '   Low Point',
+                Details: `${minDbSoFar.toFixed(1)}dB`,
+                Value: `@ Index ${minDbIndex}`,
+                Note: ''
+            });
+
+            logSummary.push({
+                Step: '   Rebounce To',
+                Details: `${currentDb.toFixed(1)}dB`,
+                Value: `@ Index ${i}`,
+                Note: ''
+            });
+
+            // 3. 加入最終動作 (整合了原本外部的 AutoDetect Refine 資訊)
+            logSummary.push({
+                Step: 'ACTION',
+                Details: `Trimming ${pointsTrimmed} pts`,
+                Value: `Cut: ${cutMs.toFixed(2)}ms`, // <--- 這裡整合了 Cut ms
+                Note: 'Applying Cut'
+            });
+
+            // 4. 輸出表格
+            console.groupCollapsed(`[Oscillogram Refine] Cut ${cutMs.toFixed(2)}ms`);
+            console.table(logSummary);
+            console.groupEnd();
           }
+          
           // 返回反彈發生前的那個谷底
           return sampleIndices[minDbIndex];
         }
       }
     }
-
-    if (DEBUG) console.log(`[Oscillogram] No cut needed. Natural decay or end reached.`);
     return endSample;
   }
 
@@ -2405,6 +2446,7 @@ export class BatCallDetector {
      * 2. "Reverse Narrowing / Ratcheting"
      * 3. Hard Stop Logic with Fallback
      * 4. Sub-harmonic Rejection (> 15kHz jump protection)
+     * 5. [NEW] 10kHz Bottoming Out Check (Noise Reject)
      * [UPDATED] Added zonalNoiseMap parameter
      */
   findOptimalLowFrequencyThreshold(spectrogram, timeFrames, freqBins, flowKHz, fhighKHz, callPeakPower_dB, peakFrameIdx = 0, limitFrameIdx = null, zonalNoiseMap = null) {
@@ -2438,9 +2480,7 @@ export class BatCallDetector {
     // ============================================================
     // 1. Calculate Zonal Robust Noise Floors
     // ============================================================
-    // ============================================================
     // Initialize Variables
-    // ============================================================
     let hitNoiseFloor = false;
     let optimalThreshold = -24; // Default safe value
     let optimalMeasurement = null;
@@ -2487,8 +2527,8 @@ export class BatCallDetector {
 
       let logRow = {
         'Thr (dB)': testThreshold_dB,
-        'Frame': frameStr,           // [NEW] Frame Index (will be updated after forward scan)
-        'Time (ms)': time_ms,        // [NEW] Relative Time (will be updated after forward scan)
+        'Frame': frameStr,
+        'Time (ms)': time_ms,
         'Freq (kHz)': '-',
         'Diff (kHz)': '-',
         'Signal (dB)': '-',
@@ -2531,7 +2571,6 @@ export class BatCallDetector {
             // 如果找到比參考值更低的頻率 (例如 Ref=41k, Found=40k)
             // 立即停止掃描，鎖定在 Frame 100，放棄後面的 Frame 102 (38k)
             if (lowestFreqInThisFrame < referenceFreq_Hz) {
-              // console.log(`[LowFreq Lock] Locked at Frame ${f} (${(lowestFreqInThisFrame/1000).toFixed(2)} kHz < ${referenceFreq_kHz.toFixed(2)} kHz)`);
               break; // 觸發鎖定，停止 Forward Scan
             }
           }
@@ -2557,8 +2596,6 @@ export class BatCallDetector {
         const targetFramePower = spectrogram[activeEndFrameIdx];
 
         // Find lowest freq (Low -> High) with frequency restriction
-        // Optimized: for (let binIdx = 0; binIdx <= currentSearchMaxBinIdx; binIdx++)
-
         for (let binIdx = 0; binIdx <= currentSearchMaxBinIdx; binIdx++) {
           if (targetFramePower[binIdx] > lowFreqThreshold_dB) {
 
@@ -2586,8 +2623,6 @@ export class BatCallDetector {
 
               // > 15kHz Jump Protection
               if (Math.abs(diff) > 15.0) {
-                // console.log(`[LowFreq Jump Rejected] Hard Stop at ${candidateFreq_kHz.toFixed(1)}kHz (Ref: ${referenceFreq_kHz.toFixed(1)}kHz, Diff: ${diff.toFixed(1)})`);
-
                 logRow['Freq (kHz)'] = candidateFreq_kHz.toFixed(2);
                 logRow['Diff (kHz)'] = Math.abs(diff).toFixed(2);
                 logRow['Judgment'] = 'Hard Stop > 15kHz (Sub-harmonic)';
@@ -2602,7 +2637,6 @@ export class BatCallDetector {
                     break;
                   }
                 }
-                // Break out of bin loop (and will break threshold loop below)
                 break;
               }
             }
@@ -2610,7 +2644,7 @@ export class BatCallDetector {
             // Valid Low Frequency Found
             lowFreq_Hz = candidateFreq_Hz;
             foundBin = true;
-            foundBinIdx = binIdx; // [NEW 2025] Track Bin Index for convergence update
+            foundBinIdx = binIdx;
             currentLowFreqPower_dB = targetFramePower[binIdx];
             break;
           }
@@ -2620,11 +2654,32 @@ export class BatCallDetector {
       // Update Log Row with found frequency
       if (foundBin && lowFreq_Hz !== null) {
         logRow['Freq (kHz)'] = (lowFreq_Hz / 1000).toFixed(2);
+
+        // ============================================================
+        // [NEW 2025] 10kHz Bottoming Out Check (Noise Protection)
+        // 條件：當前 Low Frequency <= 10kHz
+        // 動作：立即廢棄整個 Call Segment
+        // ============================================================
+        if (lowFreq_Hz <= 10000) {
+            console.warn(`%c[Noise Reject] Low Freq ${lowFreq_Hz.toFixed(0)}Hz <= 10kHz at ${testThreshold_dB}dB. Discarding Call Segment.`, 'color: red; font-weight: bold; background: #ffeaea; padding: 2px;');
+            
+            // 回傳無效數據，強制外部邏輯放棄此 Call
+            return {
+                threshold: testThreshold_dB,
+                lowFreq_Hz: null,
+                lowFreq_kHz: null,
+                endFreq_Hz: null,
+                endFreq_kHz: null,
+                lowFreqFrameIdx: null,
+                warning: true,
+                discard: true // 標記為廢棄
+            };
+        }
+        // ============================================================
+
       }
 
       // [NEW] Update Log Row with Frame/Time information
-      // Calculate time (ms), relative to Frame 0
-      // Note: Low Freq measurement point is at activeEndFrameIdx
       if (foundBin && timeFrames && timeFrames.length > 0 && activeEndFrameIdx !== undefined && activeEndFrameIdx !== null) {
         const startTime = timeFrames[0];
         const currentTime = timeFrames[activeEndFrameIdx];
@@ -2705,12 +2760,11 @@ export class BatCallDetector {
         lowFreq_kHz: lowFreq_Hz !== null ? lowFreq_Hz / 1000 : null,
         endFreq_Hz: endFreq_Hz,
         endFreq_kHz: endFreq_Hz !== null ? endFreq_Hz / 1000 : null,
-        endFrameIdx: activeEndFrameIdx, // [NEW] 記錄該閾值下的結束幀
+        endFrameIdx: activeEndFrameIdx,
         foundBin: foundBin
       });
 
       // [MODIFIED 2025] Loop tail: Update frequency search range (Top-Down Ceiling Lock)
-      // ============================================================
       if (foundBin && foundBinIdx !== -1) {
         if (foundBinIdx < currentSearchMaxBinIdx) {
           currentSearchMaxBinIdx = foundBinIdx;
@@ -2725,14 +2779,11 @@ export class BatCallDetector {
     // ============================================================
     const validMeasurements = measurements.filter(m => m.foundBin);
 
-    // [FIX] Safety check: If optimalMeasurement is null (e.g. first try Hard Stop or no signal found)
     if (!optimalMeasurement) {
       if (validMeasurements.length > 0) {
-        // Fallback to the first valid one if we have any (e.g., -18dB)
         optimalMeasurement = validMeasurements[0];
         optimalThreshold = validMeasurements[0].threshold;
       } else {
-        // No valid measurements at all
         if (summaryLog.length > 0) {
           console.groupCollapsed(`[Low Freq] Scan Summary (No Valid Found)`);
           console.table(summaryLog);
@@ -2769,7 +2820,6 @@ export class BatCallDetector {
             recordedEarlyAnomaly = validMeasurements[i - 1].threshold;
             lastValidMeasurement = validMeasurements[i - 1];
           }
-          // Mark anomaly in summary log (retroactively or by index matching)
           const targetRow = summaryLog.find(r => r['Thr (dB)'] === validMeasurements[i].threshold);
           if (targetRow) {
             targetRow['Judgment'] += ' [Diff > 1.5kHz]';
@@ -2804,7 +2854,6 @@ export class BatCallDetector {
 
     // Output the summary table
     if (summaryLog.length > 0) {
-      // 獲取最終選定的頻率值用於顯示
       const finalFreq = optimalMeasurement ? optimalMeasurement.lowFreq_kHz : null;
       const freqText = finalFreq !== null ? ` | ${finalFreq.toFixed(2)} kHz` : '';
 
@@ -2823,7 +2872,7 @@ export class BatCallDetector {
     let returnEndFreq_Hz = optimalMeasurement.endFreq_Hz;
     let returnEndFreq_kHz = optimalMeasurement.endFreq_kHz;
 
-    // Safety Mechanism Re-calculation (If threshold was clamped due to safety limits)
+    // Safety Mechanism Re-calculation
     if (safeThreshold !== finalThreshold) {
       const lowFreqThreshold_dB_safe = stablePeakPower_dB + safeThreshold;
       let activeEndFrameIdx_safe = validPeakFrameIdx;
@@ -2861,7 +2910,6 @@ export class BatCallDetector {
       lowFreq_kHz: returnLowFreq_kHz,
       endFreq_Hz: returnEndFreq_Hz,
       endFreq_kHz: returnEndFreq_kHz,
-      // [NEW] 回傳最佳測量的結束幀，如果沒有則退回原點
       lowFreqFrameIdx: optimalMeasurement ? optimalMeasurement.endFrameIdx : validPeakFrameIdx,
       warning: hasWarning
     };
@@ -2946,11 +2994,9 @@ export class BatCallDetector {
   }
 
   /**
-   * Phase 2: Measure precise parameters
-   * Based on Avisoft SASLab Pro, SonoBat, Kaleidoscope Pro, and BatSound standards
-   * * [UPDATED 2025] Optimized Safety Re-scan Logic using helper methods.
-   * Updates call.peakFreq, startFreq, endFreq, characteristicFreq, bandwidth, duration
-   * Added zonalNoiseMap parameter
+   * Measure call parameters for a selected frequency range
+   * * [UPDATED 2026] Reordered Logic for Early Noise Rejection
+   * Order: Peak -> Inst. BW Check -> Low Freq Check -> High Freq -> Tracing -> Knee
    */
   measureFrequencyParameters(call, flowKHz, fhighKHz, freqBins, freqResolution, zonalNoiseMap = null) {
     let { highFreqThreshold_dB, characteristicFreq_percentEnd } = this.config;
@@ -2960,14 +3006,7 @@ export class BatCallDetector {
     if (spectrogram.length === 0) return;
 
     // ============================================================
-    // STEP 0: Find peak frequency FIRST (before auto-threshold calculation)
-    // 
-    // CRITICAL (2025 FIX): Must find actual call peak BEFORE auto-threshold mode
-    // so that findOptimalHighFrequencyThreshold can use stable call.peakPower_dB
-    // instead of spectrogram's global max (which varies with selection size)
-    // 
-    // Professional Standard: Use FFT + Parabolic Interpolation
-    // (aligned with Avisoft, SonoBat, Kaleidoscope, BatSound)
+    // STEP 0: Find peak frequency FIRST (Base Anchor)
     // ============================================================
     let peakFreq_Hz = null;
     let peakPower_dB = -Infinity;
@@ -2986,106 +3025,143 @@ export class BatCallDetector {
       }
     }
 
-    // Phase 2: Apply parabolic interpolation for sub-bin precision
-    // If peak is not at edges, interpolate between neighboring bins
+    // Phase 2: Parabolic Interpolation for Peak
     peakFreq_Hz = freqBins[peakBinIdx];
-
     if (peakBinIdx > 0 && peakBinIdx < spectrogram[peakFrameIdx].length - 1) {
       const framePower = spectrogram[peakFrameIdx];
       const db0 = framePower[peakBinIdx - 1];
       const db1 = framePower[peakBinIdx];
       const db2 = framePower[peakBinIdx + 1];
-
-      // Parabolic vertex formula: y = a*x^2 + b*x + c
-      // Peak position correction using 2nd derivative
       const a = (db2 - 2 * db1 + db0) / 2;
       if (Math.abs(a) > 1e-10) {
-        // bin correction = (f(x-1) - f(x+1)) / (4*a)
         const binCorrection = (db0 - db2) / (4 * a);
-        const refinedBin = peakBinIdx + binCorrection;
-        const binWidth = freqBins[1] - freqBins[0]; // Frequency distance between bins
+        const binWidth = freqBins[1] - freqBins[0];
         peakFreq_Hz = freqBins[peakBinIdx] + binCorrection * binWidth;
       }
     }
 
-    // Store peak values for use in auto-threshold calculation
-    // IMPORTANT: These values are NOW STABLE and don't depend on selection area size
     call.peakFreq_kHz = peakFreq_Hz / 1000;
     call.peakPower_dB = peakPower_dB;
 
-    // ============================================================
-    // Calculate peak frequency time in milliseconds
-    // ============================================================
+    // Calculate peak time
     if (peakFrameIdx < timeFrames.length) {
-      // Convert from seconds to milliseconds, using first frame as reference point (0 ms)
       const peakTimeInSeconds = timeFrames[peakFrameIdx];
       const firstFrameTimeInSeconds = timeFrames[0];
-      const relativeTime_ms = (peakTimeInSeconds - firstFrameTimeInSeconds) * 1000;
-      call.peakFreqTime_ms = relativeTime_ms;  // Time relative to selection area start
-
-      console.log(
-        `%c[Peak Freq] ${call.peakFreq_kHz.toFixed(2)}kHz  ${call.peakFreqTime_ms.toFixed(1)}ms  Frame ${peakFrameIdx}`,
-        'color: #00d2d3; font-weight: bold;'
-      );
+      call.peakFreqTime_ms = (peakTimeInSeconds - firstFrameTimeInSeconds) * 1000;
+      call.peakFrameIdx = peakFrameIdx; 
     }
 
-    // ============================================================
-    // [FIX] Auto High Pass Filter Injection
-    // 根據 Peak Freq 自動設定 High Pass Filter，影響後續 Start/Low Freq 判斷
-    // ============================================================
+    // Auto HPF Setup
     const autoCutoff = this.calculateAutoHighpassFilterFreq(call.peakFreq_kHz);
-
-    // 強制套用自動計算的 cutoff
     if (autoCutoff > 0) {
       this.config.enableHighpassFilter = true;
       this.config.highpassFilterFreq_kHz = autoCutoff;
     }
 
     // ============================================================
-    // STEP 2: AUTO MODE & High Frequency Setup
+    // [STEP 0.5] Instantaneous Bandwidth Check (Vertical Noise Filter)
+    // 第一道防線：檢查 Peak Frame 的「瞬時頻寬」。
+    // 蝙蝠 (Sweep) = 瞬時窄頻；噪音 (Click) = 瞬時寬頻。
     // ============================================================
-    let safeHighFreq_kHz = null;
-    let safeHighFreq_Hz = null;
-    let safeHighFreqBinIdx = undefined;
-    let safeHighFreqFrameIdx = 0;
-    let finalSearchLimitFrameFromAuto = 0;
-    let skipStep2HighFrequency = false;
-    let isCFCallDetected = false; // 2025 NEW: Flag for CF Call
+    if (spectrogram.length > 0) {
+        const peakFrameData = spectrogram[peakFrameIdx];
+        const threshold_dB = peakPower_dB - 12; // 檢查 Peak 下方 12dB 的寬度
+        
+        let minBin = peakFrameData.length;
+        let maxBin = 0;
+        let activeBinCount = 0;
 
-    // Always execute Optimal Threshold Search (Auto Mode)
-    const result = this.findOptimalHighFrequencyThreshold(
+        for (let b = 0; b < peakFrameData.length; b++) {
+            if (peakFrameData[b] > threshold_dB) {
+                if (b < minBin) minBin = b;
+                if (b > maxBin) maxBin = b;
+                activeBinCount++;
+            }
+        }
+
+        if (maxBin >= minBin) {
+            const instBandwidth_Hz = (maxBin - minBin) * freqResolution;
+            const instBandwidth_kHz = instBandwidth_Hz / 1000;
+
+            // 閾值：如果單一 Frame 內能量橫跨超過 15kHz，判定為垂直噪音
+            if (instBandwidth_kHz > 15.0) {
+                console.warn(`%c[Noise Reject] Vertical Click Detected! Instant BW: ${instBandwidth_kHz.toFixed(1)}kHz. Discarding early.`, 
+                'color: red; font-weight: bold;');
+                call.isDiscarded = true;
+                return; // <--- 立即停止
+            }
+        }
+    }
+
+    // ============================================================
+    // [STEP 1] Low Frequency Check (Bottoming Out Filter)
+    // 第二道防線：檢查是否觸底 (<10kHz)
+    // 這裡我們先用 spectrogram 的最後一幀作為結束點進行快速掃描
+    // ============================================================
+    const roughEndFrameIdx = spectrogram.length - 1;
+
+    // 執行 Low Frequency 檢測
+    const resultLow = this.findOptimalLowFrequencyThreshold(
       spectrogram,
       timeFrames,
       freqBins,
       flowKHz,
       fhighKHz,
-      peakPower_dB,  // Pass stable call peak value instead of computing global peak again
-      peakFrameIdx,  // Pass peak frame index to only check frames before peak
-      zonalNoiseMap  // [NEW] Pass the pre-calculated map
+      peakPower_dB,
+      peakFrameIdx,
+      roughEndFrameIdx,
+      zonalNoiseMap 
     );
 
-    // Capture CF Detection Result
-    isCFCallDetected = result.isCFStablePattern;
-    if (isCFCallDetected) {
-      console.log('[Detector] CF Call Species Pattern Detected (Stable High Freq)');
+    // 檢查是否為噪音 (觸底 10kHz)
+    if (resultLow.discard) {
+        call.isDiscarded = true;
+        // console.log('[Noise Reject] Call discarded by Low Freq check (<10kHz).');
+        return; // <--- 立即停止，不執行 High Freq 和其他測量
     }
 
-    safeHighFreq_kHz = result.highFreq_kHz;
-    safeHighFreq_Hz = result.highFreq_Hz;
-    safeHighFreqBinIdx = result.highFreqBinIdx;  
-    safeHighFreqFrameIdx = result.highFreqFrameIdx; 
-    finalSearchLimitFrameFromAuto = result.finalSearchLimitFrame; 
-    let usedThreshold = result.threshold;
+    // 暫存 Low Freq 結果，稍後整合
+    let safeLowFreq_kHz = resultLow.lowFreq_kHz;
+    let safeEndFreq_kHz = resultLow.endFreq_kHz;
+    let usedThresholdLow = resultLow.threshold;
 
-      // ============================================================
-      // [OPTIMIZED 2025] High Freq Safety Re-scan
-      // 如果最優閾值的 High Frequency 低於 Peak Frequency，執行防呆檢查
-      // ============================================================
-      if (result.highFreq_kHz !== null && result.highFreq_kHz < (peakFreq_Hz / 1000)) {
+
+    // ============================================================
+    // STEP 2: High Frequency Search (Expensive Operation)
+    // 只有通過上述兩道防線，才執行這裡
+    // ============================================================
+    let safeHighFreq_kHz = null;
+    let safeHighFreqHz = null;
+    let safeHighFreqFrameIdx = 0;
+    let safeHighFreqBinIdx = 0;
+    let usedThresholdHigh = -24;
+    let finalSearchLimitFrameFromAuto = 0;
+    let isCFCallDetected = false;
+
+    const resultHigh = this.findOptimalHighFrequencyThreshold(
+      spectrogram,
+      timeFrames,
+      freqBins,
+      flowKHz,
+      fhighKHz,
+      peakPower_dB,
+      peakFrameIdx,
+      zonalNoiseMap
+    );
+
+    safeHighFreq_kHz = resultHigh.highFreq_kHz;
+    safeHighFreqHz = resultHigh.highFreq_Hz;
+    safeHighFreqFrameIdx = resultHigh.highFreqFrameIdx;
+    safeHighFreqBinIdx = resultHigh.highFreqBinIdx;
+    usedThresholdHigh = resultHigh.threshold;
+    finalSearchLimitFrameFromAuto = resultHigh.finalSearchLimitFrame;
+    isCFCallDetected = resultHigh.isCFStablePattern;
+
+    // --- High Freq Safety Re-scan ---
+    if (resultHigh.highFreq_kHz !== null && resultHigh.highFreq_kHz < (peakFreq_Hz / 1000)) {
         const peakFreq_kHz = peakFreq_Hz / 1000;
         
-        // 1. [PERFORMANCE FIX] Pre-calculate Max Spectrum ONCE
-        // 構建 finalSearchLimitFrameFromAuto 範圍內的 Max Spectrum
+        // Pre-calculate Max Spectrum ONCE
         const numBins = spectrogram[0].length;
         const testMaxSpectrum = new Float32Array(numBins).fill(-Infinity);
         const testFrameIndexForBin = new Uint16Array(numBins);
@@ -3100,239 +3176,93 @@ export class BatCallDetector {
           }
         }
 
-        // 2. Scan Thresholds from -24 to -100
+        // Scan Thresholds from -24 to -100
         for (let testThreshold_dB = -24; testThreshold_dB >= -100; testThreshold_dB--) {
           const highFreqThreshold_dB = peakPower_dB + testThreshold_dB;
-
-          // 3. Use Helper to Scan Max Spectrum (High to Low)
           const scanRes = this._scanSpectrumForFrequency(testMaxSpectrum, freqBins, highFreqThreshold_dB, 'HighToLow');
 
-          // 如果找到有效的 High Frequency，檢查是否 >= Peak Frequency
           if (scanRes && (scanRes.freq_Hz / 1000) >= peakFreq_kHz) {
-            safeHighFreq_Hz = scanRes.freq_Hz;
+            safeHighFreqHz = scanRes.freq_Hz;
             safeHighFreq_kHz = scanRes.freq_Hz / 1000;
             safeHighFreqBinIdx = scanRes.binIdx;
-            safeHighFreqFrameIdx = testFrameIndexForBin[scanRes.binIdx]; // Retrieve frame index
-            usedThreshold = testThreshold_dB;
-            break; // Found valid, stop
+            safeHighFreqFrameIdx = testFrameIndexForBin[scanRes.binIdx];
+            usedThresholdHigh = testThreshold_dB;
+            break; 
           }
         }
-      }
+    }
 
-    // Update the config with the calculated optimal threshold
-    this.config.highFreqThreshold_dB = usedThreshold;
-    call.highFreqThreshold_dB_used = usedThreshold;
-
-    // ============================================================
-    // 2025 NEW: DIRECT ASSIGNMENT - Trust Auto Mode Result
-    // If Auto Mode found a valid high frequency, assign it directly
-    // ============================================================
+    // 設定 High Frequency 參數
+    this.config.highFreqThreshold_dB = usedThresholdHigh;
+    call.highFreqThreshold_dB_used = usedThresholdHigh;
+    
+    // Assign Result
+    let highFreq_Hz = 0;
     if (safeHighFreq_kHz !== null) {
       call.highFreq_kHz = safeHighFreq_kHz;
       call.highFreqFrameIdx = safeHighFreqFrameIdx;
-
-      // Calculate high frequency time immediately
-      const firstFrameTimeInSeconds = timeFrames[0];
+      highFreq_Hz = safeHighFreqHz;
+      
+      // Calculate Time
       if (safeHighFreqFrameIdx < timeFrames.length) {
-        const highFreqTimeInSeconds = timeFrames[safeHighFreqFrameIdx];
-        call.highFreqTime_ms = (highFreqTimeInSeconds - firstFrameTimeInSeconds) * 1000;
-      } else {
-        call.highFreqTime_ms = 0;
+         call.highFreqTime_ms = (timeFrames[safeHighFreqFrameIdx] - timeFrames[0]) * 1000;
       }
-
-      // Flag to skip Step 2 re-calculation
-      skipStep2HighFrequency = true;
+    } else {
+      // Fallback
+       highFreq_Hz = fhighKHz * 1000;
+       call.highFreq_kHz = fhighKHz;
+       call.highFreqFrameIdx = 0;
+       call.highFreqTime_ms = 0;
     }
 
     // ============================================================
-    // STEP 1.5: 重新計算時間邊界 (基於新的 highFreqThreshold_dB)
-    // 
-    // Standard approach: Use energy threshold to find start and end
+    // STEP 2.5: Start Frequency & Time Boundary Tracing
     // ============================================================
     
-    const highThreshold_dB = peakPower_dB + this.config.highFreqThreshold_dB;
-
-    // ============================================================
-    // End & Low Frequency Threshold Setup
-    // ============================================================
-    // Always use fixed offset for time boundary detection (Auto Mode)
-    const endThreshold_dB = peakPower_dB - 27;
-
-    // 找到第一個幀，其中有信號超過閾值
+    // Recalculate Time Boundaries based on used High Threshold
+    const highThreshold_dB = peakPower_dB + usedThresholdHigh;
     let newStartFrameIdx = 0;
     for (let frameIdx = 0; frameIdx < spectrogram.length; frameIdx++) {
       const framePower = spectrogram[frameIdx];
       let frameHasSignal = false;
       for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-        if (framePower[binIdx] > highThreshold_dB) {
-          frameHasSignal = true;
-          break;
-        }
+        if (framePower[binIdx] > highThreshold_dB) { frameHasSignal = true; break; }
       }
-      if (frameHasSignal) {
-        newStartFrameIdx = frameIdx;
-        break;
-      }
+      if (frameHasSignal) { newStartFrameIdx = frameIdx; break; }
     }
-
-    // Find end frame using standard forward scanning method
-    let newEndFrameIdx = spectrogram.length - 1;
-
-    for (let frameIdx = spectrogram.length - 1; frameIdx >= 0; frameIdx--) {
-      const framePower = spectrogram[frameIdx];
-      let frameHasSignal = false;
-      for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-        if (framePower[binIdx] > endThreshold_dB) {
-          frameHasSignal = true;
-          break;
-        }
-      }
-      if (frameHasSignal) {
-        newEndFrameIdx = frameIdx;
-        break;
-      }
-    }
-
-    // 更新時間邊界
+    
     if (newStartFrameIdx < timeFrames.length) {
       call.startTime_s = timeFrames[newStartFrameIdx];
     }
-    if (newEndFrameIdx < timeFrames.length - 1) {
-      call.endTime_s = timeFrames[Math.min(newEndFrameIdx + 1, timeFrames.length - 1)];
-    }
 
-    // STEP 2: Calculate HIGH FREQUENCY from entire spectrogram (MANUAL MODE FALLBACK)
-    // ============================================================
-    let highFreq_Hz = 0;
-    let highFreqBinIdx = 0;
-    let highFreqFrameIdx = -1; 
-
-    // Sync from Auto Mode results if we are skipping
-    if (skipStep2HighFrequency) {
-      highFreq_Hz = safeHighFreq_Hz;
-      highFreqBinIdx = safeHighFreqBinIdx;
-      highFreqFrameIdx = safeHighFreqFrameIdx;
-    }
-
-    if (!skipStep2HighFrequency) {
-      // 2025 v2: 使用 AUTO MODE 返回的 finalSearchLimitFrame
-      const highFreqScanLimit = (finalSearchLimitFrameFromAuto > 0)
-        ? Math.min(finalSearchLimitFrameFromAuto, spectrogram.length - 1)
-        : Math.min(peakFrameIdx, spectrogram.length - 1);
-
-      for (let frameIdx = 0; frameIdx <= highFreqScanLimit; frameIdx++) {
-        const framePower = spectrogram[frameIdx];
-        // Search from high to low frequency (reverse order)
-        for (let binIdx = framePower.length - 1; binIdx >= 0; binIdx--) {
-          if (framePower[binIdx] > highThreshold_dB) {
-            // Found first bin above threshold in this frame
-            const testHighFreq_Hz = freqBins[binIdx];
-
-            // 2025 FIX: Anti-Rebounce Priority
-            // We want the HIGHEST frequency, but if multiple frames have the same High Freq,
-            // we MUST pick the FIRST one (lowest Time) to avoid picking up a later rebounce.
-            if (highFreqFrameIdx === -1 || testHighFreq_Hz > highFreq_Hz) {
-              highFreq_Hz = testHighFreq_Hz;
-              highFreqBinIdx = binIdx;
-              highFreqFrameIdx = frameIdx;
-
-              // Linear Interpolation
-              if (binIdx < framePower.length - 1) {
-                const thisPower = framePower[binIdx];
-                const nextPower = framePower[binIdx + 1];
-
-                if (nextPower < highThreshold_dB && thisPower > highThreshold_dB) {
-                  const powerRatio = (thisPower - highThreshold_dB) / (thisPower - nextPower);
-                  const freqDiff = freqBins[binIdx + 1] - freqBins[binIdx];
-                  highFreq_Hz = freqBins[binIdx] + powerRatio * freqDiff;
-                }
-              }
-            }
-            break;  // Move to next frame after finding first bin in this frame
-          }
-        }
-      }
-    }
-
-    if (!skipStep2HighFrequency) {
-      // Safety fallback
-      if (highFreqFrameIdx === -1) {
-        highFreq_Hz = fhighKHz * 1000;
-        highFreqFrameIdx = 0;
-      }
-
-      call.highFreq_kHz = highFreq_Hz / 1000;
-      call.highFreqFrameIdx = highFreqFrameIdx;
-
-      // Calculate high frequency time
-      const firstFrameTimeInSeconds = timeFrames[0];
-      let highFreqTime_ms = 0;
-      if (highFreqFrameIdx < timeFrames.length) {
-        const highFreqTimeInSeconds = timeFrames[highFreqFrameIdx];
-        highFreqTime_ms = (highFreqTimeInSeconds - firstFrameTimeInSeconds) * 1000;
-      }
-      call.highFreqTime_ms = highFreqTime_ms;
-
-      // Manual mode threshold recording
-      const highFreqThreshold_dB_used_manual = highThreshold_dB - peakPower_dB;
-      call.highFreqThreshold_dB_used = highFreqThreshold_dB_used_manual;
-    }
-
-    // ============================================================
-    // STEP 2.5: Calculate START FREQUENCY (Optimized 2025)
-    // ============================================================
+    // Start Frequency Tracing Logic
     let validStartFreq_Hz = highFreq_Hz;
-    let validStartBinIdx = highFreqBinIdx;
-    let validStartFrameIdx = highFreqFrameIdx;
+    let validStartBinIdx = safeHighFreqBinIdx;
+    let validStartFrameIdx = safeHighFreqFrameIdx;
 
     let performStartFreqTracing = true;
-    let startFreqThreshold_dB = (call.highFreqThreshold_dB_used !== null)
-      ? peakPower_dB + call.highFreqThreshold_dB_used
-      : peakPower_dB + this.config.highFreqThreshold_dB;
-
-    let highFreqPointPower_dB = -Infinity;
-    if (highFreqFrameIdx >= 0 && highFreqFrameIdx < spectrogram.length &&
-      highFreqBinIdx >= 0 && highFreqBinIdx < spectrogram[highFreqFrameIdx].length) {
-      highFreqPointPower_dB = spectrogram[highFreqFrameIdx][highFreqBinIdx];
-    }
+    let startFreqThreshold_dB = peakPower_dB + usedThresholdHigh;
 
     // Logic Flow for Start Freq Tracing
     if (isCFCallDetected) {
       performStartFreqTracing = true;
       startFreqThreshold_dB = peakPower_dB - 35;
     } else {
-      if (highFreqPointPower_dB < (peakPower_dB - 30)) {
-        performStartFreqTracing = false;
-      }
-      if (highFreqPointPower_dB < -80) {
-        performStartFreqTracing = false;
-      }
+       // Simple check if high freq point is strong enough to trace
+       if (safeHighFreqFrameIdx < spectrogram.length) {
+           const p = spectrogram[safeHighFreqFrameIdx][safeHighFreqBinIdx];
+           if (p < (peakPower_dB - 30) || p < -80) performStartFreqTracing = false;
+       }
     }
 
-    const traceLog = [];
-
-    // Perform Back-tracking Trace
-    if (performStartFreqTracing) {
-      let currentTrackBinIdx = highFreqBinIdx;
+    if (performStartFreqTracing && safeHighFreqFrameIdx > 0) {
+      let currentTrackBinIdx = safeHighFreqBinIdx;
       const maxJumpHz = 2000;
       const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
       const numBins = freqBins.length;
 
-      if (highFreqFrameIdx < timeFrames.length) {
-        traceLog.push({
-          'Frame': highFreqFrameIdx,
-          'Time (s)': timeFrames[highFreqFrameIdx].toFixed(4),
-          'Freq (kHz)': (highFreq_Hz / 1000).toFixed(2),
-          'Power (dB)': highFreqPointPower_dB.toFixed(1),
-          'Status': 'Start Point (High Freq)'
-        });
-      }
-
-      if (highFreqFrameIdx > 0) {
-        for (let f = highFreqFrameIdx - 1; f >= 0; f--) {
+      for (let f = safeHighFreqFrameIdx - 1; f >= 0; f--) {
           const framePower = spectrogram[f];
-          const frameTime = timeFrames[f];
-
           const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
           const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
 
@@ -3346,43 +3276,25 @@ export class BatCallDetector {
             }
           }
 
-          let traceFreq_kHz = (bestBin >= 0) ? (freqBins[bestBin] / 1000) : 0;
-          let status = 'Scanning';
-
           if (bestPower > startFreqThreshold_dB) {
             currentTrackBinIdx = bestBin;
             validStartBinIdx = bestBin;
             validStartFrameIdx = f;
             validStartFreq_Hz = freqBins[bestBin];
-
+            
             // Linear Interpolation
             if (bestBin > 0 && bestBin < numBins - 1) {
               const prevP = framePower[bestBin - 1];
               const nextP = framePower[bestBin + 1];
               if (bestPower > prevP && bestPower > nextP) {
-                const powerRatio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
+                const ratio = (bestPower - startFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
                 const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
-                validStartFreq_Hz = freqBins[bestBin] + (powerRatio * freqDiff * (prevP < nextP ? 1 : -1));
-                traceFreq_kHz = validStartFreq_Hz / 1000;
+                validStartFreq_Hz = freqBins[bestBin] + (ratio * freqDiff * (prevP < nextP ? 1 : -1));
               }
             }
-            status = 'Linked';
           } else {
-            status = 'Gap/Stop';
+            break; // Gap found
           }
-
-          traceLog.push({
-            'Frame': f,
-            'Time (s)': frameTime.toFixed(4),
-            'Freq (kHz)': traceFreq_kHz.toFixed(2),
-            'Power (dB)': bestPower.toFixed(1),
-            'Status': status
-          });
-
-          if (status === 'Gap/Stop') {
-            break;
-          }
-        }
       }
     }
 
@@ -3397,184 +3309,60 @@ export class BatCallDetector {
       call.startFreq_ms = (call.startFreqTime_s - firstFrameTime_s) * 1000;
     }
 
-    if (traceLog.length > 0) {
-      const finalFreq = call.startFreq_kHz;
-      const freqText = finalFreq !== null ? ` | Final: ${finalFreq.toFixed(2)} kHz @ ${(call.startFreqTime_s).toFixed(4)}s` : '';
-      console.groupCollapsed(`[Start Freq] Trace Summary (Threshold: ${startFreqThreshold_dB.toFixed(1)} dB${freqText})`);
-      console.table(traceLog);
-      console.groupEnd();
-    }
-
 
     // ============================================================
-    // STEP 3: Calculate LOW FREQUENCY from last frame
-    // 2025 ENHANCED PRECISION: Linear interpolation with anti-rebounce support
+    // STEP 3: Finalize Low & End Frequencies (Apply Step 1 Result)
     // ============================================================
-    const endFrameIdx_forLowFreq = Math.min(newEndFrameIdx, spectrogram.length - 1);
-    call.endFrameIdx_forLowFreq = endFrameIdx_forLowFreq;
-    const lastFramePower = spectrogram[endFrameIdx_forLowFreq];
-    const lastFrameTime_s = timeFrames[endFrameIdx_forLowFreq];
-    let lowFreq_Hz = flowKHz * 1000; 
-
-    // [OPTIMIZED] Use Helper to scan last frame for Low Freq (Manual Mode default)
-    const manualScanRes = this._scanSpectrumForFrequency(lastFramePower, freqBins, endThreshold_dB, 'LowToHigh');
-    if (manualScanRes) {
-        lowFreq_Hz = manualScanRes.freq_Hz;
-    }
-
-    // ============================================================
-    // END FREQUENCY CALCULATION
-    // ============================================================
-    let endFreq_kHz = lowFreq_Hz / 1000;
-    call.endFreq_kHz = endFreq_kHz;
-    call.endFreqTime_s = lastFrameTime_s;
-
-    // Calculate Duration
-    if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
-      call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
-    }
-
-    // Calculate low and end frequency times in milliseconds
-    const firstFrameTimeInSeconds_low = timeFrames[0];
-    const lastFrameTime_ms = (lastFrameTime_s - firstFrameTimeInSeconds_low) * 1000;
-    call.lowFreq_ms = lastFrameTime_ms;
-    call.endFreq_ms = lastFrameTime_ms;
-    call.lowFreqFrameIdx = endFrameIdx_forLowFreq;
-    call.lowFreqThreshold_dB_used = endThreshold_dB - peakPower_dB;
-
-    let lowFreq_kHz = lowFreq_Hz / 1000;
-
-    // ============================================================
-    // AUTO MODE: Low Frequency Threshold
-    // ============================================================
-    // Always execute Optimal Low Freq Search
-    const resultLow = this.findOptimalLowFrequencyThreshold(
-      spectrogram,
-      timeFrames,
-      freqBins,
-      flowKHz,
-      fhighKHz,
-      peakPower_dB,
-      peakFrameIdx,
-      endFrameIdx_forLowFreq,
-      zonalNoiseMap 
-    );
-
-    let safeLowFreq_kHz = resultLow.lowFreq_kHz;
-    let safeEndFreq_kHz = resultLow.endFreq_kHz;
-    usedThreshold = resultLow.threshold;
-
-    // ============================================================
-    // [OPTIMIZED 2025] Low Freq Safety Re-scan
-    // 如果最優閾值的 Low Frequency 高於 Peak Frequency，執行防呆檢查
-    // ============================================================
-    if (resultLow.lowFreq_kHz !== null && resultLow.lowFreq_kHz > (peakFreq_Hz / 1000)) {
-      const peakFreq_kHz = peakFreq_Hz / 1000;
-      const lastFramePowerForTest = spectrogram[spectrogram.length - 1];
-
-      // 重新測試閾值範圍
-      for (let testThreshold_dB = -24; testThreshold_dB >= -100; testThreshold_dB--) {
-        const lowFreqThreshold_dB = peakPower_dB + testThreshold_dB;
-
-        // Use Helper to scan Low to High
-        const scanRes = this._scanSpectrumForFrequency(lastFramePowerForTest, freqBins, lowFreqThreshold_dB, 'LowToHigh');
-        
-        if (scanRes && (scanRes.freq_Hz / 1000) <= peakFreq_kHz) {
-          safeLowFreq_kHz = scanRes.freq_Hz / 1000;
-          safeEndFreq_kHz = safeLowFreq_kHz; // End freq = low freq
-          usedThreshold = testThreshold_dB;
-          break; // Found valid
+    this.config.lowFreqThreshold_dB = usedThresholdLow;
+    call.lowFreqThreshold_dB_used = usedThresholdLow;
+    call.lowFreq_kHz = safeLowFreq_kHz;
+    call.endFreq_kHz = safeEndFreq_kHz;
+    
+    // Update Low Freq Time/Frame based on resultLow
+    if (resultLow.lowFreqFrameIdx !== null) {
+        call.lowFreqFrameIdx = resultLow.lowFreqFrameIdx;
+        call.endFrameIdx_forLowFreq = resultLow.lowFreqFrameIdx;
+        if (resultLow.lowFreqFrameIdx < timeFrames.length) {
+            call.endFreqTime_s = timeFrames[resultLow.lowFreqFrameIdx];
+            call.lowFreq_ms = (call.endFreqTime_s - timeFrames[0]) * 1000;
+            call.endFreq_ms = call.lowFreq_ms;
+            
+            // Update End Time Boundary
+            call.endTime_s = timeFrames[Math.min(resultLow.lowFreqFrameIdx + 1, timeFrames.length - 1)];
         }
-      }
     }
-
-    // Update the config with the calculated optimal threshold
-    // 2025 SAFETY MECHANISM: 應用安全機制 - 如果 usedThreshold 達到 -100，改用 -30
-    const finalSafeThresholdLow = (usedThreshold <= -100) ? -30 : usedThreshold;
-    this.config.lowFreqThreshold_dB = finalSafeThresholdLow;
-    call.lowFreqThreshold_dB_used = finalSafeThresholdLow;
-
-    // 如果安全機制改變了閾值，使用新閾值重新計算 lowFreq_Hz
-    if (finalSafeThresholdLow !== usedThreshold) {
-      const lastFramePowerForSafe = spectrogram[spectrogram.length - 1];
-      const lowFreqThreshold_dB_safe = peakPower_dB + finalSafeThresholdLow;
-
-      const safeScanRes = this._scanSpectrumForFrequency(lastFramePowerForSafe, freqBins, lowFreqThreshold_dB_safe, 'LowToHigh');
-      if (safeScanRes) {
-         safeLowFreq_kHz = safeScanRes.freq_Hz / 1000;
-         safeEndFreq_kHz = safeLowFreq_kHz;
-      }
-    }
-
-    lowFreq_kHz = safeLowFreq_kHz;
-    endFreq_kHz = safeEndFreq_kHz; // Declare locally since we are in the block
-
-    // Auto mode: End Frequency = Auto-calculated Low Frequency
-    call.endFreq_kHz = endFreq_kHz;
-
-    // Sync Time & Duration with Auto-Detected End Frame
-    if (resultLow.lowFreqFrameIdx !== undefined && resultLow.lowFreqFrameIdx !== null) {
-      const newAutoEndFrameIdx = resultLow.lowFreqFrameIdx;
-      call.endFrameIdx_forLowFreq = newAutoEndFrameIdx;
-      call.lowFreqFrameIdx = newAutoEndFrameIdx;
-
-      if (newAutoEndFrameIdx < timeFrames.length) {
-        call.endFreqTime_s = timeFrames[newAutoEndFrameIdx];
-      }
-
-      const firstFrameTime = timeFrames[0];
-      const newEndTime_ms = (call.endFreqTime_s - firstFrameTime) * 1000;
-      call.lowFreq_ms = newEndTime_ms;
-      call.endFreq_ms = newEndTime_ms;
-
-      if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
+    
+    // Duration Update
+    if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
         call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
-      }
     }
 
-    // ============================================================
-    // LOW FREQUENCY OPTIMIZATION: Compare with Start Frequency
-    // ============================================================
-    if (startFreq_kHz !== null && startFreq_kHz < lowFreq_kHz) {
-      lowFreq_kHz = startFreq_kHz;
+    // Optimization: Compare Low with Start
+    if (call.startFreq_kHz !== null && call.startFreq_kHz < call.lowFreq_kHz) {
+      call.lowFreq_kHz = call.startFreq_kHz;
     }
 
-    call.lowFreq_kHz = lowFreq_kHz;
 
     // ============================================================
-    // STEP 4: Calculate characteristic frequency (CF-FM distinction)
+    // STEP 4: Characteristic Frequency
     // ============================================================
-    const charFreqSearchEnd = endFrameIdx_forLowFreq;
+    const charFreqSearchEnd = call.endFrameIdx_forLowFreq || (spectrogram.length - 1);
     const lastPercentStart = Math.floor(newStartFrameIdx + (charFreqSearchEnd - newStartFrameIdx) * (1 - 0.40));
     let characteristicFreq_Hz = peakFreq_Hz;
     let characteristicFreq_FrameIdx = 0;
 
     if (lastPercentStart < charFreqSearchEnd) {
       const frameFrequencies = []; 
-      let timeFrameDelta_ms = 0;
-
-      if (timeFrames.length > 1) {
-        timeFrameDelta_ms = (timeFrames[1] - timeFrames[0]) * 1000;
-      }
+      let timeFrameDelta_ms = (timeFrames.length > 1) ? (timeFrames[1] - timeFrames[0]) * 1000 : 0;
 
       for (let frameIdx = Math.max(0, lastPercentStart); frameIdx <= charFreqSearchEnd; frameIdx++) {
         const framePower = spectrogram[frameIdx];
         let maxPower_dB = -Infinity;
         let peakBin = 0;
-
         for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-          if (framePower[binIdx] > maxPower_dB) {
-            maxPower_dB = framePower[binIdx];
-            peakBin = binIdx;
-          }
+          if (framePower[binIdx] > maxPower_dB) { maxPower_dB = framePower[binIdx]; peakBin = binIdx; }
         }
-
-        frameFrequencies.push({
-          frameIdx: frameIdx,
-          freq_Hz: freqBins[peakBin],
-          power_dB: maxPower_dB,
-          slope_kHz_per_ms: null 
-        });
+        frameFrequencies.push({ frameIdx: frameIdx, freq_Hz: freqBins[peakBin], power_dB: maxPower_dB, slope_kHz_per_ms: null });
       }
 
       for (let i = 0; i < frameFrequencies.length - 1; i++) {
@@ -3586,94 +3374,56 @@ export class BatCallDetector {
 
       let minSlope = Infinity;
       let charFreqFrameIdx = lastPercentStart;
-
       for (let i = 0; i < frameFrequencies.length; i++) {
         const point = frameFrequencies[i];
-        if (point.slope_kHz_per_ms !== null) {
-          const absSlope = Math.abs(point.slope_kHz_per_ms);
-          if (absSlope < minSlope) {
-            minSlope = absSlope;
-            charFreqFrameIdx = i;
-          }
+        if (point.slope_kHz_per_ms !== null && Math.abs(point.slope_kHz_per_ms) < minSlope) {
+          minSlope = Math.abs(point.slope_kHz_per_ms);
+          charFreqFrameIdx = i;
         }
       }
-
+      
       if (charFreqFrameIdx < frameFrequencies.length) {
-        const cfPoint = frameFrequencies[charFreqFrameIdx];
-        characteristicFreq_Hz = cfPoint.freq_Hz;
-        characteristicFreq_FrameIdx = cfPoint.frameIdx;
-      }
-
-      if (characteristicFreq_Hz === peakFreq_Hz) {
-        let totalPower = 0;
-        let weightedFreq = 0;
-        let weightedFrameIdx = 0;
-        let totalFrameWeight = 0;
-
-        for (let frameIdx = Math.max(0, lastPercentStart); frameIdx <= charFreqSearchEnd; frameIdx++) {
-          const framePower = spectrogram[frameIdx];
-          let frameMax = -Infinity;
-          for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-            frameMax = Math.max(frameMax, framePower[binIdx]);
-          }
-
-          const significantThreshold = frameMax - 6;
-          for (let binIdx = 0; binIdx < framePower.length; binIdx++) {
-            const power = framePower[binIdx];
-            if (power > significantThreshold) {
-              const linearPower = Math.pow(10, power / 10);
-              totalPower += linearPower;
-              weightedFreq += linearPower * freqBins[binIdx];
-              weightedFrameIdx += linearPower * frameIdx;
-              totalFrameWeight += linearPower;
-            }
-          }
-        }
-
-        if (totalPower > 0) {
-          characteristicFreq_Hz = weightedFreq / totalPower;
-          characteristicFreq_FrameIdx = Math.round(weightedFrameIdx / totalFrameWeight);
-        }
+          characteristicFreq_Hz = frameFrequencies[charFreqFrameIdx].freq_Hz;
+          characteristicFreq_FrameIdx = frameFrequencies[charFreqFrameIdx].frameIdx;
       }
     }
 
     call.characteristicFreq_kHz = characteristicFreq_Hz / 1000;
-
     if (characteristicFreq_FrameIdx < timeFrames.length) {
-      const charFreqTime_s = timeFrames[characteristicFreq_FrameIdx];
-      const firstFrameTimeInSeconds_char = timeFrames[0];
-      call.characteristicFreq_ms = (charFreqTime_s - firstFrameTimeInSeconds_char) * 1000; 
+      call.characteristicFreq_ms = (timeFrames[characteristicFreq_FrameIdx] - timeFrames[0]) * 1000; 
     }
+    
+    // Validate Characteristic Freq
+    if (call.characteristicFreq_kHz < call.lowFreq_kHz) call.characteristicFreq_kHz = call.lowFreq_kHz;
+    else if (call.characteristicFreq_kHz > call.peakFreq_kHz) call.characteristicFreq_kHz = call.peakFreq_kHz;
 
     // ============================================================
-    // STEP 5: Validate frequency relationships
+    // STEP 5: Bandwidth & Validation
     // ============================================================
-    const lowFreqKHz = lowFreq_Hz / 1000;
-    const charFreqKHz = characteristicFreq_Hz / 1000;
-    const peakFreqKHz = peakFreq_Hz / 1000;
-    const highFreqKHz = highFreq_Hz / 1000;
-
-    if (charFreqKHz < lowFreqKHz) {
-      call.characteristicFreq_kHz = lowFreqKHz;
-    } else if (charFreqKHz > peakFreqKHz) {
-      call.characteristicFreq_kHz = peakFreqKHz;
-    }
-
     call.calculateBandwidth();
 
+    // Secondary Noise Check (Time Tilt - Vertical Streak)
+    if (call.bandwidth_kHz !== null && call.highFreqTime_ms !== null && call.lowFreq_ms !== null) {
+        const timeTilt_ms = Math.abs(call.lowFreq_ms - call.highFreqTime_ms);
+        if (call.bandwidth_kHz > 20 && timeTilt_ms < 1.5) {
+            console.warn(`%c[Noise Reject] Vertical Click (Secondary)! BW: ${call.bandwidth_kHz.toFixed(1)}kHz. Discarding.`, 'color: red; background: #ffeaea;');
+            call.isDiscarded = true;
+            return;
+        }
+    }
+
     // ============================================================
-    // STEP 6: Calculate Knee Frequency and Knee Time
-    // [2025 FIXED] Search Constraints & Absolute Time Storage
+    // STEP 6: Calculate Knee Frequency and Knee Time (FULL CODE)
     // ============================================================
     
     // 1. Time Constraints
-    // [CRITICAL FIX] Ensure we DO NOT search before the detected Start Frequency
     let searchStartFrame = Math.max(0, newStartFrameIdx);
     if (call.startFreqFrameIdx !== null && call.startFreqFrameIdx > searchStartFrame) {
         searchStartFrame = call.startFreqFrameIdx;
     }
 
-    const searchEndFrame = Math.min(spectrogram.length - 1, newEndFrameIdx);
+    // Use rough end frame derived from low freq result or spectrogram end
+    const searchEndFrame = Math.min(spectrogram.length - 1, call.endFrameIdx_forLowFreq || (spectrogram.length - 1));
     const searchDurationFrames = searchEndFrame - searchStartFrame + 1;
 
     // 2. Frequency Constraints (+/- 1kHz Buffer)
@@ -3689,8 +3439,6 @@ export class BatCallDetector {
     for (let b = freqBins.length - 1; b >= 0; b--) {
       if (freqBins[b] <= constraintMaxFreq_Hz) { maxBinIdx = b; break; }
     }
-
-    // console.log(`[Knee Search] Range: Frames ${searchStartFrame}-${searchEndFrame}, Freq ${constraintMinFreq_Hz.toFixed(0)}-${constraintMaxFreq_Hz.toFixed(0)} Hz`);
 
     const contourKHz = []; 
     const validFrameIndices = []; 
@@ -3719,7 +3467,7 @@ export class BatCallDetector {
     }
 
     if (contourKHz.length < 5) {
-       console.log('[Knee Search] Too few points, skipping.');
+       // console.log('[Knee Search] Too few points, skipping.');
        call.kneeTime_ms = null;
        call.kneeFreq_kHz = null;
     } else {
@@ -3763,14 +3511,8 @@ export class BatCallDetector {
         const outgoingSlope = firstDerivatives[localIndex];
         
         if (incomingSlope === null || outgoingSlope === null) return false;
-
-        // Thresholds for kHz/ms units:
-        // Pipistrellus FM sweep can be steep, e.g., dropping 20kHz in 2ms = -10.
-        // So we allow slopes down to -50 (very steep).
-        // But we need to ensure it IS an FM sweep entering (negative slope).
         
         const MIN_INCOMING_STEEPNESS = -0.5; // Must be at least this steep to be FM
-        const STEEP_NEGATIVE_THRESHOLD = -100; // Sanity check for glitch
 
         // 1. Direction check: Must be downward FM (negative slope)
         if (incomingSlope > 0) return false; 
@@ -3779,8 +3521,6 @@ export class BatCallDetector {
         if (incomingSlope > MIN_INCOMING_STEEPNESS) return false; // Too flat, not FM
 
         // 3. Knee Shape check: Outgoing must be flatter than Incoming
-        // Since both are negative, |Incoming| > |Outgoing|
-        // e.g., Incoming -10, Outgoing -1. |-10| > |-1|.
         const incomingAbs = Math.abs(incomingSlope);
         const outgoingAbs = Math.abs(outgoingSlope);
         
@@ -3798,7 +3538,7 @@ export class BatCallDetector {
         const df_dt = firstDerivatives[localFreqIdx-1]; 
         const d2f_dt2 = secondDerivatives[i];
         
-        // Math using kHz/ms scales - Result will be non-zero now!
+        // Math using kHz/ms scales
         const denominator = Math.pow(1 + df_dt * df_dt, 1.5);
         const curvature = Math.abs(d2f_dt2) / (denominator + 1e-10); 
 
@@ -3808,20 +3548,15 @@ export class BatCallDetector {
         }
       }
 
-      console.log(`[Knee Search] Max Curvature: ${maxCurvature.toFixed(4)} at Local Index: ${bestLocalIdx}`);
+      // console.log(`[Knee Search] Max Curvature: ${maxCurvature.toFixed(4)} at Local Index: ${bestLocalIdx}`);
 
       // Weak Curvature / Fallback
-      // If Curvature is still 0 or very low, it means the line is straight (no knee)
       if (bestLocalIdx < 0 || maxCurvature < 0.01) {
-        console.log('[Knee Search] No strong knee found via curvature. Using max slope change.');
-        
         // Fallback: Find the point where slope changes the most (2nd deriv peak)
-        // This is simplified for robustness
         let maxChange = -1;
         for (let i = 0; i < secondDerivatives.length; i++) {
            const change = Math.abs(secondDerivatives[i]);
            const localIdx = derivIndices[i];
-           // Simple valid check
            if (change > maxChange && firstDerivatives[localIdx-1] < -0.5) {
              maxChange = change;
              bestLocalIdx = localIdx;
@@ -3829,81 +3564,54 @@ export class BatCallDetector {
         }
       }
 
-    // 6. Map Result (Mapping back to Absolute Frame)
-    let finalKneeIdx = -1;
-    if (typeof bestLocalIdx !== 'undefined' && bestLocalIdx >= 0 && bestLocalIdx < validFrameIndices.length) {
-      finalKneeIdx = validFrameIndices[bestLocalIdx];
-    }
+        // 6. Map Result (Mapping back to Absolute Frame)
+        let finalKneeIdx = -1;
+        if (typeof bestLocalIdx !== 'undefined' && bestLocalIdx >= 0 && bestLocalIdx < validFrameIndices.length) {
+        finalKneeIdx = validFrameIndices[bestLocalIdx];
+        }
 
-    // 7. Store Result (Absolute Time for now, Step 7 will normalize it)
-    if (finalKneeIdx >= 0 && finalKneeIdx < timeFrames.length) {
-      call.kneeFreq_kHz = contourKHz[bestLocalIdx];
-      
-      // Store the Frame Index! This is crucial for accurate Step 7 normalization
-      call.kneeFrameIdx = finalKneeIdx; 
-
-      // Temporary relative time (relative to Window Start)
-      const kneeFreqTime_s = timeFrames[finalKneeIdx];
-      const firstFrameTimeInSeconds_knee = timeFrames[0];
-      call.kneeFreq_ms = (kneeFreqTime_s - firstFrameTimeInSeconds_knee) * 1000;
-      call.kneeTime_ms = call.kneeFreq_ms;
-
-      // console.log(`[Knee Search] Found Knee: ${call.kneeFreq_kHz.toFixed(2)}kHz at Frame ${finalKneeIdx}`);
-    } else {
-      call.kneeTime_ms = null;
-      call.kneeFreq_kHz = null;
-      call.kneeFrameIdx = null;
-    }
+        // 7. Store Result
+        if (finalKneeIdx >= 0 && finalKneeIdx < timeFrames.length) {
+        call.kneeFreq_kHz = contourKHz[bestLocalIdx];
+        call.kneeFrameIdx = finalKneeIdx; 
+        
+        // Store temp absolute time
+        call.kneeFreq_ms = (timeFrames[finalKneeIdx] - timeFrames[0]) * 1000;
+        call.kneeTime_ms = call.kneeFreq_ms;
+        } else {
+        call.kneeTime_ms = null;
+        call.kneeFreq_kHz = null;
+        call.kneeFrameIdx = null;
+        }
     }
 
     // ============================================================
-    // STEP 7: [2025 NEW] Time Normalization (Start Freq = 0.00ms)
-    // 強制重置所有時間參數，以 Start Frequency 的 Frame 為起點
+    // STEP 7: Time Normalization (Start Freq = 0.00ms)
     // ============================================================
     if (call.startFreqFrameIdx !== null && call.startFreqFrameIdx < timeFrames.length) {
-        
-        // 基準時間點 (Start Frequency 發生的絕對時間)
         const t0_s = timeFrames[call.startFreqFrameIdx];
-
-        // Helper: 計算相對於 Start 的毫秒數
-        // 如果 targetFrame < startFrame，結果會是 0 (避免負數)，或者保留負數(如果那是真實的Pre-start signal)
-        // 根據您的要求， Start = 0.00ms，所以我們允許負數嗎？通常 Start 就是起點，不應有負數。
-        // 但如果 Peak 發生在 Start 之前(理論上不應該，除非 Start 定義錯誤)，這裡會如實反映。
         const normalizeTime = (frameIdx) => {
             if (frameIdx === null || frameIdx === undefined) return null;
             const t_target = timeFrames[frameIdx];
             return (t_target - t0_s) * 1000;
         };
 
-        // 1. Reset Start Time -> 0.00 ms
         call.startFreq_ms = 0.00;
 
-        // 2. Adjust Peak Time
-        if (peakFrameIdx !== null) {
-            call.peakFreqTime_ms = normalizeTime(peakFrameIdx);
-        }
-
-        // 3. Adjust High Freq Time
-        if (call.highFreqFrameIdx !== null) {
-            call.highFreqTime_ms = normalizeTime(call.highFreqFrameIdx);
-        }
-
-        // 4. Adjust End/Low Freq Time
+        if (peakFrameIdx !== null) call.peakFreqTime_ms = normalizeTime(peakFrameIdx);
+        if (call.highFreqFrameIdx !== null) call.highFreqTime_ms = normalizeTime(call.highFreqFrameIdx);
         if (call.endFrameIdx_forLowFreq !== null) {
             const relTime = normalizeTime(call.endFrameIdx_forLowFreq);
             call.endFreq_ms = relTime;
             call.lowFreq_ms = relTime;
         }
-
-        // 5. Adjust Knee Time
-        if (call.kneeFrameIdx !== null && call.kneeFrameIdx !== undefined) {
+        if (call.kneeFrameIdx !== null) {
             call.kneeFreq_ms = normalizeTime(call.kneeFrameIdx);
             call.kneeTime_ms = call.kneeFreq_ms;
         }
         
-        // 6. Adjust Duration (Ensure consistency)
         if (call.endFreq_ms !== null) {
-            call.duration_ms = call.endFreq_ms - call.startFreq_ms; // effectively endFreq_ms
+            call.duration_ms = call.endFreq_ms - call.startFreq_ms; 
         }
     }
 
