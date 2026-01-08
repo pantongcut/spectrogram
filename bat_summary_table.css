@@ -1,0 +1,361 @@
+/* ============================================================
+   Bat Summary Table Styles (Independent Module)
+   Dependencies: Requires CSS Variables from style.css
+   ============================================================ */
+
+/* --- Container --- */
+#callSummaryTableContainer {
+  height: calc(100% - 30px);
+  overflow: auto;
+  padding: 0;
+  background-color: var(--bg-secondary);
+}
+
+/* --- Popup Window --- */
+#callSummaryPopup {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  resize: both;
+  overflow: hidden;
+}
+
+#callSummaryPopup.minimized #callSummaryTableContainer {
+  display: none;
+}
+
+#callSummaryPopup.minimized {
+  resize: none;
+}
+
+/* --- Table Structure --- */
+.summary-table {
+  width: 100%;
+  border-collapse: separate; /* 為了 sticky header */
+  border-spacing: 0;
+  font-size: 12px;
+  font-family: 'Noto Sans HK', sans-serif;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  table-layout: fixed;
+}
+
+/* --- Header Styling (Optimized UI) --- */
+.summary-table th {
+  position: sticky;
+  top: 0;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  padding: 0;
+  z-index: 10;
+  user-select: none;
+  transition: background-color 0.2s ease;
+}
+
+.summary-table th:hover {
+  background-color: var(--bg-secondary);
+}
+
+.summary-table th:last-child {
+  border-right: none;
+}
+
+/* Header Content Container */
+.summary-table th .th-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  height: 100%;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+/* Label & Sort Icon Container */
+.th-label-container {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.th-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-secondary);
+  transition: color 0.2s;
+}
+
+.summary-table th:hover .th-text {
+  color: var(--text-primary);
+}
+
+/* Sort Icon */
+.sort-icon {
+  margin-left: 4px;
+  font-size: 9px;
+  color: var(--paravalue-color);
+  flex-shrink: 0;
+}
+
+/* Filter Button (Hover Reveal) */
+.filter-icon-btn {
+  padding: 4px 2px 2px 2px;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  opacity: 0; /* 預設隱藏 */
+  transition: opacity 0.2s, background-color 0.2s, color 0.2s;
+  flex-shrink: 0;
+}
+
+/* Show filter on hover, active filter, or popup open */
+.summary-table th:hover .filter-icon-btn,
+.filter-icon-btn.active {
+  opacity: 1;
+}
+
+.filter-icon-btn:hover {
+  background-color: rgba(128, 128, 128, 0.2);
+  color: var(--text-primary);
+}
+
+.filter-icon-btn.active {
+  color: #188038;
+  opacity: 1;
+}
+
+/* Resize Handle */
+.summary-table th .resize-handle {
+  width: 4px;
+  height: 100%;
+  position: absolute;
+  right: 0;
+  top: 0;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 11;
+}
+
+.summary-table th .resize-handle:hover {
+  background: var(--paravalue-color);
+}
+
+/* --- Table Cell Styling --- */
+.summary-table td {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.summary-table tr:hover td {
+  background-color: var(--bg-secondary);
+}
+
+.summary-table tr.discarded td {
+  background-color: rgba(0,0,0,0.05);
+  color: var(--text-secondary);
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* --- Column Visibility Context Menu --- */
+.col-ctx-menu {
+  position: fixed;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  z-index: 9999;
+  padding: 5px 0;
+  min-width: 150px;
+  color: var(--text-primary);
+  font-size: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  border-radius: 4px;
+}
+
+.col-ctx-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s;
+}
+
+.col-ctx-item:hover {
+  background-color: var(--bg-secondary);
+}
+
+.col-ctx-item input {
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+/* --- Google Sheets Style Filter Menu (Theme Adapted) --- */
+.gs-filter-menu {
+  position: fixed;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+  width: 280px;
+  font-family: 'Roboto', 'Noto Sans HK', sans-serif;
+  font-size: 13px;
+  color: var(--text-primary);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  user-select: none;
+  border-radius: 4px;
+}
+
+/* Menu Items */
+.gs-menu-item {
+  padding: 8px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background-color 0.2s ease;
+}
+.gs-menu-item:hover {
+  background-color: var(--bg-secondary);
+}
+.gs-menu-item i {
+  margin-right: 12px;
+  color: var(--text-secondary);
+  width: 16px;
+  text-align: center;
+}
+
+.gs-divider {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 4px 0;
+}
+
+/* Filter by Values Section */
+.gs-section-header {
+  padding: 8px 16px 4px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* Search Box */
+.gs-search-container {
+  padding: 8px 16px;
+}
+.gs-search-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color); 
+  background-color: var(--input-bg);
+  color: var(--text-primary);
+  border-radius: 4px;
+  font-size: 12px;
+  box-sizing: border-box; 
+}
+.gs-search-input:focus {
+  border-color: #1a73e8;
+  outline: none;
+}
+
+/* Quick Actions */
+.gs-quick-actions {
+  padding: 0 16px 8px;
+  font-size: 12px;
+}
+.gs-action-link {
+  color: var(--paravalue-color, #1a73e8);
+  cursor: pointer;
+  text-decoration: none;
+  margin-right: 8px;
+  font-weight: 600;
+}
+.gs-action-link:hover {
+  text-decoration: underline;
+}
+
+/* Scrollable List */
+.gs-value-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  padding: 4px 0;
+  background: var(--bg-tertiary);
+}
+.gs-value-item {
+  padding: 6px 16px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+.gs-value-item:hover {
+  background-color: var(--bg-secondary);
+}
+.gs-value-item input[type="checkbox"] {
+  margin-right: 12px;
+  transform: scale(1.1);
+  cursor: pointer;
+  accent-color: #188038;
+}
+.gs-value-item label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  flex-grow: 1;
+  color: var(--text-primary);
+}
+
+/* Footer Buttons */
+.gs-footer {
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.gs-btn {
+  border: none;
+  padding: 8px 24px;
+  border-radius: 4px;
+  font-weight: 500;
+  cursor: pointer;
+  font-size: 13px;
+}
+.gs-btn-cancel {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+.gs-btn-cancel:hover {
+  background: var(--bg-secondary);
+}
+.gs-btn-ok {
+  background-color: #188038;
+  color: white;
+}
+.gs-btn-ok:hover {
+  background-color: #137333;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
