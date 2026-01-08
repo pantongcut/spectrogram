@@ -72,17 +72,19 @@
 .summary-table th .th-content {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   padding: 6px 8px;
   height: 100%;
   box-sizing: border-box;
   cursor: pointer;
+  position: relative;
 }
 
 /* Label & Sort Icon Container */
 .th-label-container {
   display: flex;
   align-items: center;
+  justify-content: center;
   flex-grow: 1;
   min-width: 0;
   overflow: hidden;
@@ -104,7 +106,8 @@
 
 /* Sort Icon */
 .sort-icon {
-  margin-left: 4px;
+  margin-right: 4px;
+  margin-left: 0;
   font-size: 9px;
   color: var(--paravalue-color);
   flex-shrink: 0;
@@ -112,6 +115,8 @@
 
 /* Filter Button (Hover Reveal) */
 .filter-icon-btn {
+  position: absolute;
+  right: 4px;
   padding: 4px 2px 2px 2px;
   border-radius: 3px;
   color: var(--text-secondary);
@@ -164,6 +169,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
+  text-align: center;
 }
 
 .summary-table tr:hover td {

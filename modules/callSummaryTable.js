@@ -53,37 +53,74 @@ export function initCallSummaryTable({
   const minBtn = popup.querySelector('.popup-min-btn');
   const maxBtn = popup.querySelector('.popup-max-btn');
 
+  // --- Resizing Logic Variables ---
+  const edgeThreshold = 5; // 邊緣偵測範圍 (px)
+  let isResizingWindow = false;
+  let resizeLeft = false, resizeRight = false, resizeTop = false, resizeBottom = false;
+  let startX = 0, startY = 0;
+  let startWidth = 0, startHeight = 0, startLeft = 0, startTop = 0;
+
+  // --- Resizing Helper Functions ---
+  function getEdgeState(clientX, clientY) {
+    const rect = popup.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    const withinVertical = y >= -edgeThreshold && y <= rect.height + edgeThreshold;
+    const withinHorizontal = x >= -edgeThreshold && x <= rect.width + edgeThreshold;
+
+    const onLeft = Math.abs(x - 0) <= edgeThreshold && withinVertical;
+    const onRight = Math.abs(x - rect.width) <= edgeThreshold && withinVertical;
+    const onTop = Math.abs(y - 0) <= edgeThreshold && withinHorizontal;
+    const onBottom = Math.abs(y - rect.height) <= edgeThreshold && withinHorizontal;
+
+    return { onLeft, onRight, onTop, onBottom };
+  }
+
+  function edgeCursor(state) {
+    const { onLeft, onRight, onTop, onBottom } = state;
+    if ((onLeft && onTop) || (onRight && onBottom)) return 'nwse-resize';
+    if ((onRight && onTop) || (onLeft && onBottom)) return 'nesw-resize';
+    if (onLeft || onRight) return 'ew-resize';
+    if (onTop || onBottom) return 'ns-resize';
+    return '';
+  }
+
   // --- Column Configuration ---
   const initialColumns = [
     { key: '__discard', label: 'X', tooltip: 'Discard', width: 30, noSort: true, noFilter: true },
-    { key: 'id', label: 'ID', tooltip: 'ID', width: 50 },
-    { key: 'startTime_s', label: 'Start Time', tooltip: 'Start Time (s)', width: 90, digits: 4 },
-    { key: 'endTime_s', label: 'End Time', tooltip: 'End Time (s)', width: 90, digits: 4 },
-    { key: 'duration_ms', label: 'Duration', tooltip: 'Duration (ms)', width: 90, digits: 2 },
+    { key: 'id', label: 'ID', tooltip: 'ID', width: 40 },
+    
+    { key: 'startTime_s', label: '<i>t </i><sub>start</sub>', tooltip: 'Start Time (s)', width: 60, digits: 4 },
+    { key: 'endTime_s', label: '<i>t </i><sub>end</sub>', tooltip: 'End Time (s)', width: 60, digits: 4 },
+    { key: 'duration_ms', label: 'Dur', tooltip: 'Duration (ms)', width: 60, digits: 2 },
     
     // Frequency & Time Pairs
-    { key: 'lowFreq_kHz', label: 'Low Freq', tooltip: 'Low Freq (kHz)', width: 90, digits: 2 },
-    { key: 'lowFreq_ms', label: 'Low Time', tooltip: 'Low Freq Time (ms)', width: 90, digits: 2 },
-    { key: 'highFreq_kHz', label: 'High Freq', tooltip: 'High Freq (kHz)', width: 90, digits: 2 },
-    { key: 'highFreqTime_ms', label: 'High Time', tooltip: 'High Freq Time (ms)', width: 90, digits: 2 },
-    { key: 'peakFreq_kHz', label: 'Peak Freq', tooltip: 'Peak Freq (kHz)', width: 90, digits: 2 },
-    { key: 'peakFreqTime_ms', label: 'Peak Time', tooltip: 'Peak Freq Time (ms)', width: 90, digits: 2 },
-    { key: 'kneeFreq_kHz', label: 'Knee Freq', tooltip: 'Knee Freq (kHz)', width: 90, digits: 2 },
-    { key: 'kneeFreq_ms', label: 'Knee Time', tooltip: 'Knee Freq Time (ms)', width: 90, digits: 2 },
-    { key: 'heelFreq_kHz', label: 'Heel Freq', tooltip: 'Heel Freq (kHz)', width: 90, digits: 2 },
-    { key: 'heelFreq_ms', label: 'Heel Time', tooltip: 'Heel Freq Time (ms)', width: 90, digits: 2 },
-    { key: 'characteristicFreq_kHz', label: 'Char Freq', tooltip: 'Char Freq (kHz)', width: 90, digits: 2 },
-    { key: 'characteristicFreq_ms', label: 'Char Time', tooltip: 'Char Freq Time (ms)', width: 90, digits: 2 },
-
-    // Other
-    { key: 'startFreq_kHz', label: 'Start Freq', tooltip: 'Start Freq (kHz)', width: 90, digits: 2 },
-    { key: 'endFreq_kHz', label: 'End Freq', tooltip: 'End Freq (kHz)', width: 90, digits: 2 },
+    { key: 'lowFreq_kHz', label: 'ƒ<sub>low</sub>', tooltip: 'Low Freq (kHz)', width: 60, digits: 2 },
+    { key: 'lowFreq_ms', label: '<i>t </i><sub>low</sub>', tooltip: 'Low Freq Time (ms)', width: 60, digits: 2 },
     
-    // Power & Quality
-    { key: 'bandwidth_kHz', label: 'Bandwidth', tooltip: 'Bandwidth (kHz)', width: 90, digits: 2 },
-    { key: 'peakPower_dB', label: 'Peak Power', tooltip: 'Peak Power (dB)', width: 90, digits: 1 },
-    { key: 'snr_dB', label: 'SNR', tooltip: 'SNR (dB)', width: 80, digits: 1 },
-    { key: 'quality', label: 'Quality', tooltip: 'Quality', width: 80 }
+    { key: 'highFreq_kHz', label: 'ƒ<sub>high</sub>', tooltip: 'High Freq (kHz)', width: 60, digits: 2 },
+    { key: 'highFreqTime_ms', label: '<i>t </i><sub>high</sub>', tooltip: 'High Freq Time (ms)', width: 60, digits: 2 },
+    
+    { key: 'peakFreq_kHz', label: 'ƒ<sub>peak</sub>', tooltip: 'Peak Freq (kHz)', width: 60, digits: 2 },
+    { key: 'peakFreqTime_ms', label: '<i>t </i><sub>peak</sub>', tooltip: 'Peak Freq Time (ms)', width: 60, digits: 2 },
+
+    { key: 'kneeFreq_kHz', label: 'ƒ<sub>knee</sub>', tooltip: 'Knee Freq (kHz)', width: 60, digits: 2 },
+    { key: 'kneeFreq_ms', label: '<i>t </i><sub>knee</sub>', tooltip: 'Knee Freq Time (ms)', width: 60, digits: 2 },
+    
+    { key: 'heelFreq_kHz', label: 'ƒ<sub>heel</sub>', tooltip: 'Heel Freq (kHz)', width: 60, digits: 2 },
+    { key: 'heelFreq_ms', label: '<i>t </i><sub>heel</sub>', tooltip: 'Heel Freq Time (ms)', width: 60, digits: 2 },
+    
+    { key: 'characteristicFreq_kHz', label: 'ƒ<sub>char</sub>', tooltip: 'Char Freq (kHz)', width: 60, digits: 2 },
+    { key: 'characteristicFreq_ms', label: '<i>t </i><sub>char</sub>', tooltip: 'Char Freq Time (ms)', width: 60, digits: 2 },
+
+    { key: 'startFreq_kHz', label: 'ƒ<sub>start</sub>', tooltip: 'Start Freq (kHz)', width: 60, digits: 2 },
+    { key: 'endFreq_kHz', label: 'ƒ<sub>end</sub>', tooltip: 'End Freq (kHz)', width: 60, digits: 2 },
+    
+    { key: 'bandwidth_kHz', label: 'BW', tooltip: 'Bandwidth (kHz)', width: 60, digits: 2 },
+    { key: 'peakPower_dB', label: 'dB<sub>peak</sub>', tooltip: 'Peak Power (dB)', width: 70, digits: 1 },
+    { key: 'snr_dB', label: 'SNR', tooltip: 'SNR (dB)', width: 60, digits: 1 },
+    { key: 'quality', label: 'Quality', tooltip: 'Signal Quality', width: 80 }
   ];
 
   // State for column visibility and width
@@ -415,22 +452,21 @@ export function initCallSummaryTable({
       const thContent = document.createElement('div');
       thContent.className = 'th-content';
       
-      // 1. 左側：標題文字 + 排序箭頭
+      // 1. 左側：標題文字 + 排序箭頭容器
       const labelContainer = document.createElement('div');
       labelContainer.className = 'th-label-container';
       
-      const textSpan = document.createElement('span');
-      textSpan.className = 'th-text';
-      textSpan.textContent = col.label;
-      labelContainer.appendChild(textSpan);
-
-      // Sort Icon (只在有排序時顯示，或你可以讓它一直佔位)
       if (sortState.key === col.key && sortState.direction !== 'none') {
         const sortIcon = document.createElement('i');
         sortIcon.className = 'sort-icon fa-solid';
         sortIcon.className += (sortState.direction === 'asc') ? ' fa-arrow-up' : ' fa-arrow-down';
         labelContainer.appendChild(sortIcon);
       }
+
+      const textSpan = document.createElement('span');
+      textSpan.className = 'th-text';
+      textSpan.innerHTML = col.label; // 支援 HTML 下標
+      labelContainer.appendChild(textSpan); // 文字後加入
       
       // 點擊左側文字區域觸發排序
       if (!col.noSort) {
@@ -546,6 +582,109 @@ export function initCallSummaryTable({
   }
 
   // --- Initialization ---
+
+  // --- Edge Resizing Event Listeners ---
+  // 1. 滑鼠在 Popup 上移動：變換游標形狀
+  popup.addEventListener('mousemove', (e) => {
+    if (isMaximized || isDocked) return;
+    if (isDraggingWindow || isResizingWindow) return; // 如果正在操作中，不改變游標
+
+    const state = getEdgeState(e.clientX, e.clientY);
+    const cursor = edgeCursor(state);
+    
+    // 如果在邊緣，改變游標；否則恢復預設
+    popup.style.cursor = cursor || 'default';
+  });
+
+  // 2. 滑鼠按下：開始 Resize
+  popup.addEventListener('mousedown', (e) => {
+    if (isMaximized || isDocked) return;
+    // 如果按在 DragBar 上，讓原本的視窗拖曳邏輯處理
+    if (e.target === dragBar || dragBar.contains(e.target)) return;
+
+    const state = getEdgeState(e.clientX, e.clientY);
+    
+    // 只有真的在邊緣時才啟動
+    if (state.onLeft || state.onRight || state.onTop || state.onBottom) {
+      isResizingWindow = true;
+      resizeLeft = state.onLeft;
+      resizeRight = state.onRight;
+      resizeTop = state.onTop;
+      resizeBottom = state.onBottom;
+
+      // 記錄初始狀態
+      startX = e.clientX;
+      startY = e.clientY;
+      startWidth = popup.offsetWidth;
+      startHeight = popup.offsetHeight;
+      startLeft = popup.offsetLeft;
+      startTop = popup.offsetTop;
+
+      // 防止選取文字
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
+
+  // 3. 全域滑鼠移動：執行 Resize 計算
+  window.addEventListener('mousemove', (e) => {
+    if (!isResizingWindow) return;
+
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    
+    // 設定最小尺寸限制
+    const minW = 400; 
+    const minH = 200;
+
+    let newW = startWidth;
+    let newH = startHeight;
+    let newL = startLeft;
+    let newT = startTop;
+
+    if (resizeRight) {
+      newW = Math.max(minW, startWidth + dx);
+    }
+    if (resizeBottom) {
+      newH = Math.max(minH, startHeight + dy);
+    }
+    if (resizeLeft) {
+      // 向左拉：寬度增加 dx (反向)，且 Left 位置也要跟著移動
+      // 注意：dx 為負數時代表向左移
+      const w = Math.max(minW, startWidth - dx);
+      // 只有當寬度真的改變時，才改變 Left，避免視窗「飄移」
+      if (w !== startWidth) {
+          newW = w;
+          newL = startLeft + dx; 
+      }
+    }
+    if (resizeTop) {
+      const h = Math.max(minH, startHeight - dy);
+      if (h !== startHeight) {
+          newH = h;
+          newT = startTop + dy;
+      }
+    }
+
+    // 套用樣式
+    popup.style.width = `${newW}px`;
+    popup.style.height = `${newH}px`;
+    popup.style.left = `${newL}px`;
+    popup.style.top = `${newT}px`;
+  }, true);
+
+  // 4. 全域滑鼠放開：結束 Resize
+  window.addEventListener('mouseup', () => {
+    if (isResizingWindow) {
+      isResizingWindow = false;
+      popup.style.cursor = ''; // 恢復游標
+      
+      // 儲存最後的大小到 LocalStorage
+      localStorage.setItem('callSummaryPopupWidth', popup.style.width);
+      localStorage.setItem('callSummaryPopupHeight', popup.style.height);
+    }
+  }, true);
+
   btn.addEventListener('click', openPopup);
   closeBtn.addEventListener('click', closePopup);
   minBtn.addEventListener('click', toggleDock);
@@ -601,7 +740,7 @@ export function initCallSummaryTable({
       </div>
       
       <div class="gs-quick-actions">
-        <span class="gs-action-link" id="action-select-all">Select all</span> - 
+        <span class="gs-action-link" id="action-select-all">Select all</span>
         <span class="gs-action-link" id="action-clear">Clear</span>
       </div>
       
