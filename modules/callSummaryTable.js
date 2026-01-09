@@ -31,6 +31,10 @@ export function initCallSummaryTable({
   let isDocked = false;
   let preDockState = {};
 
+  let isSplitMode = false;     // [NEW] Split 狀態
+  let preSplitState = {};      // [NEW] 記錄 Split 前的位置與大小
+  let isResizingSplit = false; // [NEW] Split Resizer 拖曳狀態
+
   // Data State
   let allCalls = [];       // Original data source
   let displayCalls = [];   // Filtered and sorted data
@@ -52,6 +56,11 @@ export function initCallSummaryTable({
   const closeBtn = popup.querySelector('.popup-close-btn');
   const minBtn = popup.querySelector('.popup-min-btn');
   const maxBtn = popup.querySelector('.popup-max-btn');
+  
+  // [NEW] 取得相關元素
+  const splitBtn = popup.querySelector('.popup-split-btn');
+  const splitResizer = document.getElementById('split-resizer');
+  const mainArea = document.getElementById('mainarea');
 
   // --- Resizing Logic Variables ---
   const edgeThreshold = 5; // 邊緣偵測範圍 (px)
@@ -160,6 +169,10 @@ export function initCallSummaryTable({
   }
 
   function closePopup() {
+    // [MODIFIED] 如果在 Split 模式下關閉，先還原
+    if (isSplitMode) {
+        toggleSplit(); 
+    }
     popup.style.display = 'none';
     if (!isMaximized && !isDocked) {
         localStorage.setItem('callSummaryPopupWidth', popup.style.width);
@@ -168,6 +181,7 @@ export function initCallSummaryTable({
   }
 
   function toggleDock() {
+    if (isSplitMode) toggleSplit(); // [NEW] 互斥
     if (isDocked) {
       popup.classList.remove('docked');
       if (isMaximized) {
@@ -189,6 +203,7 @@ export function initCallSummaryTable({
   }
 
   function toggleMaximize() {
+    if (isSplitMode) toggleSplit(); // [NEW] 互斥
     if (isDocked) { toggleDock(); if (isMaximized) return; }
     if (isMaximized) {
       Object.assign(popup.style, { width: preMaximizeState.width, height: preMaximizeState.height, left: preMaximizeState.left, top: preMaximizeState.top });
@@ -204,6 +219,135 @@ export function initCallSummaryTable({
       maxBtn.innerHTML = '<i class="fa-regular fa-clone"></i>';
       maxBtn.title = 'Restore Down';
     }
+  }
+
+  // --- [NEW] Split View Logic ---
+  function toggleSplit() {
+    // 1. 處理互斥狀態
+    if (isDocked) toggleDock();
+    if (isMaximized) toggleMaximize();
+
+    if (!isSplitMode) {
+        // === 進入 Split Mode ===
+        
+        // A. 記錄當前 Floating 狀態
+        preSplitState = {
+            width: popup.style.width,
+            height: popup.style.height,
+            left: popup.style.left,
+            top: popup.style.top,
+            position: popup.style.position,
+            display: popup.style.display // 記錄之前的 display 狀態
+        };
+
+        // B. 修改樣式與類別
+        popup.classList.add('split-mode');
+        // 強制顯示 (覆蓋可能的 display: none)
+        popup.style.display = 'flex'; 
+        splitResizer.style.display = 'block';
+        
+        // C. 計算初始寬度 (50% 剩餘空間)
+        // 取得 Sidebar 寬度 (如果有的話)
+        const sidebarWidth = document.getElementById('sidebar')?.offsetWidth || 0;
+        const availableWidth = window.innerWidth - sidebarWidth - 5; // -5 是 resizer 寬度
+        const halfWidth = Math.floor(availableWidth / 2);
+        
+        popup.style.width = `${halfWidth}px`;
+        popup.style.height = ''; // 高度由 CSS height: 100% 控制
+        
+        // D. 更新按鈕圖示
+        splitBtn.innerHTML = '<i class="fa-solid fa-up-right-from-square"></i>'; 
+        splitBtn.title = 'Restore Floating';
+        
+        // E. 隱藏不必要的按鈕
+        minBtn.style.display = 'none';
+        maxBtn.style.display = 'none';
+
+        isSplitMode = true;
+
+    } else {
+        // === 退出 Split Mode (還原) ===
+        
+        // A. 移除樣式與類別
+        popup.classList.remove('split-mode');
+        splitResizer.style.display = 'none';
+        
+        // B. 還原位置與大小
+        popup.style.position = 'absolute';
+        popup.style.width = preSplitState.width || '1000px';
+        popup.style.height = preSplitState.height || '300px';
+        popup.style.left = preSplitState.left || '100px';
+        popup.style.top = preSplitState.top || '100px';
+        
+        // 恢復之前的 display 狀態 (如果是從關閉狀態點 split，可能需要保持開啟)
+        popup.style.display = 'block'; // 確保是 block/flex
+        
+        // C. 更新按鈕圖示
+        splitBtn.innerHTML = '<i class="fa-solid fa-table-columns"></i>';
+        splitBtn.title = 'Split View';
+
+        // D. 恢復按鈕顯示
+        minBtn.style.display = '';
+        maxBtn.style.display = '';
+
+        isSplitMode = false;
+    }
+
+    // F. 觸發 Resize 事件以重繪 Spectrogram
+    // 給瀏覽器一點時間重排 Layout
+    requestAnimationFrame(() => {
+        window.dispatchEvent(new Event('resize'));
+    });
+  }
+
+  // --- [NEW] Split Resizer Logic ---
+  let splitStartX = 0;
+  let splitStartPopupWidth = 0;
+
+  function onSplitResizeStart(e) {
+    if (!isSplitMode) return;
+    e.preventDefault();
+    isResizingSplit = true;
+    splitStartX = e.clientX;
+    splitStartPopupWidth = popup.offsetWidth;
+    splitResizer.classList.add('active');
+    
+    document.body.style.cursor = 'col-resize';
+    
+    document.addEventListener('mousemove', onSplitResizeMove);
+    document.addEventListener('mouseup', onSplitResizeEnd);
+  }
+
+  function onSplitResizeMove(e) {
+    if (!isResizingSplit) return;
+    
+    // 計算位移: 
+    // 滑鼠往左移 (dx < 0) -> 表格變寬
+    // 滑鼠往右移 (dx > 0) -> 表格變窄
+    const dx = e.clientX - splitStartX;
+    const newWidth = splitStartPopupWidth - dx;
+    
+    // 限制最小寬度 (例如 200px) 和最大寬度 (視窗寬度 - sidebar - 200px)
+    const sidebarWidth = document.getElementById('sidebar')?.offsetWidth || 0;
+    const maxAvailable = window.innerWidth - sidebarWidth - 100;
+
+    if (newWidth > 200 && newWidth < maxAvailable) {
+        popup.style.width = `${newWidth}px`;
+        
+        // 可選：即時重繪 Spectrogram (可能會比較吃效能，若卡頓可拿掉)
+        // window.dispatchEvent(new Event('resize'));
+    }
+  }
+
+  function onSplitResizeEnd() {
+    isResizingSplit = false;
+    splitResizer.classList.remove('active');
+    document.body.style.cursor = '';
+    document.removeEventListener('mousemove', onSplitResizeMove);
+    document.removeEventListener('mouseup', onSplitResizeEnd);
+    
+    // 結束拖曳後，務必重繪一次
+    window.dispatchEvent(new Event('resize'));
   }
 
   // --- Window Dragging ---
@@ -598,7 +742,7 @@ export function initCallSummaryTable({
 
   // 2. 滑鼠按下：開始 Resize
   popup.addEventListener('mousedown', (e) => {
-    if (isMaximized || isDocked) return;
+    if (isMaximized || isDocked || isSplitMode) return;
     // 如果按在 DragBar 上，讓原本的視窗拖曳邏輯處理
     if (e.target === dragBar || dragBar.contains(e.target)) return;
 
@@ -690,12 +834,16 @@ export function initCallSummaryTable({
   minBtn.addEventListener('click', toggleDock);
   maxBtn.addEventListener('click', toggleMaximize);
 
+  // [NEW] 綁定 Split 按鈕與 Resizer 事件
+  if (splitBtn) splitBtn.addEventListener('click', toggleSplit);
+  if (splitResizer) splitResizer.addEventListener('mousedown', onSplitResizeStart);
+
   dragBar.addEventListener('mousedown', onWindowDragStart);
   document.addEventListener('mousemove', onWindowDragMove);
   document.addEventListener('mouseup', onWindowDragEnd);
 
   const observer = new ResizeObserver(() => {
-    if (!isMaximized && !isDocked && popup.style.display !== 'none') {
+    if (!isMaximized && !isDocked && !isSplitMode && popup.style.display !== 'none') {
       localStorage.setItem('callSummaryPopupWidth', popup.style.width);
       localStorage.setItem('callSummaryPopupHeight', popup.style.height);
     }

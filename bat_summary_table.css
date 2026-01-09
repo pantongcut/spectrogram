@@ -365,3 +365,88 @@
   background-color: #137333;
   box-shadow: 0 1px 2px rgba(0,0,0,0.15);
 }
+
+/* ============================================================
+   Split View & Resizer Styles (Fixed Layout)
+   ============================================================ */
+
+/* 1. 強制 Layout 容器不換行，確保左右排列 */
+#layout {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important; /* [關鍵] 禁止換行，這樣表格才不會掉下去 */
+  overflow: hidden !important;
+}
+
+/* 2. 讓 Main Area 可以縮小 */
+#mainarea {
+  flex-grow: 1;
+  min-width: 0; /* [關鍵] 允許 Flex 項目縮小到內容寬度以下 */
+  height: 100%;
+  position: relative;
+  transition: flex-basis 0.1s; /* 加一點平滑過渡 */
+}
+
+/* Split Button Icon */
+.popup-split-btn {
+  position: absolute;
+  top: 0;
+  right: 70px;
+  width: 30px;
+  height: 30px;
+  line-height: 30px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  cursor: pointer;
+  color: #555;
+}
+.popup-split-btn:hover {
+  color: #000;
+}
+
+/* Split Resizer Handle */
+#split-resizer {
+  width: 5px;
+  background-color: var(--bg-tertiary); /* 給個底色讓它明顯一點，或用 transparent */
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  cursor: col-resize;
+  flex-shrink: 0; /* 防止 Resizer 被壓扁 */
+  z-index: 100;
+  display: none; /* 預設隱藏 */
+  position: relative;
+  transition: background-color 0.2s;
+}
+
+#split-resizer:hover,
+#split-resizer.active {
+  background-color: #007bff;
+}
+
+/* Split Mode State - 強制覆蓋定位屬性 */
+#callSummaryPopup.split-mode {
+  position: relative !important; /* 變成 Flex Item */
+  top: auto !important;
+  left: auto !important;
+  bottom: auto !important;
+  right: auto !important;
+  
+  display: flex !important; /* [關鍵] 確保顯示 */
+  flex-direction: column;
+  
+  height: 100% !important; 
+  flex-shrink: 0; /* 防止表格被自動壓扁，寬度由 JS 控制 */
+  
+  border-radius: 0;
+  border: none;
+  border-left: 1px solid var(--border-color); /* 左側加線 */
+  box-shadow: none;
+  z-index: 50; /* 比 Map Popup 低，但比主畫面高 */
+  background-color: var(--bg-secondary);
+}
+
+/* 在 Split Mode 下隱藏 Resize Handle (原本的四角拖拉) */
+#callSummaryPopup.split-mode .popup-drag-bar {
+  cursor: default;
+}
