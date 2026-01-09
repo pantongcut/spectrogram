@@ -91,8 +91,9 @@ function _injectCssForSmoothing() {
     if (dur > 10000) return 2000;
     if (isSelectionExpandMode()) {
       if (dur > 0) {
-        if (dur < 1000) return 15000;
-        if (dur < 3000) return 3000;
+        if (dur < 600) return 100000;
+        if (dur < 1000) return 60000;
+        if (dur < 3000) return 15000;
       }
     }
     return 5000;
