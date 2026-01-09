@@ -609,6 +609,11 @@ export function initCallSummaryTable({
 
   function openPopup() {
     popup.style.display = 'block';
+
+    if (!isSplitMode) {
+        toggleSplit();
+    }
+    
     if (!isSplitMode && !isMaximized) {
         const savedWidth = localStorage.getItem('callSummaryPopupWidth');
         const savedHeight = localStorage.getItem('callSummaryPopupHeight');

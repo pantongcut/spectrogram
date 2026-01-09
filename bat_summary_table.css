@@ -435,20 +435,21 @@
 /* Split Resizer Handle */
 #split-resizer {
   width: 5px;
-  background-color: var(--bg-tertiary);
-  border-left: 1px solid var(--border-color);
-  border-right: 1px solid var(--border-color);
+  margin-left: -3px;
+  background-color: transparent;
+  border: none;
   cursor: col-resize;
   flex-shrink: 0;
   z-index: 100;
   display: none;
   position: relative;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s ease;
 }
 
 #split-resizer:hover,
 #split-resizer.active {
   background-color: #007bff;
+  opacity: 1;
 }
 
 /* Split Mode State - 強制覆蓋定位屬性 */
