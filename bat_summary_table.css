@@ -190,13 +190,37 @@
   border: 1px solid var(--border-color);
   box-shadow: 0 2px 6px rgba(0,0,0,0.3);
   z-index: 9999;
-  padding: 5px 0;
+  padding: 0; /* [修改] 移除內距，由子元素控制 */
   min-width: 150px;
   color: var(--text-primary);
   font-size: 12px;
   max-height: 300px;
-  overflow-y: auto;
+  /* [修改] 這裡不再設定 overflow-y，改用 Flex 佈局 */
+  display: flex;
+  flex-direction: column;
   border-radius: 4px;
+  overflow: hidden; /* 確保圓角不被子元素溢出遮擋 */
+}
+
+/* Context Menu Header */
+.col-ctx-header {
+  padding: 8px 12px; /* [調整] 稍微增加 padding */
+  font-weight: bold;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  background-color: var(--bg-secondary);
+  margin-bottom: 0; /* [修改] 移除 margin，緊貼 body */
+  cursor: default;
+  user-select: none;
+  flex-shrink: 0; /* 防止 Header 被壓縮 */
+}
+
+/* [新增] Scrollable Body */
+.col-ctx-body {
+  overflow-y: auto; /* 滾動條只出現在這裡 */
+  flex-grow: 1;     /* 佔滿剩餘空間 */
+  padding: 5px 0;   /* 原本 menu 的 padding 移到這裡 */
 }
 
 .col-ctx-item {
@@ -374,24 +398,24 @@
 #layout {
   display: flex !important;
   flex-direction: row !important;
-  flex-wrap: nowrap !important; /* [關鍵] 禁止換行，這樣表格才不會掉下去 */
+  flex-wrap: nowrap !important;
   overflow: hidden !important;
 }
 
 /* 2. 讓 Main Area 可以縮小 */
 #mainarea {
   flex-grow: 1;
-  min-width: 0; /* [關鍵] 允許 Flex 項目縮小到內容寬度以下 */
+  min-width: 0;
   height: 100%;
   position: relative;
-  transition: flex-basis 0.1s; /* 加一點平滑過渡 */
+  transition: flex-basis 0.1s;
 }
 
 /* Split Button Icon */
 .popup-split-btn {
   position: absolute;
   top: 0;
-  right: 70px;
+  right: 40px;
   width: 30px;
   height: 30px;
   line-height: 30px;
@@ -404,17 +428,20 @@
 .popup-split-btn:hover {
   color: #000;
 }
+#callSummaryPopup.split-mode .popup-split-btn {
+  right: 20px;
+}
 
 /* Split Resizer Handle */
 #split-resizer {
   width: 5px;
-  background-color: var(--bg-tertiary); /* 給個底色讓它明顯一點，或用 transparent */
+  background-color: var(--bg-tertiary);
   border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
   cursor: col-resize;
-  flex-shrink: 0; /* 防止 Resizer 被壓扁 */
+  flex-shrink: 0;
   z-index: 100;
-  display: none; /* 預設隱藏 */
+  display: none;
   position: relative;
   transition: background-color 0.2s;
 }
@@ -426,27 +453,26 @@
 
 /* Split Mode State - 強制覆蓋定位屬性 */
 #callSummaryPopup.split-mode {
-  position: relative !important; /* 變成 Flex Item */
+  position: relative !important;
   top: auto !important;
   left: auto !important;
   bottom: auto !important;
   right: auto !important;
   
-  display: flex !important; /* [關鍵] 確保顯示 */
+  display: flex !important;
   flex-direction: column;
   
   height: 100% !important; 
-  flex-shrink: 0; /* 防止表格被自動壓扁，寬度由 JS 控制 */
+  flex-shrink: 0;
   
   border-radius: 0;
   border: none;
-  border-left: 1px solid var(--border-color); /* 左側加線 */
+  border-left: 1px solid var(--border-color);
   box-shadow: none;
-  z-index: 50; /* 比 Map Popup 低，但比主畫面高 */
+  z-index: 50;
   background-color: var(--bg-secondary);
 }
 
-/* 在 Split Mode 下隱藏 Resize Handle (原本的四角拖拉) */
 #callSummaryPopup.split-mode .popup-drag-bar {
   cursor: default;
 }

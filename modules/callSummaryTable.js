@@ -28,12 +28,9 @@ export function initCallSummaryTable({
   let isMaximized = false;
   let preMaximizeState = {};
 
-  let isDocked = false;
-  let preDockState = {};
-
-  let isSplitMode = false;     // [NEW] Split 狀態
-  let preSplitState = {};      // [NEW] 記錄 Split 前的位置與大小
-  let isResizingSplit = false; // [NEW] Split Resizer 拖曳狀態
+  let isSplitMode = false;     // Split 狀態
+  let preSplitState = {};      // 記錄 Split 前的位置與大小
+  let isResizingSplit = false; // Split Resizer 拖曳狀態
 
   // Data State
   let allCalls = [];       // Original data source
@@ -54,10 +51,9 @@ export function initCallSummaryTable({
 
   const dragBar = popup.querySelector('.popup-drag-bar');
   const closeBtn = popup.querySelector('.popup-close-btn');
-  const minBtn = popup.querySelector('.popup-min-btn');
   const maxBtn = popup.querySelector('.popup-max-btn');
   
-  // [NEW] 取得相關元素
+  // 取得相關元素
   const splitBtn = popup.querySelector('.popup-split-btn');
   const splitResizer = document.getElementById('split-resizer');
   const mainArea = document.getElementById('mainarea');
@@ -133,78 +129,41 @@ export function initCallSummaryTable({
   ];
 
   // State for column visibility and width
-  // Deep copy to separate instances
   let columns = initialColumns.map(c => ({...c, visible: true}));
-
-  // --- Logic Functions ---
 
   // --- Data Helper: Get Unique Values for Filter List ---
   function getSortedUniqueValues(columnKey) {
     const uniqueSet = new Set();
-    
-    // 1. 收集所有不重複值
     allCalls.forEach(call => {
       let val = (columnKey === 'id') ? allCalls.indexOf(call) + 1 : call[columnKey];
-      
-      // 處理空白或無效值
       if (val === undefined || val === null || val === '') {
         uniqueSet.add('(Blanks)');
       } else {
         uniqueSet.add(val);
       }
     });
-
-    // 2. 轉為陣列並排序
     return Array.from(uniqueSet).sort((a, b) => {
-      // 確保 (Blanks) 永遠排最後
       if (a === '(Blanks)') return 1;
       if (b === '(Blanks)') return -1;
-      
-      // 數值排序 vs 文字排序
-      if (typeof a === 'number' && typeof b === 'number') {
-        return a - b;
-      }
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
       return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
     });
   }
 
   function closePopup() {
-    // [MODIFIED] 如果在 Split 模式下關閉，先還原
+    // 如果在 Split 模式下關閉，先還原
     if (isSplitMode) {
         toggleSplit(); 
     }
     popup.style.display = 'none';
-    if (!isMaximized && !isDocked) {
+    if (!isMaximized) {
         localStorage.setItem('callSummaryPopupWidth', popup.style.width);
         localStorage.setItem('callSummaryPopupHeight', popup.style.height);
     }
   }
 
-  function toggleDock() {
-    if (isSplitMode) toggleSplit(); // [NEW] 互斥
-    if (isDocked) {
-      popup.classList.remove('docked');
-      if (isMaximized) {
-         Object.assign(popup.style, { position: 'absolute', width: '100vw', height: '100vh', left: '0', top: '0', bottom: '' });
-      } else {
-         Object.assign(popup.style, { position: 'absolute', width: preDockState.width, height: preDockState.height, left: preDockState.left, top: preDockState.top, bottom: '' });
-      }
-      minBtn.innerHTML = '<i class="fa-solid fa-window-minimize"></i>';
-      minBtn.title = 'Minimize';
-      isDocked = false;
-    } else {
-      preDockState = { width: popup.style.width, height: popup.style.height, left: popup.style.left, top: popup.style.top };
-      popup.classList.add('docked');
-      Object.assign(popup.style, { position: 'fixed', width: '100vw', height: '300px', left: '0', top: 'auto', bottom: '0' });
-      minBtn.innerHTML = '<i class="fa-solid fa-window-maximize"></i>';
-      minBtn.title = 'Restore Up';
-      isDocked = true;
-    }
-  }
-
   function toggleMaximize() {
-    if (isSplitMode) toggleSplit(); // [NEW] 互斥
-    if (isDocked) { toggleDock(); if (isMaximized) return; }
+    if (isSplitMode) toggleSplit(); // 互斥
     if (isMaximized) {
       Object.assign(popup.style, { width: preMaximizeState.width, height: preMaximizeState.height, left: preMaximizeState.left, top: preMaximizeState.top });
       popup.classList.remove('maximized');
@@ -221,10 +180,9 @@ export function initCallSummaryTable({
     }
   }
 
-  // --- [NEW] Split View Logic ---
+  // --- Split View Logic ---
   function toggleSplit() {
     // 1. 處理互斥狀態
-    if (isDocked) toggleDock();
     if (isMaximized) toggleMaximize();
 
     if (!isSplitMode) {
@@ -255,12 +213,11 @@ export function initCallSummaryTable({
         popup.style.width = `${halfWidth}px`;
         popup.style.height = ''; // 高度由 CSS height: 100% 控制
         
-        // D. 更新按鈕圖示
-        splitBtn.innerHTML = '<i class="fa-solid fa-up-right-from-square"></i>'; 
+        // D. 更新按鈕圖示 [CHANGED]
+        splitBtn.innerHTML = '<i class="fa-solid fa-window-maximize"></i>'; 
         splitBtn.title = 'Restore Floating';
         
         // E. 隱藏不必要的按鈕
-        minBtn.style.display = 'none';
         maxBtn.style.display = 'none';
 
         isSplitMode = true;
@@ -279,28 +236,26 @@ export function initCallSummaryTable({
         popup.style.left = preSplitState.left || '100px';
         popup.style.top = preSplitState.top || '100px';
         
-        // 恢復之前的 display 狀態 (如果是從關閉狀態點 split，可能需要保持開啟)
-        popup.style.display = 'block'; // 確保是 block/flex
+        // 恢復之前的 display 狀態
+        popup.style.display = 'block';
         
-        // C. 更新按鈕圖示
+        // C. 更新按鈕圖示 [CHANGED]
         splitBtn.innerHTML = '<i class="fa-solid fa-table-columns"></i>';
         splitBtn.title = 'Split View';
 
         // D. 恢復按鈕顯示
-        minBtn.style.display = '';
         maxBtn.style.display = '';
 
         isSplitMode = false;
     }
 
     // F. 觸發 Resize 事件以重繪 Spectrogram
-    // 給瀏覽器一點時間重排 Layout
     requestAnimationFrame(() => {
         window.dispatchEvent(new Event('resize'));
     });
   }
 
-  // --- [NEW] Split Resizer Logic ---
+  // --- Split Resizer Logic ---
   let splitStartX = 0;
   let splitStartPopupWidth = 0;
 
@@ -320,22 +275,13 @@ export function initCallSummaryTable({
 
   function onSplitResizeMove(e) {
     if (!isResizingSplit) return;
-    
-    // 計算位移: 
-    // 滑鼠往左移 (dx < 0) -> 表格變寬
-    // 滑鼠往右移 (dx > 0) -> 表格變窄
     const dx = e.clientX - splitStartX;
     const newWidth = splitStartPopupWidth - dx;
-    
-    // 限制最小寬度 (例如 200px) 和最大寬度 (視窗寬度 - sidebar - 200px)
     const sidebarWidth = document.getElementById('sidebar')?.offsetWidth || 0;
     const maxAvailable = window.innerWidth - sidebarWidth - 100;
 
     if (newWidth > 200 && newWidth < maxAvailable) {
         popup.style.width = `${newWidth}px`;
-        
-        // 可選：即時重繪 Spectrogram (可能會比較吃效能，若卡頓可拿掉)
-        // window.dispatchEvent(new Event('resize'));
     }
   }
 
@@ -345,21 +291,19 @@ export function initCallSummaryTable({
     document.body.style.cursor = '';
     document.removeEventListener('mousemove', onSplitResizeMove);
     document.removeEventListener('mouseup', onSplitResizeEnd);
-    
-    // 結束拖曳後，務必重繪一次
     window.dispatchEvent(new Event('resize'));
   }
 
   // --- Window Dragging ---
   function onWindowDragStart(e) {
     if (e.target.closest('button')) return;
-    if (isMaximized || isDocked) return;
+    if (isMaximized || isSplitMode) return;
     isDraggingWindow = true;
     dragStartX = e.clientX; dragStartY = e.clientY;
     popupStartX = popup.offsetLeft; popupStartY = popup.offsetTop;
   }
   function onWindowDragMove(e) {
-    if (!isDraggingWindow || isMaximized || isDocked) return;
+    if (!isDraggingWindow || isMaximized || isSplitMode) return;
     popup.style.left = `${popupStartX + (e.clientX - dragStartX)}px`;
     popup.style.top = `${popupStartY + (e.clientY - dragStartY)}px`;
   }
@@ -400,39 +344,23 @@ export function initCallSummaryTable({
   }
 
   // --- Sorting & Filtering Logic ---
-  
   function processData() {
-    // 1. Filtering
     let filtered = allCalls.filter((call, idx) => {
-      // 遍歷每一個有過濾條件的欄位
       for (const [key, filterVal] of Object.entries(filterState)) {
-        // 如果過濾條件是空的，跳過
         if (!filterVal) continue;
-
-        // 取得當前資料行的該欄位數值
         let cellValue;
         if (key === 'id') cellValue = idx + 1;
         else cellValue = call[key];
         
-        // 統一將 null/undefined 轉為系統內部的 '(Blanks)' 標記，以便比對
         const compareValue = (cellValue === undefined || cellValue === null || cellValue === '') 
-                             ? '(Blanks)' 
-                             : cellValue;
+                             ? '(Blanks)' : cellValue;
 
-        // --- [NEW] Set 類型 (來自 Checkbox 多選) ---
         if (filterVal instanceof Set) {
-            // 如果當前值 不在 白名單(Set) 中，就過濾掉
             if (!filterVal.has(compareValue)) return false;
-        } 
-        
-        // --- [Legacy] String 類型 (來自舊版輸入框或數學運算) ---
-        else if (typeof filterVal === 'string') {
+        } else if (typeof filterVal === 'string') {
             if (key === '__discard') continue;
-            
             const fLower = filterVal.toLowerCase();
-            
             if (typeof cellValue === 'number') {
-              // 處理 >, <, >=, <=
               const cleanFilter = filterVal.trim();
               if (cleanFilter.startsWith('>=')) {
                  if (!(cellValue >= parseFloat(cleanFilter.substring(2)))) return false;
@@ -443,19 +371,16 @@ export function initCallSummaryTable({
               } else if (cleanFilter.startsWith('<')) {
                  if (!(cellValue < parseFloat(cleanFilter.substring(1)))) return false;
               } else {
-                 // 數字模糊搜尋
                  if (!String(cellValue).includes(filterVal)) return false;
               }
             } else {
-              // 文字模糊搜尋
               if (!String(compareValue).toLowerCase().includes(fLower)) return false;
             }
         }
       }
-      return true; // 通過所有過濾器
+      return true;
     });
 
-    // 2. Sorting (保持不變)
     if (sortState.key && sortState.direction !== 'none') {
       filtered.sort((a, b) => {
         let valA, valB;
@@ -466,26 +391,21 @@ export function initCallSummaryTable({
             valA = a[sortState.key];
             valB = b[sortState.key];
         }
-
         if (valA === valB) return 0;
         if (valA === undefined || valA === null) return 1;
         if (valB === undefined || valB === null) return -1;
-
         if (typeof valA === 'string') valA = valA.toLowerCase();
         if (typeof valB === 'string') valB = valB.toLowerCase();
-
         if (valA < valB) return sortState.direction === 'asc' ? -1 : 1;
         if (valA > valB) return sortState.direction === 'asc' ? 1 : -1;
         return 0;
       });
     }
-
     displayCalls = filtered;
   }
 
   function handleSort(key) {
-    if (key === '__discard') return; // Cannot sort by discard checkbox directly (or add logic if needed)
-
+    if (key === '__discard') return;
     if (sortState.key === key) {
       if (sortState.direction === 'none') sortState.direction = 'asc';
       else if (sortState.direction === 'asc') sortState.direction = 'desc';
@@ -497,18 +417,9 @@ export function initCallSummaryTable({
     renderTable();
   }
 
-  function handleFilterInput(key, value) {
-    filterState[key] = value;
-    renderTable(); // Re-process and render
-  }
-
   function handleDiscardToggle(originalIndex, isChecked) {
-    if (isChecked) {
-      discardedIds.add(originalIndex);
-    } else {
-      discardedIds.delete(originalIndex);
-    }
-    // Update visual row style immediately
+    if (isChecked) discardedIds.add(originalIndex);
+    else discardedIds.delete(originalIndex);
     const row = container.querySelector(`tr[data-original-index="${originalIndex}"]`);
     if (row) {
       if (isChecked) row.classList.add('discarded');
@@ -519,7 +430,6 @@ export function initCallSummaryTable({
   // --- Context Menu (Column Visibility) ---
   function showContextMenu(e) {
     e.preventDefault();
-    // Remove existing menu
     const existing = document.getElementById('col-ctx-menu');
     if (existing) existing.remove();
 
@@ -529,7 +439,20 @@ export function initCallSummaryTable({
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
 
+    // 1. Header (固定在頂部)
+    const header = document.createElement('div');
+    header.className = 'col-ctx-header';
+    header.innerText = 'Field selection';
+    menu.appendChild(header);
+
+    // 2. Scrollable Body (包裹選項的容器)
+    const scrollContainer = document.createElement('div');
+    scrollContainer.className = 'col-ctx-body';
+    menu.appendChild(scrollContainer);
+
     columns.forEach((col, idx) => {
+      if (col.key === '__discard') return;
+
       const item = document.createElement('div');
       item.className = 'col-ctx-item';
       
@@ -543,7 +466,7 @@ export function initCallSummaryTable({
       };
 
       const lbl = document.createElement('span');
-      lbl.textContent = col.label;
+      lbl.innerHTML = col.label;
 
       item.appendChild(cb);
       item.appendChild(lbl);
@@ -552,25 +475,20 @@ export function initCallSummaryTable({
         col.visible = cb.checked;
         renderTable();
       };
-      menu.appendChild(item);
+      
+      scrollContainer.appendChild(item);
     });
 
     document.body.appendChild(menu);
-
-    // Close menu on click elsewhere
     const closeMenu = () => {
       menu.remove();
       document.removeEventListener('click', closeMenu);
     };
-    // Delay slightly to avoid immediate trigger
     setTimeout(() => document.addEventListener('click', closeMenu), 0);
   }
 
-  // --- Rendering ---
   function renderTable() {
-    processData(); // Sort and Filter first
-
-    // Clean container
+    processData();
     container.innerHTML = '';
 
     if (displayCalls.length === 0) {
@@ -581,22 +499,18 @@ export function initCallSummaryTable({
     const table = document.createElement('table');
     table.className = 'summary-table';
 
-    // 1. Header Row
     const thead = document.createElement('thead');
     const headerRow = document.createElement('tr');
 
     columns.forEach((col, idx) => {
       if (!col.visible) return;
-
-      // -- Main Header --
       const th = document.createElement('th');
       th.style.width = `${col.width}px`;
-      if (col.tooltip) th.title = col.tooltip; // Tooltip 對於縮略文字很重要
+      if (col.tooltip) th.title = col.tooltip;
 
       const thContent = document.createElement('div');
       thContent.className = 'th-content';
       
-      // 1. 左側：標題文字 + 排序箭頭容器
       const labelContainer = document.createElement('div');
       labelContainer.className = 'th-label-container';
       
@@ -609,26 +523,22 @@ export function initCallSummaryTable({
 
       const textSpan = document.createElement('span');
       textSpan.className = 'th-text';
-      textSpan.innerHTML = col.label; // 支援 HTML 下標
-      labelContainer.appendChild(textSpan); // 文字後加入
+      textSpan.innerHTML = col.label;
+      labelContainer.appendChild(textSpan);
       
-      // 點擊左側文字區域觸發排序
       if (!col.noSort) {
         labelContainer.onclick = () => handleSort(col.key);
       }
       
       thContent.appendChild(labelContainer);
 
-      // 2. 右側：Filter 圖示
       if (!col.noFilter) {
           const filterIcon = document.createElement('i');
-          // 判斷是否過濾中，如果是，加上 .active class
           const isActive = filterState[col.key] !== undefined;
           filterIcon.className = `fa-solid fa-filter filter-icon-btn ${isActive ? 'active' : ''}`;
           filterIcon.title = 'Filter';
-          
           filterIcon.onclick = (e) => {
-              e.stopPropagation(); // 防止觸發排序
+              e.stopPropagation();
               createFilterMenu(th, col.key);
           };
           thContent.appendChild(filterIcon);
@@ -636,7 +546,6 @@ export function initCallSummaryTable({
       
       thContent.oncontextmenu = (e) => showContextMenu(e);
 
-      // Resize Handle
       const resizeHandle = document.createElement('div');
       resizeHandle.className = 'resize-handle';
       resizeHandle.onmousedown = (e) => onColumnResizeStart(e, idx);
@@ -649,10 +558,8 @@ export function initCallSummaryTable({
     thead.appendChild(headerRow);
     table.appendChild(thead);
 
-    // 3. Body
     const tbody = document.createElement('tbody');
     displayCalls.forEach((call) => {
-      // Find original index for Discard logic
       const originalIndex = allCalls.indexOf(call);
       const isDiscarded = discardedIds.has(originalIndex);
 
@@ -662,11 +569,8 @@ export function initCallSummaryTable({
 
       columns.forEach(col => {
         if (!col.visible) return;
-
         const td = document.createElement('td');
-        
         if (col.key === '__discard') {
-          // Discard Checkbox
           const cb = document.createElement('input');
           cb.type = 'checkbox';
           cb.checked = isDiscarded;
@@ -680,18 +584,14 @@ export function initCallSummaryTable({
           } else {
             value = call[col.key];
           }
-
           if (typeof value === 'number') {
-            if (col.digits !== undefined) {
-               value = value.toFixed(col.digits);
-            } else {
-               value = value.toString();
-            }
+            if (col.digits !== undefined) value = value.toFixed(col.digits);
+            else value = value.toString();
           } else if (value === undefined || value === null) {
             value = '-';
           }
           td.textContent = value;
-          td.title = value; // Tooltip for truncated content
+          td.title = value;
         }
         row.appendChild(td);
       });
@@ -704,20 +604,16 @@ export function initCallSummaryTable({
 
   function updateTable(calls) {
     allCalls = calls || [];
-    // Reset transient states on new data load? Maybe keep filters?
-    // Let's keep filters/sort to allow refreshing data without losing context.
     renderTable();
   }
 
   function openPopup() {
     popup.style.display = 'block';
-    if (!isDocked && !isMaximized) {
+    if (!isSplitMode && !isMaximized) {
         const savedWidth = localStorage.getItem('callSummaryPopupWidth');
         const savedHeight = localStorage.getItem('callSummaryPopupHeight');
         if (savedWidth) popup.style.width = savedWidth;
         if (savedHeight) popup.style.height = savedHeight;
-        
-        // Basic position check
         const rect = popup.getBoundingClientRect();
         if (rect.top < 0 || rect.left < 0) {
             popup.style.top = '100px'; popup.style.left = '100px';
@@ -725,105 +621,66 @@ export function initCallSummaryTable({
     }
   }
 
-  // --- Initialization ---
-
-  // --- Edge Resizing Event Listeners ---
-  // 1. 滑鼠在 Popup 上移動：變換游標形狀
   popup.addEventListener('mousemove', (e) => {
-    if (isMaximized || isDocked) return;
-    if (isDraggingWindow || isResizingWindow) return; // 如果正在操作中，不改變游標
-
+    if (isMaximized || isSplitMode) return;
+    if (isDraggingWindow || isResizingWindow) return;
     const state = getEdgeState(e.clientX, e.clientY);
     const cursor = edgeCursor(state);
-    
-    // 如果在邊緣，改變游標；否則恢復預設
     popup.style.cursor = cursor || 'default';
   });
 
-  // 2. 滑鼠按下：開始 Resize
   popup.addEventListener('mousedown', (e) => {
-    if (isMaximized || isDocked || isSplitMode) return;
-    // 如果按在 DragBar 上，讓原本的視窗拖曳邏輯處理
+    if (isMaximized || isSplitMode) return;
     if (e.target === dragBar || dragBar.contains(e.target)) return;
-
     const state = getEdgeState(e.clientX, e.clientY);
-    
-    // 只有真的在邊緣時才啟動
     if (state.onLeft || state.onRight || state.onTop || state.onBottom) {
       isResizingWindow = true;
       resizeLeft = state.onLeft;
       resizeRight = state.onRight;
       resizeTop = state.onTop;
       resizeBottom = state.onBottom;
-
-      // 記錄初始狀態
       startX = e.clientX;
       startY = e.clientY;
       startWidth = popup.offsetWidth;
       startHeight = popup.offsetHeight;
       startLeft = popup.offsetLeft;
       startTop = popup.offsetTop;
-
-      // 防止選取文字
       e.preventDefault();
       e.stopPropagation();
     }
   });
 
-  // 3. 全域滑鼠移動：執行 Resize 計算
   window.addEventListener('mousemove', (e) => {
     if (!isResizingWindow) return;
-
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    
-    // 設定最小尺寸限制
     const minW = 400; 
     const minH = 200;
-
     let newW = startWidth;
     let newH = startHeight;
     let newL = startLeft;
     let newT = startTop;
 
-    if (resizeRight) {
-      newW = Math.max(minW, startWidth + dx);
-    }
-    if (resizeBottom) {
-      newH = Math.max(minH, startHeight + dy);
-    }
+    if (resizeRight) newW = Math.max(minW, startWidth + dx);
+    if (resizeBottom) newH = Math.max(minH, startHeight + dy);
     if (resizeLeft) {
-      // 向左拉：寬度增加 dx (反向)，且 Left 位置也要跟著移動
-      // 注意：dx 為負數時代表向左移
       const w = Math.max(minW, startWidth - dx);
-      // 只有當寬度真的改變時，才改變 Left，避免視窗「飄移」
-      if (w !== startWidth) {
-          newW = w;
-          newL = startLeft + dx; 
-      }
+      if (w !== startWidth) { newW = w; newL = startLeft + dx; }
     }
     if (resizeTop) {
       const h = Math.max(minH, startHeight - dy);
-      if (h !== startHeight) {
-          newH = h;
-          newT = startTop + dy;
-      }
+      if (h !== startHeight) { newH = h; newT = startTop + dy; }
     }
-
-    // 套用樣式
     popup.style.width = `${newW}px`;
     popup.style.height = `${newH}px`;
     popup.style.left = `${newL}px`;
     popup.style.top = `${newT}px`;
   }, true);
 
-  // 4. 全域滑鼠放開：結束 Resize
   window.addEventListener('mouseup', () => {
     if (isResizingWindow) {
       isResizingWindow = false;
-      popup.style.cursor = ''; // 恢復游標
-      
-      // 儲存最後的大小到 LocalStorage
+      popup.style.cursor = '';
       localStorage.setItem('callSummaryPopupWidth', popup.style.width);
       localStorage.setItem('callSummaryPopupHeight', popup.style.height);
     }
@@ -831,10 +688,8 @@ export function initCallSummaryTable({
 
   btn.addEventListener('click', openPopup);
   closeBtn.addEventListener('click', closePopup);
-  minBtn.addEventListener('click', toggleDock);
   maxBtn.addEventListener('click', toggleMaximize);
 
-  // [NEW] 綁定 Split 按鈕與 Resizer 事件
   if (splitBtn) splitBtn.addEventListener('click', toggleSplit);
   if (splitResizer) splitResizer.addEventListener('mousedown', onSplitResizeStart);
 
@@ -843,197 +698,108 @@ export function initCallSummaryTable({
   document.addEventListener('mouseup', onWindowDragEnd);
 
   const observer = new ResizeObserver(() => {
-    if (!isMaximized && !isDocked && !isSplitMode && popup.style.display !== 'none') {
+    if (!isMaximized && !isSplitMode && popup.style.display !== 'none') {
       localStorage.setItem('callSummaryPopupWidth', popup.style.width);
       localStorage.setItem('callSummaryPopupHeight', popup.style.height);
     }
   });
   observer.observe(popup);
 
-  // --- Google Sheets Style Filter UI (Fully Functional) ---
   function createFilterMenu(targetTh, columnKey) {
-    // 1. 關閉現有的選單
     const existing = document.getElementById('gs-filter-popup');
     if (existing) existing.remove();
-
-    // 2. 獲取真實數據列表 (Sorted Unique Values)
     const uniqueList = getSortedUniqueValues(columnKey);
-    
-    // 3. 判斷目前的勾選狀態
-    // 如果 filterState 裡沒有這個 key，代表「全選 (沒有過濾)」
-    // 如果有，則只勾選 Set 裡有的值
     const currentSet = filterState[columnKey];
     const isFilterActive = (currentSet instanceof Set);
-
-    // 4. 建立容器
     const menu = document.createElement('div');
     menu.id = 'gs-filter-popup';
     menu.className = 'gs-filter-menu';
-
-    // 5. 構建 HTML (Search + Action + List)
     menu.innerHTML = `
-      <div class="gs-menu-item" id="sort-asc">
-        <i class="fa-solid fa-arrow-down-a-z"></i> Sort A to Z
-      </div>
-      <div class="gs-menu-item" id="sort-desc">
-        <i class="fa-solid fa-arrow-down-z-a"></i> Sort Z to A
-      </div>
-      
+      <div class="gs-menu-item" id="sort-asc"><i class="fa-solid fa-arrow-down-a-z"></i> Sort A to Z</div>
+      <div class="gs-menu-item" id="sort-desc"><i class="fa-solid fa-arrow-down-z-a"></i> Sort Z to A</div>
       <div class="gs-divider"></div>
-      
       <div class="gs-section-header">Filter by values</div>
-      
-      <div class="gs-search-container">
-        <input type="text" class="gs-search-input" placeholder="Search...">
-      </div>
-      
+      <div class="gs-search-container"><input type="text" class="gs-search-input" placeholder="Search..."></div>
       <div class="gs-quick-actions">
         <span class="gs-action-link" id="action-select-all">Select all</span>
         <span class="gs-action-link" id="action-clear">Clear</span>
       </div>
-      
-      <div class="gs-value-list" id="gs-value-list-container">
-        </div>
-      
+      <div class="gs-value-list" id="gs-value-list-container"></div>
       <div class="gs-divider"></div>
-      
       <div class="gs-footer">
         <button class="gs-btn gs-btn-cancel">Cancel</button>
         <button class="gs-btn gs-btn-ok">OK</button>
       </div>
     `;
-
-    // 6. 生成列表項目 (Populate List)
     const listContainer = menu.querySelector('#gs-value-list-container');
-    
     uniqueList.forEach((val, idx) => {
       const itemDiv = document.createElement('div');
       itemDiv.className = 'gs-value-item';
-      
-      // 判斷是否勾選：如果沒有過濾器(全選狀態) 或 值在Set裡面 -> Checked
       const isChecked = !isFilterActive || currentSet.has(val);
-      
-      // 我們將真實值儲存在 data-value 屬性中，方便之後讀取 (注意處理雙引號)
-      // 使用 JSON.stringify 安全地處理特殊字符
       const safeValue = encodeURIComponent(String(val));
-
       itemDiv.innerHTML = `
         <input type="checkbox" id="chk-${idx}" data-val="${safeValue}" ${isChecked ? 'checked' : ''}>
         <label for="chk-${idx}">${val}</label>
       `;
-      
-      // 點擊整行都能觸發 checkbox
       itemDiv.onclick = (e) => {
         if(e.target.tagName !== 'INPUT') {
           const cb = itemDiv.querySelector('input');
           cb.checked = !cb.checked;
         }
       };
-      
       listContainer.appendChild(itemDiv);
     });
-
-    // 7. 定位選單
     const rect = targetTh.getBoundingClientRect();
-    // 邊界檢查：如果太靠右，選單往左長
     const leftPos = (rect.left + 280 > window.innerWidth) ? (window.innerWidth - 290) : rect.left;
-    
     menu.style.left = `${leftPos}px`;
     menu.style.top = `${rect.bottom + 2}px`;
-
     document.body.appendChild(menu);
 
-    // --- Event Listeners ---
-
-    // A. 排序功能
     menu.querySelector('#sort-asc').onclick = () => {
-        sortState.key = columnKey;
-        sortState.direction = 'asc';
-        renderTable();
-        menu.remove();
+        sortState.key = columnKey; sortState.direction = 'asc'; renderTable(); menu.remove();
     };
     menu.querySelector('#sort-desc').onclick = () => {
-        sortState.key = columnKey;
-        sortState.direction = 'desc';
-        renderTable();
-        menu.remove();
+        sortState.key = columnKey; sortState.direction = 'desc'; renderTable(); menu.remove();
     };
-
-    // B. Search Box Filter Logic (前端視覺過濾)
     const searchInput = menu.querySelector('.gs-search-input');
     searchInput.addEventListener('input', (e) => {
         const term = e.target.value.toLowerCase();
         const items = listContainer.querySelectorAll('.gs-value-item');
         items.forEach(item => {
             const text = item.querySelector('label').textContent.toLowerCase();
-            if (text.includes(term)) {
-                item.style.display = 'flex';
-            } else {
-                item.style.display = 'none';
-            }
+            if (text.includes(term)) item.style.display = 'flex';
+            else item.style.display = 'none';
         });
     });
-    searchInput.focus(); // 打開選單直接聚焦輸入框
-
-    // C. Select All / Clear (只影響目前搜尋看得到的項目)
+    searchInput.focus();
     menu.querySelector('#action-select-all').onclick = () => {
-        const visibleItems = Array.from(listContainer.querySelectorAll('.gs-value-item'))
-                                  .filter(el => el.style.display !== 'none');
+        const visibleItems = Array.from(listContainer.querySelectorAll('.gs-value-item')).filter(el => el.style.display !== 'none');
         visibleItems.forEach(el => el.querySelector('input').checked = true);
     };
-
     menu.querySelector('#action-clear').onclick = () => {
-        const visibleItems = Array.from(listContainer.querySelectorAll('.gs-value-item'))
-                                  .filter(el => el.style.display !== 'none');
+        const visibleItems = Array.from(listContainer.querySelectorAll('.gs-value-item')).filter(el => el.style.display !== 'none');
         visibleItems.forEach(el => el.querySelector('input').checked = false);
     };
-
-    // D. Cancel
     menu.querySelector('.gs-btn-cancel').onclick = () => menu.remove();
-
-    // E. OK Button (Apply Filter)
     menu.querySelector('.gs-btn-ok').onclick = () => {
-        // 1. 收集所有被勾選的值
         const checkedInputs = listContainer.querySelectorAll('input[type="checkbox"]:checked');
         const allInputs = listContainer.querySelectorAll('input[type="checkbox"]');
-        
-        // 2. 判斷是否全選了 (如果是全選，我們通常清空 filterState 以節省效能)
         if (checkedInputs.length === allInputs.length) {
-            delete filterState[columnKey]; // 移除過濾器 = 顯示全部
+            delete filterState[columnKey];
         } else {
-            // 3. 建立白名單 Set
             const allowedSet = new Set();
             checkedInputs.forEach(input => {
-                // 解碼回原始值
-                let valStr = decodeURIComponent(input.getAttribute('data-val'));
-                // 嘗試還原數字類型 (如果原本是數字)
-                // 這裡簡化處理：因為 Set 比較需要類型一致。
-                // 我們的 getSortedUniqueValues 混合了數字和字串。
-                // 為了安全，我們在 processData 裡都轉字串比對，或者在這裡還原類型。
-                // 比較好的做法是：依照 columnKey 查找原始數據判斷類型，但這裡我們用簡單的「嘗試轉數字」
-                
-                // 修正：為了精確匹配，我們應該保持原始類型。
-                // 方法：從 uniqueList 裡透過 index 取回原始值最安全！
                 const index = parseInt(input.id.split('-')[1]);
                 allowedSet.add(uniqueList[index]); 
             });
-            
             filterState[columnKey] = allowedSet;
         }
-
-        // 4. 更新 UI (Icon 顏色) 和 表格
         const icon = targetTh.querySelector('.filter-icon-btn');
-        if (filterState[columnKey]) {
-            icon.classList.add('active'); // CSS 需對應增加 .active 顏色變綠
-        } else {
-            icon.classList.remove('active');
-        }
-
+        if (filterState[columnKey]) icon.classList.add('active');
+        else icon.classList.remove('active');
         renderTable();
         menu.remove();
     };
-
-    // F. Click Outside Close
     setTimeout(() => {
         const closeHandler = (e) => {
             if (!menu.contains(e.target) && !targetTh.contains(e.target)) {
@@ -1045,8 +811,6 @@ export function initCallSummaryTable({
     }, 100);
   }
 
-
-  // Return API
   return {
     updateTable,
     openPopup,
