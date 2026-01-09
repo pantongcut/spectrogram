@@ -1550,7 +1550,14 @@ document.body.classList.toggle('settings-open', isOpen);
 initExport({ buttonId: 'exportBtn' });
 initTrashProgram();
 initMapPopup();
-const callSummaryTableControl = initCallSummaryTable();
+const callSummaryTableControl = initCallSummaryTable({
+  onCallSelected: (index) => {
+    // 當 Table Row 被點擊時，通知 FrequencyHover 高亮對應方框
+    if (freqHoverControl && typeof freqHoverControl.highlightSelection === 'function') {
+      freqHoverControl.highlightSelection(index);
+    }
+  }
+});
 
 // 初始化 Peak Control
 initPeakControl({

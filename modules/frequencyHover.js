@@ -1539,11 +1539,41 @@ function createBtnGroup(sel, isShortSelection = false) {
     });
   }
 
+  function highlightSelection(index) {
+    // 1. 移除舊的高亮
+    selections.forEach(sel => {
+      if (sel.rect) sel.rect.classList.remove('selection-box-highlighted');
+    });
+
+    if (index === null || index === undefined || index < 0) return;
+
+    // 2. 確保順序與 Table 一致
+    const sortedSelections = selections.slice().sort((a, b) => a.data.startTime - b.data.startTime);
+
+    // 3. 添加高亮並安全滾動
+    const targetSel = sortedSelections[index];
+    if (targetSel && targetSel.rect) {
+      targetSel.rect.classList.add('selection-box-highlighted');
+      
+      const elementLeft = targetSel.rect.offsetLeft;
+      const elementWidth = targetSel.rect.offsetWidth;
+      const viewerWidth = viewer.clientWidth;
+      
+      const targetScrollLeft = elementLeft + (elementWidth / 2) - (viewerWidth / 2);
+      
+      viewer.scrollTo({
+        left: targetScrollLeft,
+        behavior: 'smooth'
+      });
+    }
+  }
+
   return {
     updateSelections,
     clearSelections,
-    addAutoSelections,  // [NEW 2025] Export for event system
-    getBatCalls,        // [NEW 2025] Export for Excel generation
+    addAutoSelections,
+    getBatCalls,
+    highlightSelection,
     setFrequencyRange: (min, max) => {
       minFrequency = min;
       maxFrequency = max;

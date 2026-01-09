@@ -7,7 +7,8 @@
 export function initCallSummaryTable({
   buttonId = 'viewTableBtn',
   popupId = 'callSummaryPopup',
-  containerId = 'callSummaryTableContainer'
+  containerId = 'callSummaryTableContainer',
+  onCallSelected = null
 } = {}) {
   const btn = document.getElementById(buttonId);
   const popup = document.getElementById(popupId);
@@ -595,6 +596,23 @@ export function initCallSummaryTable({
         }
         row.appendChild(td);
       });
+      row.addEventListener('click', (e) => {
+        // 1. 阻止事件冒泡 (防止觸發 Sidebar 收合或其他全域點擊事件)
+        e.stopPropagation();
+
+        // 2. 移除其他 Row 的 selected class (使用新名稱)
+        const prevSelected = container.querySelector('tr.summary-row-selected');
+        if (prevSelected) prevSelected.classList.remove('summary-row-selected');
+
+        // 3. 添加當前 Row 的 selected class (使用新名稱)
+        row.classList.add('summary-row-selected');
+
+        // 4. 觸發外部回調
+        if (typeof onCallSelected === 'function') {
+          onCallSelected(originalIndex);
+        }
+      });
+
       tbody.appendChild(row);
     });
 
@@ -613,7 +631,7 @@ export function initCallSummaryTable({
     if (!isSplitMode) {
         toggleSplit();
     }
-    
+
     if (!isSplitMode && !isMaximized) {
         const savedWidth = localStorage.getItem('callSummaryPopupWidth');
         const savedHeight = localStorage.getItem('callSummaryPopupHeight');

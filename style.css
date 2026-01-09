@@ -3301,3 +3301,19 @@ input.tag-button.editing {
 #callSummaryPopup.minimized {
   resize: none;
 }
+
+/* === Call Summary Table Row Highlight (Renamed to avoid conflicts) === */
+.summary-table tr.summary-row-selected td {
+  background-color: #fff3cd !important;
+  border-top: 1px solid #ffc107;
+  border-bottom: 1px solid #ffc107;
+}
+
+/* === Spectrogram Selection Highlight (Renamed) === */
+.selection-rect.selection-box-highlighted {
+  border-color: #9b59b6 !important;
+  border-width: 2px !important;
+  box-shadow: 0 0 8px rgba(155, 89, 182, 0.8);
+  z-index: 50;
+  background-color: rgba(155, 89, 182, 0.1) !important;
+}
