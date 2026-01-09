@@ -3624,6 +3624,18 @@ export class BatCallDetector {
       }
     }
 
+    // ============================================================
+    // [FIX] Sync Call Start/End Times with Frequency Boundaries
+    // 修正：將 Call 的 Start/End Time 同步為頻率測量的精確邊界
+    // 這樣可以確保 Export Table 中的 (End - Start) 準確等於 Duration
+    // ============================================================
+    if (call.startFreqTime_s !== null) {
+      call.startTime_s = call.startFreqTime_s;
+    }
+    if (call.endFreqTime_s !== null) {
+      call.endTime_s = call.endFreqTime_s;
+    }
+
     // Time Expansion Correction
     if (getTimeExpansionMode()) {
       call.applyTimeExpansion(10);

@@ -2417,6 +2417,15 @@ input.tag-button.editing {
   justify-content: space-between;
 }
 
+#spectrogram-settings-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 1;
+  margin-right: 10px;
+}
+
 #color-bar {
   width: 400px;
   height: 15px;
