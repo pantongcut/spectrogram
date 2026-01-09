@@ -9,6 +9,7 @@
   overflow: auto;
   padding: 0;
   background-color: var(--bg-secondary);
+  transition: background-color 0.3s ease;
 }
 
 /* --- Popup Window --- */
@@ -16,6 +17,8 @@
   position: fixed;
   bottom: 10px;
   right: 10px;
+  padding-right: 1px;
+  padding-bottom: 2px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -23,8 +26,8 @@
   display: flex;
   flex-direction: column;
   z-index: 1000;
-  resize: both;
   overflow: hidden;
+  transition: background-color 0.3s ease, border 0.3s ease;
 }
 
 #callSummaryPopup.minimized #callSummaryTableContainer {
@@ -45,6 +48,7 @@
   background: var(--bg-secondary);
   color: var(--text-primary);
   table-layout: fixed;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 /* --- Header Styling (Optimized UI) --- */
@@ -57,7 +61,7 @@
   padding: 0;
   z-index: 10;
   user-select: none;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.3s ease, border 0.3s;
 }
 
 .summary-table th:hover {
@@ -70,14 +74,14 @@
 
 /* Header Content Container */
 .summary-table th .th-content {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 6px 8px;
+  padding: 6px 15px;
   height: 100%;
   box-sizing: border-box;
   cursor: pointer;
-  position: relative;
 }
 
 /* Label & Sort Icon Container */
@@ -97,7 +101,7 @@
   font-weight: 600;
   font-size: 11px;
   color: var(--text-secondary);
-  transition: color 0.2s;
+  transition: color 0.3s;
 }
 
 .summary-table th:hover .th-text {
@@ -106,11 +110,16 @@
 
 /* Sort Icon */
 .sort-icon {
-  margin-right: 4px;
-  margin-left: 0;
-  font-size: 9px;
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
   color: var(--paravalue-color);
   flex-shrink: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 15;
 }
 
 /* Filter Button (Hover Reveal) */
@@ -160,27 +169,30 @@
 
 /* --- Table Cell Styling --- */
 .summary-table td {
-  background-color: var(--bg-primary);
+  background-color: var(--table-bg);
   color: var(--text-primary);
   padding: 4px 8px;
   border-bottom: 1px solid var(--border-color);
-  border-right: 1px solid transparent;
+  border-right: 1px solid var(--border-color);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 12px;
   text-align: center;
+  transition: background-color 0.3s ease, color 0.3s ease, border 0.3s ease;
 }
 
 .summary-table tr:hover td {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-tertiary);
 }
 
 .summary-table tr.discarded td {
-  background-color: rgba(0,0,0,0.05);
+  /* [修改] 移除背景色，避免在 Dark Mode 下變黑看不見 */
+  background-color: transparent; 
   color: var(--text-secondary);
   text-decoration: line-through;
-  opacity: 0.6;
+  opacity: 0.5;
+  transition: color 0.3s ease;
 }
 
 /* --- Column Visibility Context Menu --- */
@@ -190,30 +202,29 @@
   border: 1px solid var(--border-color);
   box-shadow: 0 2px 6px rgba(0,0,0,0.3);
   z-index: 9999;
-  padding: 0; /* [修改] 移除內距，由子元素控制 */
+  padding: 0;
   min-width: 150px;
   color: var(--text-primary);
   font-size: 12px;
   max-height: 300px;
-  /* [修改] 這裡不再設定 overflow-y，改用 Flex 佈局 */
   display: flex;
   flex-direction: column;
   border-radius: 4px;
-  overflow: hidden; /* 確保圓角不被子元素溢出遮擋 */
+  overflow: hidden;
 }
 
 /* Context Menu Header */
 .col-ctx-header {
-  padding: 8px 12px; /* [調整] 稍微增加 padding */
+  padding: 8px 12px;
   font-weight: bold;
   font-size: 11px;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
   background-color: var(--bg-secondary);
-  margin-bottom: 0; /* [修改] 移除 margin，緊貼 body */
+  margin-bottom: 0;/
   cursor: default;
   user-select: none;
-  flex-shrink: 0; /* 防止 Header 被壓縮 */
+  flex-shrink: 0;
 }
 
 /* [新增] Scrollable Body */
@@ -228,7 +239,7 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  transition: background-color 0.2s;
+  transition: background-color 0.3s;
 }
 
 .col-ctx-item:hover {
@@ -263,7 +274,7 @@
   cursor: pointer;
   display: flex;
   align-items: center;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.3s ease;
 }
 .gs-menu-item:hover {
   background-color: var(--bg-secondary);

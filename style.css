@@ -24,12 +24,15 @@
   --scrollbar-track: #1E1F20;
   --scrollbar-thumb: #7a7a7a; 
   --scrollbar-thumb-hover: #c7c7c7;
+  --table-bg:#1E1F20;
+  --table-selected-bg: #423d24;      /* 深色模式下的選中背景 (暗金色) */
+  --table-selected-border: #b09315;  /* 深色模式下的選中邊框 */
 }
 
 body.light-mode {
   --bg-primary: #ffffff;
   --bg-secondary: #f5f5f5;
-  --bg-tertiary: #ffffff;
+  --bg-tertiary: #f5f5f5;
   --text-primary: #000000;
   --text-secondary: #333333;
   --paravalue-color:#0066cc;
@@ -49,6 +52,9 @@ body.light-mode {
   --scrollbar-track: #ffffff;
   --scrollbar-thumb: #ccc;
   --scrollbar-thumb-hover: #999;
+  --table-bg:#ffffff;
+  --table-selected-bg: #fff3cd;      /* 淺色模式下的選中背景 (淺黃色) */
+  --table-selected-border: #ffc107;
 }
 
 /* === Selection Time Info (右上角) === */
@@ -3260,23 +3266,15 @@ input.tag-button.editing {
   background-color: #e0e0e0;
   color: #000000;
   padding: 4px 8px;
-  border: 1px solid #999;
   text-align: left;
   z-index: 1;
   font-weight: 600;
 }
 
-/* Explicit: White background and Black text for cells - override all themes */
-.summary-table td {
-  background-color: #ffffff !important;
-  color: #000000 !important;
-  padding: 4px 8px;
-  border: 1px solid #ccc;
-  white-space: nowrap;
-}
-
-.summary-table tbody tr:hover td {
-  background-color: #f0f0f0 !important;
+.summary-table tr.summary-row-selected td {
+  background-color: var(--table-selected-bg) !important;
+  border-top: 1px solid var(--table-selected-border);
+  border-bottom: 1px solid var(--table-selected-border);
 }
 
 #callSummaryPopup {
@@ -3300,13 +3298,6 @@ input.tag-button.editing {
 
 #callSummaryPopup.minimized {
   resize: none;
-}
-
-/* === Call Summary Table Row Highlight (Renamed to avoid conflicts) === */
-.summary-table tr.summary-row-selected td {
-  background-color: #fff3cd !important;
-  border-top: 1px solid #ffc107;
-  border-bottom: 1px solid #ffc107;
 }
 
 /* === Spectrogram Selection Highlight (Renamed) === */

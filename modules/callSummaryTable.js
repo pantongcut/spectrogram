@@ -94,8 +94,8 @@ export function initCallSummaryTable({
 
   // --- Column Configuration ---
   const initialColumns = [
-    { key: '__discard', label: 'X', tooltip: 'Discard', width: 30, noSort: true, noFilter: true },
-    { key: 'id', label: 'ID', tooltip: 'ID', width: 40 },
+    { key: '__discard', label: '', width: 40, noSort: true, noFilter: true },
+    { key: 'id', label: 'ID', tooltip: 'ID', width: 42, noFilter: true },
     
     { key: 'startTime_s', label: '<i>t </i><sub>start</sub>', tooltip: 'Start Time (s)', width: 60, digits: 4 },
     { key: 'endTime_s', label: '<i>t </i><sub>end</sub>', tooltip: 'End Time (s)', width: 60, digits: 4 },
@@ -512,27 +512,41 @@ export function initCallSummaryTable({
       const thContent = document.createElement('div');
       thContent.className = 'th-content';
       
+      // [修改] 1. 先建立 Label Container (只放文字)
       const labelContainer = document.createElement('div');
       labelContainer.className = 'th-label-container';
       
-      if (sortState.key === col.key && sortState.direction !== 'none') {
-        const sortIcon = document.createElement('i');
-        sortIcon.className = 'sort-icon fa-solid';
-        sortIcon.className += (sortState.direction === 'asc') ? ' fa-arrow-up' : ' fa-arrow-down';
-        labelContainer.appendChild(sortIcon);
-      }
-
       const textSpan = document.createElement('span');
       textSpan.className = 'th-text';
       textSpan.innerHTML = col.label;
       labelContainer.appendChild(textSpan);
       
+      // 點擊文字觸發排序
       if (!col.noSort) {
         labelContainer.onclick = () => handleSort(col.key);
       }
       
       thContent.appendChild(labelContainer);
 
+      // [修改] 2. 將 Sort Icon 移出 labelContainer，直接加入 thContent
+      // 這樣它就會根據 CSS 的 absolute position 定位，不會推擠文字
+      if (sortState.key === col.key && sortState.direction !== 'none') {
+        const sortIcon = document.createElement('i');
+        sortIcon.className = 'sort-icon fa-solid';
+        sortIcon.className += (sortState.direction === 'asc') ? ' fa-arrow-up' : ' fa-arrow-down';
+        
+        // 點擊圖標也要觸發排序
+        if (!col.noSort) {
+            sortIcon.onclick = (e) => {
+                e.stopPropagation(); // 防止冒泡兩次
+                handleSort(col.key);
+            };
+        }
+        
+        thContent.appendChild(sortIcon);
+      }
+
+      // [保持不變] Filter Icon
       if (!col.noFilter) {
           const filterIcon = document.createElement('i');
           const isActive = filterState[col.key] !== undefined;
