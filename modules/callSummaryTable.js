@@ -5,6 +5,7 @@
  */
 
 import { getIconString } from './icons.js';
+import { showMessageBox } from './messageBox.js';
 
 export function initCallSummaryTable({
   buttonId = 'viewTableBtn',
@@ -106,14 +107,17 @@ export function initCallSummaryTable({
     { key: 'duration_ms', label: 'Dur', tooltip: 'Duration (ms)', width: 60, digits: 2 },
     
     // Frequency & Time Pairs
+    { key: 'highFreq_kHz', label: 'ƒ<sub>high</sub>', tooltip: 'High Freq (kHz)', width: 60, digits: 2 },
+    { key: 'highFreqTime_ms', label: '<i>t </i><sub>high</sub>', tooltip: 'High Freq Time (ms)', width: 60, digits: 2 },
+
     { key: 'lowFreq_kHz', label: 'ƒ<sub>low</sub>', tooltip: 'Low Freq (kHz)', width: 60, digits: 2 },
     { key: 'lowFreq_ms', label: '<i>t </i><sub>low</sub>', tooltip: 'Low Freq Time (ms)', width: 60, digits: 2 },
     
-    { key: 'highFreq_kHz', label: 'ƒ<sub>high</sub>', tooltip: 'High Freq (kHz)', width: 60, digits: 2 },
-    { key: 'highFreqTime_ms', label: '<i>t </i><sub>high</sub>', tooltip: 'High Freq Time (ms)', width: 60, digits: 2 },
-    
     { key: 'peakFreq_kHz', label: 'ƒ<sub>peak</sub>', tooltip: 'Peak Freq (kHz)', width: 60, digits: 2 },
     { key: 'peakFreqTime_ms', label: '<i>t </i><sub>peak</sub>', tooltip: 'Peak Freq Time (ms)', width: 60, digits: 2 },
+
+    { key: 'characteristicFreq_kHz', label: 'ƒ<sub>char</sub>', tooltip: 'Char Freq (kHz)', width: 60, digits: 2 },
+    { key: 'characteristicFreq_ms', label: '<i>t </i><sub>char</sub>', tooltip: 'Char Freq Time (ms)', width: 60, digits: 2 },
 
     { key: 'kneeFreq_kHz', label: 'ƒ<sub>knee</sub>', tooltip: 'Knee Freq (kHz)', width: 60, digits: 2 },
     { key: 'kneeFreq_ms', label: '<i>t </i><sub>knee</sub>', tooltip: 'Knee Freq Time (ms)', width: 60, digits: 2 },
@@ -121,9 +125,6 @@ export function initCallSummaryTable({
     { key: 'heelFreq_kHz', label: 'ƒ<sub>heel</sub>', tooltip: 'Heel Freq (kHz)', width: 60, digits: 2 },
     { key: 'heelFreq_ms', label: '<i>t </i><sub>heel</sub>', tooltip: 'Heel Freq Time (ms)', width: 60, digits: 2 },
     
-    { key: 'characteristicFreq_kHz', label: 'ƒ<sub>char</sub>', tooltip: 'Char Freq (kHz)', width: 60, digits: 2 },
-    { key: 'characteristicFreq_ms', label: '<i>t </i><sub>char</sub>', tooltip: 'Char Freq Time (ms)', width: 60, digits: 2 },
-
     { key: 'startFreq_kHz', label: 'ƒ<sub>start</sub>', tooltip: 'Start Freq (kHz)', width: 60, digits: 2 },
     { key: 'endFreq_kHz', label: 'ƒ<sub>end</sub>', tooltip: 'End Freq (kHz)', width: 60, digits: 2 },
     
@@ -462,17 +463,23 @@ export function initCallSummaryTable({
             label: 'Clear all', 
             icon: 'fa-trash', 
             action: () => {
-                if (confirm('Are you sure you want to clear ALL calls?')) {
-                    
-                    discardedIds.clear();
-                    allCalls = [];
-                    displayCalls = [];
-                    
-                    if (typeof onClearAll === 'function') {
-                        onClearAll();
+                // [MODIFIED] 使用 messageBox 替代 confirm
+                showMessageBox({
+                    title: 'Clear All',
+                    message: 'Are you sure you want to clear ALL calls?',
+                    confirmText: 'Clear All',
+                    cancelText: 'Cancel',
+                    onConfirm: () => {
+                        discardedIds.clear();
+                        allCalls = [];
+                        displayCalls = [];
+                        
+                        if (typeof onClearAll === 'function') {
+                            onClearAll();
+                        }
+                        renderTable();
                     }
-                    renderTable();
-                }
+                });
             }
         },
         { 
@@ -480,19 +487,32 @@ export function initCallSummaryTable({
             icon: 'fa-eraser', 
             action: () => {
                 if (discardedIds.size === 0) {
-                    alert('No rows selected (checked).');
+                    // [MODIFIED] 使用 messageBox 替代 alert
+                    showMessageBox({
+                        title: 'Notice',
+                        message: 'No rows selected (checked).',
+                        confirmText: 'OK'
+                    });
                     return;
                 }
                 
-                if (confirm(`Remove ${discardedIds.size} selected call(s)?`)) {
-                    const indicesToRemove = Array.from(discardedIds);
-                    
-                    discardedIds.clear();
-                    
-                    if (typeof onDeleteCalls === 'function') {
-                        onDeleteCalls(indicesToRemove);
+                // [MODIFIED] 使用 messageBox 替代 confirm
+                showMessageBox({
+                    title: 'Remove Selected',
+                    message: `Remove ${discardedIds.size} selected call(s)?`,
+                    confirmText: 'Remove',
+                    cancelText: 'Cancel',
+                    onConfirm: () => {
+                        const indicesToRemove = Array.from(discardedIds);
+                        
+                        // [Critical] Clear IDs BEFORE callback to prevent race condition on redraw
+                        discardedIds.clear();
+                        
+                        if (typeof onDeleteCalls === 'function') {
+                            onDeleteCalls(indicesToRemove);
+                        }
                     }
-                }
+                });
             } 
         },
         { separator: true },
@@ -543,47 +563,132 @@ export function initCallSummaryTable({
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
 
-    // 1. Header (固定在頂部)
+    // 1. Header
     const header = document.createElement('div');
     header.className = 'col-ctx-header';
     header.innerText = 'Field selection';
     menu.appendChild(header);
 
-    // 2. Scrollable Body (包裹選項的容器)
+    // ============================================================
+    // 2. Presets Options (Top of menu)
+    // ============================================================
+    const presetContainer = document.createElement('div');
+    presetContainer.style.padding = '4px 0';
+    presetContainer.style.borderBottom = '1px solid var(--border-color)';
+
+    const freqKeys = new Set([
+      'startFreq_kHz', 'endFreq_kHz', 'highFreq_kHz', 'lowFreq_kHz', 
+      'kneeFreq_kHz', 'characteristicFreq_kHz', 'heelFreq_kHz', 'peakFreq_kHz'
+    ]);
+
+    const timeKeys = new Set([
+      'startTime_s', 'endTime_s', 'highFreqTime_ms', 'lowFreqTime_ms', 
+      'kneeFreq_ms', 'characteristicFreq_ms', 'heelFreq_ms', 'peakFreqTime_ms'
+    ]);
+
+    const applyPreset = (filterType) => {
+      columns.forEach(col => {
+        if (col.key === '__discard') return;
+        
+        // 始終保持 ID 可見
+        if (col.key === 'id') {
+          col.visible = true;
+          return;
+        }
+
+        if (filterType === 'all') {
+          col.visible = true;
+        } else if (filterType === 'freq') {
+          col.visible = freqKeys.has(col.key);
+        } else if (filterType === 'time') {
+          col.visible = timeKeys.has(col.key);
+        }
+      });
+
+      renderTable();
+      refreshCheckboxState();
+    };
+
+    const createPresetItem = (label, type) => {
+      const item = document.createElement('div');
+      item.className = 'col-ctx-item';
+      
+      // [UI 優化]
+      // 1. 移除 paddingLeft = '34px'，改為預設 (通常 CSS class 有 padding: 6px 12px)
+      // 這樣就會靠左，不再有空格
+      
+      // 2. 顏色改為跟隨 Theme (Text Primary)
+      item.style.color = 'var(--text-primary)'; 
+      
+      item.style.fontSize = '12px';
+      item.style.fontWeight = '600'; // 稍微加粗以示區別 (可選)
+      item.style.cursor = 'pointer';
+      item.innerText = label;
+      
+      item.onclick = (ev) => {
+        ev.stopPropagation();
+        applyPreset(type);
+      };
+      
+      // Hover 效果
+      item.onmouseenter = () => item.style.backgroundColor = 'var(--bg-secondary)';
+      item.onmouseleave = () => item.style.backgroundColor = 'transparent';
+
+      return item;
+    };
+
+    presetContainer.appendChild(createPresetItem('Show Freq Only', 'freq'));
+    presetContainer.appendChild(createPresetItem('Show Time Only', 'time'));
+    presetContainer.appendChild(createPresetItem('Show All', 'all'));
+    
+    menu.appendChild(presetContainer);
+
+    // ============================================================
+    // 3. Scrollable Body (Checkboxes)
+    // ============================================================
     const scrollContainer = document.createElement('div');
     scrollContainer.className = 'col-ctx-body';
     menu.appendChild(scrollContainer);
 
-    columns.forEach((col, idx) => {
-      if (col.key === '__discard') return;
-
-      const item = document.createElement('div');
-      item.className = 'col-ctx-item';
+    function refreshCheckboxState() {
+      scrollContainer.innerHTML = ''; 
       
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = col.visible;
-      cb.onclick = (ev) => {
-        ev.stopPropagation();
-        col.visible = cb.checked;
-        renderTable();
-      };
+      columns.forEach((col, idx) => {
+        if (col.key === '__discard') return;
 
-      const lbl = document.createElement('span');
-      lbl.innerHTML = col.label;
+        const item = document.createElement('div');
+        item.className = 'col-ctx-item';
+        
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = col.visible;
+        
+        cb.onclick = (ev) => {
+          ev.stopPropagation();
+          col.visible = cb.checked;
+          renderTable();
+        };
 
-      item.appendChild(cb);
-      item.appendChild(lbl);
-      item.onclick = () => {
-        cb.checked = !cb.checked;
-        col.visible = cb.checked;
-        renderTable();
-      };
-      
-      scrollContainer.appendChild(item);
-    });
+        const lbl = document.createElement('span');
+        lbl.innerHTML = col.label;
+
+        item.appendChild(cb);
+        item.appendChild(lbl);
+        
+        item.onclick = () => {
+          cb.checked = !cb.checked;
+          col.visible = cb.checked;
+          renderTable();
+        };
+        
+        scrollContainer.appendChild(item);
+      });
+    }
+
+    refreshCheckboxState();
 
     document.body.appendChild(menu);
+    
     const closeMenu = () => {
       menu.remove();
       document.removeEventListener('click', closeMenu);
