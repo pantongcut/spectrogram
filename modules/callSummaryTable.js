@@ -10,7 +10,9 @@ export function initCallSummaryTable({
   buttonId = 'viewTableBtn',
   popupId = 'callSummaryPopup',
   containerId = 'callSummaryTableContainer',
-  onCallSelected = null
+  onCallSelected = null,
+  onDeleteCalls = null,
+  onClearAll = null
 } = {}) {
   const btn = document.getElementById(buttonId);
   const popup = document.getElementById(popupId);
@@ -435,35 +437,66 @@ export function initCallSummaryTable({
     e.preventDefault();
     e.stopPropagation();
     
-    // 移除現有的選單 (如果有)
     const existing = document.getElementById('action-ctx-menu');
     if (existing) existing.remove();
-    // 也要移除 col-ctx-menu 以防重疊
     const colMenu = document.getElementById('col-ctx-menu');
     if (colMenu) colMenu.remove();
 
     const menu = document.createElement('div');
     menu.id = 'action-ctx-menu';
-    // 複用 col-ctx-menu 的樣式，或者你可以定義新的 action-ctx-menu class
     menu.className = 'col-ctx-menu'; 
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
-    menu.style.minWidth = '150px'; // 稍微調整寬度
+    menu.style.minWidth = '160px';
 
-    // Header
     const header = document.createElement('div');
     header.className = 'col-ctx-header';
     header.innerText = 'Actions';
     menu.appendChild(header);
 
-    // Body
     const body = document.createElement('div');
     body.className = 'col-ctx-body';
 
-    // 定義選項
     const options = [
-        { label: 'Clear all', icon: 'fa-trash', action: () => console.log('Clear all clicked') },
-        { label: 'Clear selected', icon: 'fa-eraser', action: () => console.log('Clear selected clicked') },
+        { 
+            label: 'Clear all', 
+            icon: 'fa-trash', 
+            action: () => {
+                if (confirm('Are you sure you want to clear ALL calls?')) {
+                    // 通知外部清空
+                    if (typeof onClearAll === 'function') {
+                        onClearAll();
+                    }
+                    // 本地清空 (雖然外部更新回來也會清空，但這樣 UI 反應更快)
+                    allCalls = [];
+                    displayCalls = [];
+                    discardedIds.clear();
+                    renderTable();
+                }
+            } 
+        },
+        { 
+            label: 'Clear selected', 
+            icon: 'fa-eraser', 
+            action: () => {
+                if (discardedIds.size === 0) {
+                    alert('No rows selected (checked).');
+                    return;
+                }
+                
+                if (confirm(`Remove ${discardedIds.size} selected call(s)?`)) {
+                    // 將 Set 轉為 Array 傳遞出去
+                    const indicesToRemove = Array.from(discardedIds);
+                    
+                    if (typeof onDeleteCalls === 'function') {
+                        onDeleteCalls(indicesToRemove);
+                    }
+                    
+                    // 清空選取狀態
+                    discardedIds.clear();
+                }
+            } 
+        },
         { separator: true },
         { label: 'Export .xlsx', icon: 'fa-file-excel', action: () => console.log('Export xlsx clicked') },
         { label: 'Export .csv', icon: 'fa-file-csv', action: () => console.log('Export csv clicked') }
@@ -472,18 +505,15 @@ export function initCallSummaryTable({
     options.forEach(opt => {
         if (opt.separator) {
             const sep = document.createElement('div');
-            sep.style.borderTop = '1px solid #eee';
+            sep.style.borderTop = '1px solid var(--border-color)';
             sep.style.margin = '4px 0';
             body.appendChild(sep);
             return;
         }
 
         const item = document.createElement('div');
-        item.className = 'col-ctx-item'; // 複用樣式
-        item.style.padding = '8px 12px';
-        
-        // Icon + Label
-        item.innerHTML = `<i class="fa-solid ${opt.icon}" style="width:20px; text-align:center; margin-right:8px; color:#666;"></i> ${opt.label}`;
+        item.className = 'col-ctx-item';
+        item.innerHTML = `<i class="fa-solid ${opt.icon}" style="width:20px; text-align:center; margin-right:8px; color:var(--text-secondary);"></i> ${opt.label}`;
         
         item.onclick = (ev) => {
             ev.stopPropagation();
@@ -496,7 +526,6 @@ export function initCallSummaryTable({
     menu.appendChild(body);
     document.body.appendChild(menu);
 
-    // 點擊外部關閉
     const closeMenu = () => {
       menu.remove();
       document.removeEventListener('click', closeMenu);

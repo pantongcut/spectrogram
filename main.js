@@ -1561,6 +1561,25 @@ const callSummaryTableControl = initCallSummaryTable({
     if (freqHoverControl && typeof freqHoverControl.highlightSelection === 'function') {
       freqHoverControl.highlightSelection(index);
     }
+  },
+  // [NEW] 處理 Clear All
+  onClearAll: () => {
+    if (freqHoverControl && typeof freqHoverControl.clearSelections === 'function') {
+      freqHoverControl.clearSelections();
+    }
+  },
+  // [NEW] 處理 Clear Selected
+  onDeleteCalls: (indices) => {
+    if (freqHoverControl && typeof freqHoverControl.removeSelectionsByIndices === 'function') {
+      // 1. 要求 FrequencyHover 刪除指定的方框
+      const remainingCalls = freqHoverControl.removeSelectionsByIndices(indices);
+      
+      // 2. 將刪除後剩餘的 Calls 重新同步回 Table
+      // 這保證了 Table 的 ID 順序與 FrequencyHover 內部的 selections 陣列永遠一致
+      if (callSummaryTableControl) {
+        callSummaryTableControl.updateTable(remainingCalls);
+      }
+    }
   }
 });
 

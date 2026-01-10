@@ -1568,12 +1568,38 @@ function createBtnGroup(sel, isShortSelection = false) {
     }
   }
 
+  /**
+   * 根據索引列表批量刪除 Selection Box
+   * @param {Array<number>} indices - 要刪除的 originalIndex 列表
+   */
+  function removeSelectionsByIndices(indices) {
+    const indicesToRemove = new Set(indices);
+    const selectionsToRemove = [];
+
+    // 1. 先收集要刪除的 Selection 對象 (避免邊刪邊迴圈導致索引錯亂)
+    indicesToRemove.forEach(index => {
+      // 確保 index 有效
+      if (index >= 0 && index < selections.length) {
+        selectionsToRemove.push(selections[index]);
+      }
+    });
+
+    // 2. 執行刪除 (removeSelection 會處理 DOM移除 和 陣列 splice)
+    selectionsToRemove.forEach(sel => {
+      removeSelection(sel);
+    });
+
+    // 3. 返回刪除後剩餘的 Bat Calls 列表，以便 Table 更新
+    return getBatCalls();
+  }
+
   return {
     updateSelections,
     clearSelections,
     addAutoSelections,
     getBatCalls,
     highlightSelection,
+    removeSelectionsByIndices,
     setFrequencyRange: (min, max) => {
       minFrequency = min;
       maxFrequency = max;
