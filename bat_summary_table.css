@@ -72,6 +72,27 @@
   border-right: none;
 }
 
+/* --- Action Column Specific Styles (Fix for fa-bars) --- */
+
+/* 1. 針對 Action Column Header 移除 Padding 並強制置中 */
+.summary-table th.th-action-col .th-content {
+  padding: 0 !important;       /* 移除預設的 6px 15px padding */
+  justify-content: center;     /* Flexbox 水平置中 */
+  width: 100%;                 /* 確保佔滿整個格寬 */
+}
+
+/* 2. 針對 Action Column 裡面的 icon 微調 */
+.summary-table th.th-action-col .th-label-container .fa-bars {
+  margin-right: 0 !important;  /* 移除原本為了文字留的間距，確保絕對置中 */
+  font-size: 14px;             /* 稍微調大一點點讓它更明顯 (可選) */
+  display: block;              /* 確保它是 block 行為以便置中 */
+}
+
+/* 3. 確保該欄位游標為預設 (因為不能 Resize) */
+.summary-table th.th-action-col {
+  cursor: default;
+}
+
 /* Header Content Container */
 .summary-table th .th-content {
   position: relative;
@@ -92,6 +113,21 @@
   flex-grow: 1;
   min-width: 0;
   overflow: hidden;
+}
+
+/* --- Action Menu Icon (fa-bars) --- */
+.th-label-container .fa-bars {
+  color: var(--text-secondary); /* 平常狀態：跟隨次要文字顏色 */
+  margin-right: 8px;            /* 與旁邊文字的距離 */
+  font-size: 12px;              /* 大小調整 */
+  cursor: pointer;
+  opacity: 0.7;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.th-label-container .fa-bars:hover {
+  color: var(--text-primary);   /* Hover 狀態：變為主要文字顏色 (亮起) */
+  opacity: 1;
 }
 
 .th-text {

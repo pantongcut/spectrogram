@@ -430,6 +430,80 @@ export function initCallSummaryTable({
     }
   }
 
+  // --- Action Menu (For Discard Column) ---
+  function showActionMenu(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // 移除現有的選單 (如果有)
+    const existing = document.getElementById('action-ctx-menu');
+    if (existing) existing.remove();
+    // 也要移除 col-ctx-menu 以防重疊
+    const colMenu = document.getElementById('col-ctx-menu');
+    if (colMenu) colMenu.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'action-ctx-menu';
+    // 複用 col-ctx-menu 的樣式，或者你可以定義新的 action-ctx-menu class
+    menu.className = 'col-ctx-menu'; 
+    menu.style.left = `${e.clientX}px`;
+    menu.style.top = `${e.clientY}px`;
+    menu.style.minWidth = '150px'; // 稍微調整寬度
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'col-ctx-header';
+    header.innerText = 'Actions';
+    menu.appendChild(header);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'col-ctx-body';
+
+    // 定義選項
+    const options = [
+        { label: 'Clear all', icon: 'fa-trash', action: () => console.log('Clear all clicked') },
+        { label: 'Clear selected', icon: 'fa-eraser', action: () => console.log('Clear selected clicked') },
+        { separator: true },
+        { label: 'Export .xlsx', icon: 'fa-file-excel', action: () => console.log('Export xlsx clicked') },
+        { label: 'Export .csv', icon: 'fa-file-csv', action: () => console.log('Export csv clicked') }
+    ];
+
+    options.forEach(opt => {
+        if (opt.separator) {
+            const sep = document.createElement('div');
+            sep.style.borderTop = '1px solid #eee';
+            sep.style.margin = '4px 0';
+            body.appendChild(sep);
+            return;
+        }
+
+        const item = document.createElement('div');
+        item.className = 'col-ctx-item'; // 複用樣式
+        item.style.padding = '8px 12px';
+        
+        // Icon + Label
+        item.innerHTML = `<i class="fa-solid ${opt.icon}" style="width:20px; text-align:center; margin-right:8px; color:#666;"></i> ${opt.label}`;
+        
+        item.onclick = (ev) => {
+            ev.stopPropagation();
+            opt.action();
+            menu.remove();
+        };
+        body.appendChild(item);
+    });
+
+    menu.appendChild(body);
+    document.body.appendChild(menu);
+
+    // 點擊外部關閉
+    const closeMenu = () => {
+      menu.remove();
+      document.removeEventListener('click', closeMenu);
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 0);
+  }
+
   // --- Context Menu (Column Visibility) ---
   function showContextMenu(e) {
     e.preventDefault();
@@ -511,40 +585,62 @@ export function initCallSummaryTable({
       th.style.width = `${col.width}px`;
       if (col.tooltip) th.title = col.tooltip;
 
+      if (col.key === '__discard') {
+          th.classList.add('th-action-col');
+      }
+
       const thContent = document.createElement('div');
       thContent.className = 'th-content';
       
-      // [修改] 1. 先建立 Label Container (只放文字)
+      // [修改] 1. 建立 Label Container
       const labelContainer = document.createElement('div');
       labelContainer.className = 'th-label-container';
       
-      const textSpan = document.createElement('span');
-      textSpan.className = 'th-text';
-      textSpan.innerHTML = col.label;
-      labelContainer.appendChild(textSpan);
-      
-      // 點擊文字觸發排序
-      if (!col.noSort) {
-        labelContainer.onclick = () => handleSort(col.key);
+      // [NEW] 針對 __discard 欄位特殊處理
+      if (col.key === '__discard') {
+          const menuIcon = document.createElement('i');
+          menuIcon.className = 'fas fa-bars';
+          menuIcon.style.cursor = 'pointer';
+          menuIcon.style.opacity = '0.7';
+          
+          // Hover effect setup (optional via inline or css)
+          menuIcon.onmouseover = () => menuIcon.style.opacity = '1';
+          menuIcon.onmouseout = () => menuIcon.style.opacity = '0.7';
+
+          // 點擊觸發 Action Menu
+          menuIcon.onclick = (e) => {
+              e.stopPropagation();
+              showActionMenu(e);
+          };
+          
+          labelContainer.appendChild(menuIcon);
+      } else {
+          // 一般欄位顯示文字
+          const textSpan = document.createElement('span');
+          textSpan.className = 'th-text';
+          textSpan.innerHTML = col.label;
+          labelContainer.appendChild(textSpan);
+          
+          // 點擊文字觸發排序
+          if (!col.noSort) {
+            labelContainer.onclick = () => handleSort(col.key);
+          }
       }
       
       thContent.appendChild(labelContainer);
 
-      // [修改] 2. 將 Sort Icon 移出 labelContainer，直接加入 thContent
-      // 這樣它就會根據 CSS 的 absolute position 定位，不會推擠文字
+      // [修改] 2. Sort Icon (一般欄位才顯示)
       if (sortState.key === col.key && sortState.direction !== 'none') {
         const sortIcon = document.createElement('i');
         sortIcon.className = 'sort-icon fa-solid';
         sortIcon.className += (sortState.direction === 'asc') ? ' fa-arrow-up' : ' fa-arrow-down';
         
-        // 點擊圖標也要觸發排序
         if (!col.noSort) {
             sortIcon.onclick = (e) => {
-                e.stopPropagation(); // 防止冒泡兩次
+                e.stopPropagation(); 
                 handleSort(col.key);
             };
         }
-        
         thContent.appendChild(sortIcon);
       }
 
@@ -561,14 +657,28 @@ export function initCallSummaryTable({
           thContent.appendChild(filterIcon);
       }
       
-      thContent.oncontextmenu = (e) => showContextMenu(e);
+      // [NEW] 右鍵選單邏輯：__discard 不顯示 Field selection
+      if (col.key === '__discard') {
+          thContent.oncontextmenu = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              // 可以在這裡決定是否右鍵也能開 Action Menu，目前設為不做任何事(屏蔽)
+          };
+      } else {
+          thContent.oncontextmenu = (e) => showContextMenu(e);
+      }
 
       const resizeHandle = document.createElement('div');
       resizeHandle.className = 'resize-handle';
       resizeHandle.onmousedown = (e) => onColumnResizeStart(e, idx);
 
       th.appendChild(thContent);
-      th.appendChild(resizeHandle);
+      if (col.key !== '__discard') {
+          const resizeHandle = document.createElement('div');
+          resizeHandle.className = 'resize-handle';
+          resizeHandle.onmousedown = (e) => onColumnResizeStart(e, idx);
+          th.appendChild(resizeHandle);
+      }
       headerRow.appendChild(th);
     });
 
@@ -613,17 +723,10 @@ export function initCallSummaryTable({
         row.appendChild(td);
       });
       row.addEventListener('click', (e) => {
-        // 1. 阻止事件冒泡 (防止觸發 Sidebar 收合或其他全域點擊事件)
         e.stopPropagation();
-
-        // 2. 移除其他 Row 的 selected class (使用新名稱)
         const prevSelected = container.querySelector('tr.summary-row-selected');
         if (prevSelected) prevSelected.classList.remove('summary-row-selected');
-
-        // 3. 添加當前 Row 的 selected class (使用新名稱)
         row.classList.add('summary-row-selected');
-
-        // 4. 觸發外部回調
         if (typeof onCallSelected === 'function') {
           onCallSelected(originalIndex);
         }
