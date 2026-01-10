@@ -463,17 +463,17 @@ export function initCallSummaryTable({
             icon: 'fa-trash', 
             action: () => {
                 if (confirm('Are you sure you want to clear ALL calls?')) {
-                    // 通知外部清空
+                    
+                    discardedIds.clear();
+                    allCalls = [];
+                    displayCalls = [];
+                    
                     if (typeof onClearAll === 'function') {
                         onClearAll();
                     }
-                    // 本地清空 (雖然外部更新回來也會清空，但這樣 UI 反應更快)
-                    allCalls = [];
-                    displayCalls = [];
-                    discardedIds.clear();
                     renderTable();
                 }
-            } 
+            }
         },
         { 
             label: 'Clear selected', 
@@ -485,15 +485,13 @@ export function initCallSummaryTable({
                 }
                 
                 if (confirm(`Remove ${discardedIds.size} selected call(s)?`)) {
-                    // 將 Set 轉為 Array 傳遞出去
                     const indicesToRemove = Array.from(discardedIds);
+                    
+                    discardedIds.clear();
                     
                     if (typeof onDeleteCalls === 'function') {
                         onDeleteCalls(indicesToRemove);
                     }
-                    
-                    // 清空選取狀態
-                    discardedIds.clear();
                 }
             } 
         },
