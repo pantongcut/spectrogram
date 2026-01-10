@@ -4,6 +4,8 @@
  * Features: Sorting, Filtering, Resizing, Discarding, Column Visibility
  */
 
+import { getIconString } from './icons.js';
+
 export function initCallSummaryTable({
   buttonId = 'viewTableBtn',
   popupId = 'callSummaryPopup',
@@ -241,7 +243,7 @@ export function initCallSummaryTable({
         popup.style.display = 'block';
         
         // C. 更新按鈕圖示 [CHANGED]
-        splitBtn.innerHTML = '<i class="fa-solid fa-table-columns"></i>';
+        splitBtn.innerHTML = getIconString('splitView');
         splitBtn.title = 'Split View';
 
         // D. 恢復按鈕顯示

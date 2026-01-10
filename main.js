@@ -26,6 +26,7 @@ import { initFileLoader, getWavSampleRate } from './modules/fileLoader.js';
 import { initBrightnessControl } from './modules/brightnessControl.js';
 import { initFrequencyHover } from './modules/frequencyHover.js';
 import { getColorMapDefaults } from './modules/spectrogram.esm.js';
+import { getIconString } from './modules/icons.js';
 import { cropWavBlob } from './modules/cropAudio.js';
 import { drawTimeAxis, drawFrequencyGrid } from './modules/axisRenderer.js';
 import { initExport, exportBatCallsToXlsx } from './modules/export.js';
@@ -169,6 +170,10 @@ function updateExpandBackBtn() {
 }
 // Time Expansion UI helper
 const timeExpBtn = document.getElementById('timeexpBtn');
+if (timeExpBtn) {
+    timeExpBtn.innerHTML = getIconString('timeExpansion');
+}
+
 function applyTimeExpansionUI() {
   const active = getTimeExpansionMode();
   if (timeExpBtn) {

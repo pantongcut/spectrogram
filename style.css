@@ -1246,9 +1246,11 @@ body.light-mode .sidebar-button:hover {
   background-color: #9f1410;
 }
 
-.sidebar-button i {
+.sidebar-button i,
+.sidebar-button svg {
   color: var(--icon-color);
   font-size: 15px;
+  transition: color 0.3s;
 }
 
 #themeToggleBtn i {
@@ -2513,10 +2515,18 @@ input.tag-button.editing {
 }
 
 .drop-icon {
-  font-size: 60px;
+  font-size: 60px; /* 控制 SVG 大小 (因為 SVG width="1em") */
   color: var(--text-secondary);
   margin-bottom: 10px;
   transition: color 0.3s;
+  width: 1em;
+  height: 1em;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.drop-icon svg {
+  fill: currentColor; 
 }
 
 #spectrogram-only {
