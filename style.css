@@ -3312,9 +3312,9 @@ input.tag-button.editing {
 
 /* === Spectrogram Selection Highlight (Renamed) === */
 .selection-rect.selection-box-highlighted {
-  border-color: #9b59b6 !important;
-  border-width: 2px !important;
-  box-shadow: 0 0 8px rgba(155, 89, 182, 0.8);
+  border-color: #ff00cb !important;
+  border-width: 1px !important;
+  box-shadow: 0 0 4px rgba(155, 89, 182, 0.8);
   z-index: 50;
   background-color: rgba(155, 89, 182, 0.1) !important;
 }

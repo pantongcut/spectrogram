@@ -111,7 +111,7 @@ export function initCallSummaryTable({
     { key: 'highFreqTime_ms', label: '<i>t </i><sub>high</sub>', tooltip: 'High Freq Time (ms)', width: 60, digits: 2 },
 
     { key: 'lowFreq_kHz', label: 'ƒ<sub>low</sub>', tooltip: 'Low Freq (kHz)', width: 60, digits: 2 },
-    { key: 'lowFreq_ms', label: '<i>t </i><sub>low</sub>', tooltip: 'Low Freq Time (ms)', width: 60, digits: 2 },
+    { key: 'lowFreqTime_ms', label: '<i>t </i><sub>low</sub>', tooltip: 'Low Freq Time (ms)', width: 60, digits: 2 },
     
     { key: 'peakFreq_kHz', label: 'ƒ<sub>peak</sub>', tooltip: 'Peak Freq (kHz)', width: 60, digits: 2 },
     { key: 'peakFreqTime_ms', label: '<i>t </i><sub>peak</sub>', tooltip: 'Peak Freq Time (ms)', width: 60, digits: 2 },
@@ -560,37 +560,58 @@ export function initCallSummaryTable({
     const menu = document.createElement('div');
     menu.id = 'col-ctx-menu';
     menu.className = 'col-ctx-menu';
+    // 改為自動寬度，以容納三欄
+    menu.style.minWidth = 'auto'; 
+    menu.style.whiteSpace = 'nowrap';
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
 
-    // 1. Header
+    // 1. Main Header
     const header = document.createElement('div');
     header.className = 'col-ctx-header';
     header.innerText = 'Field selection';
     menu.appendChild(header);
 
-    // ============================================================
-    // 2. Presets Options (Top of menu)
-    // ============================================================
-    const presetContainer = document.createElement('div');
-    presetContainer.style.padding = '4px 0';
-    presetContainer.style.borderBottom = '1px solid var(--border-color)';
+    // 2. Three-Column Container
+    const contentContainer = document.createElement('div');
+    contentContainer.style.display = 'flex';
+    contentContainer.style.flexDirection = 'row';
+    contentContainer.style.gap = '20px'; // 欄間距
+    contentContainer.style.padding = '10px 15px';
 
-    const freqKeys = new Set([
-      'startFreq_kHz', 'endFreq_kHz', 'highFreq_kHz', 'lowFreq_kHz', 
-      'kneeFreq_kHz', 'characteristicFreq_kHz', 'heelFreq_kHz', 'peakFreq_kHz'
-    ]);
+    // 定義三欄的結構、對應的 Column Key 以及顯示名稱 (參考您的圖片)
+    const groups = [
+      {
+        header: 'Show All',
+        actionType: 'all', // 按下此標題會顯示全部
+        keys: ['id', 'duration_ms', 'bandwidth_kHz', 'peakPower_dB', 'snr_dB', 'quality'],
+        labels: ['ID', 'Duration', 'Bandwidth', 'PeakdB', 'SNR', 'Quality']
+      },
+      {
+        header: 'Freq Only',
+        actionType: 'freq', // 按下此標題只顯示 Freq
+        keys: ['startFreq_kHz', 'endFreq_kHz', 'highFreq_kHz', 'lowFreq_kHz', 'peakFreq_kHz', 'characteristicFreq_kHz', 'kneeFreq_kHz', 'heelFreq_kHz'],
+        labels: ['Start Freq', 'End Freq', 'High Freq', 'Low Freq', 'Peak Freq', 'Char Freq', 'Knee Freq', 'Heel Freq']
+      },
+      {
+        header: 'Time Only',
+        actionType: 'time', // 按下此標題只顯示 Time
+        keys: ['startTime_s', 'endTime_s', 'highFreqTime_ms', 'lowFreqTime_ms', 'peakFreqTime_ms', 'characteristicFreq_ms', 'kneeFreq_ms', 'heelFreq_ms'],
+        labels: ['Start Time', 'End Time', 'High Time', 'Low Time', 'Peak Time', 'Char Time', 'Knee Time', 'Heel Time']
+      }
+    ];
 
-    const timeKeys = new Set([
-      'startTime_s', 'endTime_s', 'highFreqTime_ms', 'lowFreqTime_ms', 
-      'kneeFreq_ms', 'characteristicFreq_ms', 'heelFreq_ms', 'peakFreqTime_ms'
-    ]);
+    // 用於快速查詢的 Set
+    const freqKeysSet = new Set(groups[1].keys);
+    const timeKeysSet = new Set(groups[2].keys);
+    const checkboxMap = {}; // 儲存 checkbox 引用以便刷新狀態
 
+    // 篩選邏輯
     const applyPreset = (filterType) => {
       columns.forEach(col => {
         if (col.key === '__discard') return;
         
-        // 始終保持 ID 可見
+        // ID 始終保持可見 (除非您希望 Freq Only 時連 ID 都隱藏，可移除此判斷)
         if (col.key === 'id') {
           col.visible = true;
           return;
@@ -599,100 +620,125 @@ export function initCallSummaryTable({
         if (filterType === 'all') {
           col.visible = true;
         } else if (filterType === 'freq') {
-          col.visible = freqKeys.has(col.key);
+          col.visible = freqKeysSet.has(col.key);
         } else if (filterType === 'time') {
-          col.visible = timeKeys.has(col.key);
+          col.visible = timeKeysSet.has(col.key);
         }
       });
-
       renderTable();
-      refreshCheckboxState();
+      refreshAllCheckboxes();
     };
 
-    const createPresetItem = (label, type) => {
-      const item = document.createElement('div');
-      item.className = 'col-ctx-item';
-      
-      // [UI 優化]
-      // 1. 移除 paddingLeft = '34px'，改為預設 (通常 CSS class 有 padding: 6px 12px)
-      // 這樣就會靠左，不再有空格
-      
-      // 2. 顏色改為跟隨 Theme (Text Primary)
-      item.style.color = 'var(--text-primary)'; 
-      
-      item.style.fontSize = '12px';
-      item.style.fontWeight = '600'; // 稍微加粗以示區別 (可選)
-      item.style.cursor = 'pointer';
-      item.innerText = label;
-      
-      item.onclick = (ev) => {
-        ev.stopPropagation();
-        applyPreset(type);
+    // 建立三欄 UI
+    groups.forEach(group => {
+      const colDiv = document.createElement('div');
+      colDiv.style.display = 'flex';
+      colDiv.style.flexDirection = 'column';
+      colDiv.style.minWidth = '90px';
+
+      // 欄標題 (也是按鈕)
+      const groupHeader = document.createElement('div');
+      groupHeader.innerText = group.header;
+      groupHeader.style.fontWeight = 'bold';
+      groupHeader.style.fontSize = '12px';
+      groupHeader.style.marginBottom = '8px';
+      groupHeader.style.paddingBottom = '4px';
+      groupHeader.style.cursor = 'pointer';
+      groupHeader.style.textAlign = 'center';
+      groupHeader.style.color = 'var(--text-primary)';
+      groupHeader.style.borderBottom = '2px solid var(--border-color)';
+
+      // Header Hover 效果
+      groupHeader.onmouseover = () => {
+        groupHeader.style.color = 'var(--paravalue-color)';
+        groupHeader.style.borderColor = 'var(--paravalue-color)';
+      };
+      groupHeader.onmouseout = () => {
+        groupHeader.style.color = 'var(--text-primary)';
+        groupHeader.style.borderColor = 'var(--border-color)';
       };
       
-      // Hover 效果
-      item.onmouseenter = () => item.style.backgroundColor = 'var(--bg-secondary)';
-      item.onmouseleave = () => item.style.backgroundColor = 'transparent';
+      // Header Click 事件
+      groupHeader.onclick = (ev) => {
+        ev.stopPropagation();
+        applyPreset(group.actionType);
+      };
 
-      return item;
-    };
+      colDiv.appendChild(groupHeader);
 
-    presetContainer.appendChild(createPresetItem('Show Freq Only', 'freq'));
-    presetContainer.appendChild(createPresetItem('Show Time Only', 'time'));
-    presetContainer.appendChild(createPresetItem('Show All', 'all'));
-    
-    menu.appendChild(presetContainer);
+      // 建立該欄的 Checkbox 清單
+      group.keys.forEach((key, idx) => {
+        const colDef = columns.find(c => c.key === key);
+        if (!colDef) return;
 
-    // ============================================================
-    // 3. Scrollable Body (Checkboxes)
-    // ============================================================
-    const scrollContainer = document.createElement('div');
-    scrollContainer.className = 'col-ctx-body';
-    menu.appendChild(scrollContainer);
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.padding = '3px 0';
+        row.style.cursor = 'pointer';
 
-    function refreshCheckboxState() {
-      scrollContainer.innerHTML = ''; 
-      
-      columns.forEach((col, idx) => {
-        if (col.key === '__discard') return;
-
-        const item = document.createElement('div');
-        item.className = 'col-ctx-item';
-        
         const cb = document.createElement('input');
         cb.type = 'checkbox';
-        cb.checked = col.visible;
+        cb.checked = colDef.visible;
+        cb.style.marginRight = '8px';
+        cb.style.cursor = 'pointer';
         
+        checkboxMap[key] = cb; // 存起來以便之後刷新
+
         cb.onclick = (ev) => {
           ev.stopPropagation();
-          col.visible = cb.checked;
+          colDef.visible = cb.checked;
           renderTable();
         };
 
         const lbl = document.createElement('span');
-        lbl.innerHTML = col.label;
+        lbl.innerText = group.labels[idx]; // 使用自定義名稱
+        lbl.style.fontSize = '12px';
+        lbl.style.color = 'var(--text-primary)'; // 支援 Dark/Light mode
 
-        item.appendChild(cb);
-        item.appendChild(lbl);
+        row.appendChild(cb);
+        row.appendChild(lbl);
         
-        item.onclick = () => {
-          cb.checked = !cb.checked;
-          col.visible = cb.checked;
-          renderTable();
+        // 點擊整行也能切換
+        row.onclick = () => {
+           cb.checked = !cb.checked;
+           colDef.visible = cb.checked;
+           renderTable();
         };
-        
-        scrollContainer.appendChild(item);
+
+        colDiv.appendChild(row);
       });
-    }
 
-    refreshCheckboxState();
+      contentContainer.appendChild(colDiv);
+    });
 
+    menu.appendChild(contentContainer);
     document.body.appendChild(menu);
     
-    const closeMenu = () => {
-      menu.remove();
-      document.removeEventListener('click', closeMenu);
+    // 位置修正：如果選單超出右邊界，往左移
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+        menu.style.left = `${window.innerWidth - rect.width - 10}px`;
+    }
+
+    // 刷新所有 Checkbox 狀態的 Helper
+    function refreshAllCheckboxes() {
+       Object.keys(checkboxMap).forEach(key => {
+          const colDef = columns.find(c => c.key === key);
+          if (colDef && checkboxMap[key]) {
+             checkboxMap[key].checked = colDef.visible;
+          }
+       });
+    }
+
+    // 點擊外部關閉
+    const closeMenu = (ev) => {
+       if (!menu.contains(ev.target)) {
+          menu.remove();
+          document.removeEventListener('click', closeMenu);
+       }
     };
+    // 稍微延遲以避免立即觸發
     setTimeout(() => document.addEventListener('click', closeMenu), 0);
   }
 
