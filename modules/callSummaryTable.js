@@ -112,7 +112,7 @@ export function initCallSummaryTable({
     { key: 'highFreqTime_ms', label: '<i>t </i><sub>high</sub>', tooltip: 'High Freq Time (ms)', width: 60, digits: 2 },
 
     { key: 'lowFreq_kHz', label: 'ƒ<sub>low</sub>', tooltip: 'Low Freq (kHz)', width: 60, digits: 2 },
-    { key: 'lowFreqTime_ms', label: '<i>t </i><sub>low</sub>', tooltip: 'Low Freq Time (ms)', width: 60, digits: 2 },
+    { key: 'lowFreq_ms', label: '<i>t </i><sub>low</sub>', tooltip: 'Low Freq Time (ms)', width: 60, digits: 2 },
     
     { key: 'peakFreq_kHz', label: 'ƒ<sub>peak</sub>', tooltip: 'Peak Freq (kHz)', width: 60, digits: 2 },
     { key: 'peakFreqTime_ms', label: '<i>t </i><sub>peak</sub>', tooltip: 'Peak Freq Time (ms)', width: 60, digits: 2 },
@@ -628,7 +628,7 @@ export function initCallSummaryTable({
       {
         header: 'Time Only',
         actionType: 'time', // 按下此標題只顯示 Time
-        keys: ['startTime_s', 'endTime_s', 'highFreqTime_ms', 'lowFreqTime_ms', 'peakFreqTime_ms', 'characteristicFreq_ms', 'kneeFreq_ms', 'heelFreq_ms'],
+        keys: ['startTime_s', 'endTime_s', 'highFreqTime_ms', 'lowFreq_ms', 'peakFreqTime_ms', 'characteristicFreq_ms', 'kneeFreq_ms', 'heelFreq_ms'],
         labels: ['Start Time', 'End Time', 'High Time', 'Low Time', 'Peak Time', 'Char Time', 'Knee Time', 'Heel Time']
       }
     ];
