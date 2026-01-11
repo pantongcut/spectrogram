@@ -6,6 +6,7 @@
 
 import { getIconString } from './icons.js';
 import { showMessageBox } from './messageBox.js';
+import { exportBatCallsToXlsx, exportBatCallsToCsv } from './export.js';
 
 export function initCallSummaryTable({
   buttonId = 'viewTableBtn',
@@ -433,6 +434,14 @@ export function initCallSummaryTable({
     }
   }
 
+  // --- Helper: Generate Filename ---
+  function getExportFilename(extension) {
+    // 嘗試從 window 全局變量獲取當前文件名 (main.js 定義的)
+    const originalName = window.__currentFileName ? window.__currentFileName.replace(/\.[^/.]+$/, "") : "bat_calls";
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19); // YYYY-MM-DDTHH-mm-ss
+    return `${originalName}_summary_table_${timestamp}${extension}`;
+  }
+
   // --- Action Menu (For Discard Column) ---
   function showActionMenu(e) {
     e.preventDefault();
@@ -516,8 +525,31 @@ export function initCallSummaryTable({
             } 
         },
         { separator: true },
-        { label: 'Export .xlsx', icon: 'fa-file-excel', action: () => console.log('Export xlsx clicked') },
-        { label: 'Export .csv', icon: 'fa-file-csv', action: () => console.log('Export csv clicked') }
+        { 
+            label: 'Export .xlsx', 
+            icon: 'fa-file-excel', 
+            action: () => {
+                if (displayCalls.length === 0) {
+                    showMessageBox({ title: 'Info', message: 'Table is empty, nothing to export.' });
+                    return;
+                }
+                const filename = getExportFilename('.xlsx');
+                // 使用 displayCalls 確保導出的是當前表格顯示的內容 (包含排序與篩選後的結果)
+                exportBatCallsToXlsx(displayCalls, filename);
+            } 
+        },
+        { 
+            label: 'Export .csv', 
+            icon: 'fa-file-csv', 
+            action: () => {
+                if (displayCalls.length === 0) {
+                    showMessageBox({ title: 'Info', message: 'Table is empty, nothing to export.' });
+                    return;
+                }
+                const filename = getExportFilename('.csv');
+                exportBatCallsToCsv(displayCalls, filename);
+            } 
+        }
     ];
 
     options.forEach(opt => {

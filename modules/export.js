@@ -443,3 +443,75 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+// ============================================================
+// [NEW] Bat Call 專用 CSV 導出函數
+// ============================================================
+export function exportBatCallsToCsv(calls, filename = 'bat_calls_analysis.csv') {
+  if (!calls || calls.length === 0) {
+    // 避免循環依賴，這裡使用原生的 alert，或者假設 messageBox 已加載
+    alert("No calls to export.");
+    return;
+  }
+
+  // 數值格式化輔助函數
+  const fmt = (val, p = 2) => {
+    if (val === null || val === undefined || isNaN(val)) return "";
+    return val.toFixed(p);
+  };
+
+  // 1. 定義 Headers (保持與 Excel 一致)
+  const headers = [
+    "ID", 
+    "Start Time (s)", "End Time (s)", "Duration (ms)", 
+    "Low Freq (kHz)", "Low Freq Time (ms)", 
+    "High Freq (kHz)", "High Freq Time (ms)", 
+    "Peak Freq (kHz)", "Peak Freq Time (ms)", 
+    "Knee Freq (kHz)", "Knee Freq Time (ms)", 
+    "Heel Freq (kHz)", "Heel Freq Time (ms)",
+    "Char Freq (kHz)", "Char Freq Time (ms)", 
+    "Start Freq (kHz)", "End Freq (kHz)",
+    "Bandwidth (kHz)", "Peak Power (dB)", "SNR (dB)", "Quality"
+  ];
+
+  // 2. 構建 CSV 內容
+  let csvContent = headers.join(",") + "\n";
+
+  calls.forEach((call, index) => {
+    const row = [
+      index + 1,
+      fmt(call.startTime_s, 4),
+      fmt(call.endTime_s, 4),
+      fmt(call.duration_ms, 2),
+      
+      fmt(call.lowFreq_kHz, 2), fmt(call.lowFreq_ms, 2),
+      fmt(call.highFreq_kHz, 2), fmt(call.highFreqTime_ms, 2),
+      fmt(call.peakFreq_kHz, 2), fmt(call.peakFreqTime_ms, 2),
+      fmt(call.kneeFreq_kHz, 2), fmt(call.kneeFreq_ms, 2),
+      fmt(call.heelFreq_kHz, 2), fmt(call.heelFreq_ms, 2),
+      fmt(call.characteristicFreq_kHz, 2), fmt(call.characteristicFreq_ms, 2),
+      
+      fmt(call.startFreq_kHz, 2),
+      fmt(call.endFreq_kHz, 2),
+      
+      fmt(call.bandwidth_kHz, 2),
+      fmt(call.peakPower_dB, 1),
+      fmt(call.snr_dB, 1),
+      
+      `"${call.quality || ""}"` // Quality 是文字，加上引號以防萬一
+    ];
+    csvContent += row.join(",") + "\n";
+  });
+
+  // 3. 下載文件
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.endsWith('.csv') ? filename : `${filename}.csv`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
