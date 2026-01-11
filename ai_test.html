@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Bat AI Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            padding: 20px;
+        }
+
+        .box {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin-top: 10px;
+            border-radius: 8px;
+        }
+
+        button {
+            padding: 10px 20px;
+            cursor: pointer;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        #result {
+            font-weight: bold;
+            color: green;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🦇 蝙蝠叫聲 AI 辨識器 (網頁版)</h1>
+    <p>這是一個測試頁面，用來驗證 bat_model.onnx 是否能在瀏覽器運行。</p>
+
+    <div class="box">
+        <h3>模擬輸入數據 (10 個參數)</h3>
+        <p>假設我們從錄音中提取了以下特徵：</p>
+        <code id="inputData">[0.5, 0.2, 0.8, 0.1, 0.5, 0.5, 0.2, 0.8, 0.1, 0.5]</code>
+        <br><br>
+        <button onclick="runAI()">立即辨識</button>
+    </div>
+
+    <div class="box">
+        <h3>辨識結果：</h3>
+        <p id="output">等待分析...</p>
+    </div>
+
+    <script>
+        // 模擬數據
+        const inputData = [
+            4.5,   // Duration
+            46.9,  // Low Freq
+            4.5,   // Low Freq Time
+            61.06, // High Freq
+            0,     // High Freq Time
+            48.38, // Peak Freq
+            3.0,   // Peak Freq Time
+            53.63, // Knee Freq
+            0.25,  // Knee Freq Time
+            49.13, // Heel Freq (如果沒有就填 -1)
+            2.08,  // Heel Freq Time
+            48.38, // Char Freq
+            6.0,   // Char Freq Time
+            61.06, // Start Freq
+            46.9,  // End Freq
+            14.16  // Bandwidth
+        ];
+
+        async function runAI() {
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerText = "正在載入模型並運算...";
+
+            try {
+                // 1. 建立 Session
+                const session = await ort.InferenceSession.create('./bat_model.onnx');
+
+                // 2. 準備輸入
+                // 注意：如果將來輸入名字變了，也可以用 session.inputNames[0] 來查
+                const tensor = new ort.Tensor('float32', inputData, [1, 16]);
+                const inputName = session.inputNames[0]; // 自動取得輸入名稱 (通常是 float_input)
+                const feeds = {};
+                feeds[inputName] = tensor;
+
+                // 3. 執行預測
+                const results = await session.run(feeds);
+
+                // ============================================
+                // 🌟 自動偵測輸出名稱 (修復錯誤的關鍵)
+                // ============================================
+                console.log("模型的所有輸出:", results); // 在 Console 顯示所有資訊
+
+                // 取得所有輸出的名字 (例如 ['label', 'probabilities'])
+                const outputKeys = Object.keys(results);
+
+                // 假設第一個輸出是「分類標籤」，第二個是「機率」
+                // (通常 onnx 模型都會把 label 放在第一個)
+                const labelKey = outputKeys[0];
+                const probKey = outputKeys[1];
+
+                console.log(`偵測到輸出名稱 -> 標籤: ${labelKey}, 機率: ${probKey}`);
+
+                // 4. 讀取數據
+                const prediction = results[labelKey].data[0];
+                const rawProbabilities = results[probKey].data;
+                const formattedProbs = Array.from(rawProbabilities).map(num =>
+                    (num * 100).toFixed(2) + "%"
+                );
+
+                // 顯示結果
+                outputDiv.innerHTML = `
+                    預測物種: <span id="result" style="font-size: 1.5em; color: blue;">${prediction}</span>
+                    <br><br>
+                    <small>輸出名稱: ${labelKey}</small><br>
+                    <small>各類別機率: <b>[ ${formattedProbs.join(', ')} ]</b></small>
+                `;
+
+            } catch (e) {
+                console.error("發生錯誤:", e);
+                outputDiv.innerText = "發生錯誤: " + e.message + " (請按 F12 看 Console)";
+            }
+        }
+    </script>
+</body>
+
+</html>
