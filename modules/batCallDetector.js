@@ -82,10 +82,10 @@ export class BatCall {
     // 7 Frequency Parameters with Time Values (ms)
     // ============================================================
     this.peakFreq_kHz = null;       // Peak frequency (kHz) - absolute max power
-    this.peakFreqTime_ms = null;    // Peak frequency time (ms) - time of peak power frame (absolute time in selection area)
+    this.peakFreq_ms = null;    // Peak frequency time (ms) - time of peak power frame (absolute time in selection area)
 
     this.highFreq_kHz = null;       // High frequency (kHz) - highest frequency in entire call (calculated from all frames)
-    this.highFreqTime_ms = null;    // High frequency time (ms) - time of high frequency occurrence within selection area
+    this.highFreq_ms = null;    // High frequency time (ms) - time of high frequency occurrence within selection area
     this.highFreqFrameIdx = null;   // High frequency frame index - which frame the high frequency occurs in
 
     this.startFreq_kHz = null;      // Start frequency (kHz) - time-domain start frequency (from first frame, -24dB threshold or rule b)
@@ -234,11 +234,11 @@ export class BatCall {
     if (this.duration_ms !== null) {
       this.duration_ms /= factor;
     }
-    if (this.peakFreqTime_ms !== null) {
-      this.peakFreqTime_ms /= factor;
+    if (this.peakFreq_ms !== null) {
+      this.peakFreq_ms /= factor;
     }
-    if (this.highFreqTime_ms !== null) {
-      this.highFreqTime_ms /= factor;
+    if (this.highFreq_ms !== null) {
+      this.highFreq_ms /= factor;
     }
     if (this.startFreq_ms !== null) {
       this.startFreq_ms /= factor;
@@ -325,10 +325,10 @@ export class BatCall {
       'Bandwidth [kHz]': this.bandwidth_kHz?.toFixed(2) || '-',
 
       // Time Parameters (Normalized)
-      'Peak Time [ms]': this.peakFreqTime_ms?.toFixed(2) || '-',
+      'Peak Time [ms]': this.peakFreq_ms?.toFixed(2) || '-',
       'Knee Time [ms]': this.kneeFreq_ms?.toFixed(2) || '-',
       'Heel Time [ms]': this.heelFreq_ms?.toFixed(2) || '-',
-      'High Time [ms]': this.highFreqTime_ms?.toFixed(2) || '-',
+      'High Time [ms]': this.highFreq_ms?.toFixed(2) || '-',
       'Low Time [ms]': this.lowFreq_ms?.toFixed(2) || '-',
 
       // Other
@@ -2975,7 +2975,7 @@ export class BatCallDetector {
     if (peakFrameIdx < timeFrames.length) {
       const peakTimeInSeconds = timeFrames[peakFrameIdx];
       const firstFrameTimeInSeconds = timeFrames[0];
-      call.peakFreqTime_ms = (peakTimeInSeconds - firstFrameTimeInSeconds) * 1000;
+      call.peakFreq_ms = (peakTimeInSeconds - firstFrameTimeInSeconds) * 1000;
       call.peakFrameIdx = peakFrameIdx;
     }
 
@@ -3133,14 +3133,14 @@ export class BatCallDetector {
 
       // Calculate Time
       if (safeHighFreqFrameIdx < timeFrames.length) {
-        call.highFreqTime_ms = (timeFrames[safeHighFreqFrameIdx] - timeFrames[0]) * 1000;
+        call.highFreq_ms = (timeFrames[safeHighFreqFrameIdx] - timeFrames[0]) * 1000;
       }
     } else {
       // Fallback
       highFreq_Hz = fhighKHz * 1000;
       call.highFreq_kHz = fhighKHz;
       call.highFreqFrameIdx = 0;
-      call.highFreqTime_ms = 0;
+      call.highFreq_ms = 0;
     }
 
     // ============================================================
@@ -3605,8 +3605,8 @@ export class BatCallDetector {
 
       call.startFreq_ms = 0.00;
 
-      if (peakFrameIdx !== null) call.peakFreqTime_ms = normalizeTime(peakFrameIdx);
-      if (call.highFreqFrameIdx !== null) call.highFreqTime_ms = normalizeTime(call.highFreqFrameIdx);
+      if (peakFrameIdx !== null) call.peakFreq_ms = normalizeTime(peakFrameIdx);
+      if (call.highFreqFrameIdx !== null) call.highFreq_ms = normalizeTime(call.highFreqFrameIdx);
       if (call.endFrameIdx_forLowFreq !== null) {
         const relTime = normalizeTime(call.endFrameIdx_forLowFreq);
         call.endFreq_ms = relTime;

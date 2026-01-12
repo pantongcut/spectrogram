@@ -1325,9 +1325,9 @@ function updateParametersDisplay(popup, batCall, peakFreqFallback = null) {
     // Time Values Update
     if (startFreqTimeEl) startFreqTimeEl.textContent = batCall.startFreq_ms?.toFixed(2) || '-';
     if (endFreqTimeEl) endFreqTimeEl.textContent = batCall.endFreq_ms?.toFixed(2) || '-';
-    if (highFreqTimeEl) highFreqTimeEl.textContent = batCall.highFreqTime_ms?.toFixed(2) || '-';
+    if (highFreqTimeEl) highFreqTimeEl.textContent = batCall.highFreq_ms?.toFixed(2) || '-';
     if (lowFreqTimeEl) lowFreqTimeEl.textContent = batCall.lowFreq_ms?.toFixed(2) || '-';
-    if (peakFreqTimeEl) peakFreqTimeEl.textContent = batCall.peakFreqTime_ms?.toFixed(2) || '-';
+    if (peakFreqTimeEl) peakFreqTimeEl.textContent = batCall.peakFreq_ms?.toFixed(2) || '-';
     if (charFreqTimeEl) charFreqTimeEl.textContent = batCall.characteristicFreq_ms?.toFixed(2) || '-';
   } else {
     // Reset to '-'

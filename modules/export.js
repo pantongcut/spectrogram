@@ -362,18 +362,23 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
 
   // 1. 定義 Headers
   const headers = [
-    "ID", 
-    "Start Time (s)", 
-    "End Time (s)", 
+    "ID",
+    // [NEW] Added Signal Start/End
+    "Signal Start (s)",
+    "Signal End (s)", 
+    
+    // [MODIFIED] Changed unit to (ms)
+    "Start Time (ms)", 
+    "End Time (ms)", 
     "Duration (ms)", 
     
     // Frequency & Time Pairs
-    "Low Freq (kHz)", "Low Freq Time (ms)", 
-    "High Freq (kHz)", "High Freq Time (ms)", 
-    "Peak Freq (kHz)", "Peak Freq Time (ms)", 
-    "Knee Freq (kHz)", "Knee Freq Time (ms)", 
-    "Heel Freq (kHz)", "Heel Freq Time (ms)",
-    "Char Freq (kHz)", "Char Freq Time (ms)", 
+    "Low Freq (kHz)", "Low Time (ms)", 
+    "High Freq (kHz)", "High Time (ms)", 
+    "Peak Freq (kHz)", "Peak Time (ms)", 
+    "Knee Freq (kHz)", "Knee Time (ms)", 
+    "Heel Freq (kHz)", "Heel Time (ms)",
+    "Char Freq (kHz)", "Char Time (ms)", 
     
     // Other Freqs
     "Start Freq (kHz)", 
@@ -389,11 +394,18 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
   const rows = [headers];
 
   calls.forEach((call, index) => {
-    // 2. 填充數據 (使用 fmt 函數轉為數字)
+    // 2. 填充數據
     rows.push([
-      index + 1, // ID (Number)
+      index + 1, // ID
+      
+      // [NEW] Signal Columns
       fmt(call.startTime_s, 4),
       fmt(call.endTime_s, 4),
+
+      // [MODIFIED] Changed source to startFreq_ms / endFreq_ms
+      fmt(call.startFreq_ms, 2),
+      fmt(call.endFreq_ms, 2),
+      
       fmt(call.duration_ms, 2),
       
       // Low Freq Pair
@@ -402,11 +414,11 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
       
       // High Freq Pair
       fmt(call.highFreq_kHz, 2),
-      fmt(call.highFreqTime_ms, 2),
+      fmt(call.highFreq_ms, 2),
       
       // Peak Freq Pair
       fmt(call.peakFreq_kHz, 2),
-      fmt(call.peakFreqTime_ms, 2),
+      fmt(call.peakFreq_ms, 2),
       
       // Knee Freq Pair
       fmt(call.kneeFreq_kHz, 2),
@@ -427,7 +439,7 @@ export function exportBatCallsToXlsx(calls, filename = 'bat_calls_analysis.xlsx'
       fmt(call.peakPower_dB, 1),
       fmt(call.snr_dB, 1),
       
-      call.quality || "" // Quality 是文字，保持原樣
+      call.quality || ""
     ]);
   });
 
@@ -463,13 +475,14 @@ export function exportBatCallsToCsv(calls, filename = 'bat_calls_analysis.csv') 
   // 1. 定義 Headers (保持與 Excel 一致)
   const headers = [
     "ID", 
-    "Start Time (s)", "End Time (s)", "Duration (ms)", 
-    "Low Freq (kHz)", "Low Freq Time (ms)", 
-    "High Freq (kHz)", "High Freq Time (ms)", 
-    "Peak Freq (kHz)", "Peak Freq Time (ms)", 
-    "Knee Freq (kHz)", "Knee Freq Time (ms)", 
-    "Heel Freq (kHz)", "Heel Freq Time (ms)",
-    "Char Freq (kHz)", "Char Freq Time (ms)", 
+    "Signal Start (s)", "Signal End (s)",
+    "Start Time (ms)", "End Time (ms)", "Duration (ms)", 
+    "Low Freq (kHz)", "Low Time (ms)", 
+    "High Freq (kHz)", "High Time (ms)", 
+    "Peak Freq (kHz)", "Peak Time (ms)", 
+    "Knee Freq (kHz)", "Knee Time (ms)", 
+    "Heel Freq (kHz)", "Heel Time (ms)",
+    "Char Freq (kHz)", "Char Time (ms)", 
     "Start Freq (kHz)", "End Freq (kHz)",
     "Bandwidth (kHz)", "Peak Power (dB)", "SNR (dB)", "Quality"
   ];
@@ -480,13 +493,18 @@ export function exportBatCallsToCsv(calls, filename = 'bat_calls_analysis.csv') 
   calls.forEach((call, index) => {
     const row = [
       index + 1,
+      // [NEW] Signal Columns
       fmt(call.startTime_s, 4),
       fmt(call.endTime_s, 4),
+
+      // [MODIFIED] Changed source to _ms
+      fmt(call.startFreq_ms, 2),
+      fmt(call.endFreq_ms, 2),
       fmt(call.duration_ms, 2),
       
       fmt(call.lowFreq_kHz, 2), fmt(call.lowFreq_ms, 2),
-      fmt(call.highFreq_kHz, 2), fmt(call.highFreqTime_ms, 2),
-      fmt(call.peakFreq_kHz, 2), fmt(call.peakFreqTime_ms, 2),
+      fmt(call.highFreq_kHz, 2), fmt(call.highFreq_ms, 2),
+      fmt(call.peakFreq_kHz, 2), fmt(call.peakFreq_ms, 2),
       fmt(call.kneeFreq_kHz, 2), fmt(call.kneeFreq_ms, 2),
       fmt(call.heelFreq_kHz, 2), fmt(call.heelFreq_ms, 2),
       fmt(call.characteristicFreq_kHz, 2), fmt(call.characteristicFreq_ms, 2),
@@ -498,7 +516,7 @@ export function exportBatCallsToCsv(calls, filename = 'bat_calls_analysis.csv') 
       fmt(call.peakPower_dB, 1),
       fmt(call.snr_dB, 1),
       
-      `"${call.quality || ""}"` // Quality 是文字，加上引號以防萬一
+      `"${call.quality || ""}"`
     ];
     csvContent += row.join(",") + "\n";
   });

@@ -103,19 +103,25 @@ export function initCallSummaryTable({
     { key: '__discard', label: '', width: 40, noSort: true, noFilter: true },
     { key: 'id', label: 'ID', tooltip: 'ID', width: 42, noFilter: true },
     
-    { key: 'startTime_s', label: '<i>t </i><sub>start</sub>', tooltip: 'Start Time (s)', width: 60, digits: 4 },
-    { key: 'endTime_s', label: '<i>t </i><sub>end</sub>', tooltip: 'End Time (s)', width: 60, digits: 4 },
+    { key: 'startTime_s', label: '𝑆<sub>start</sub>', tooltip: 'Signal Start Time (s)', width: 70, digits: 4 },
+    { key: 'endTime_s', label: '𝑆<sub>end</sub>', tooltip: 'Signal End Time (s)', width: 70, digits: 4 },
     { key: 'duration_ms', label: 'Dur', tooltip: 'Duration (ms)', width: 60, digits: 2 },
+    { key: 'bandwidth_kHz', label: 'BW', tooltip: 'Bandwidth (kHz)', width: 60, digits: 2 },
+
+    { key: 'startFreq_kHz', label: 'ƒ<sub>start</sub>', tooltip: 'Start Freq (kHz)', width: 60, digits: 2 },
+    { key: 'startFreq_ms', label: '<i>t </i><sub>start</sub>', tooltip: 'Start Time (ms relative to signal)', width: 60, digits: 2 },
+
+    { key: 'endFreq_kHz', label: 'ƒ<sub>end</sub>', tooltip: 'End Freq (kHz)', width: 60, digits: 2 },
+    { key: 'endFreq_ms', label: '<i>t </i><sub>end</sub>', tooltip: 'End Time (ms relative to signal)', width: 60, digits: 2 },
     
-    // Frequency & Time Pairs
     { key: 'highFreq_kHz', label: 'ƒ<sub>high</sub>', tooltip: 'High Freq (kHz)', width: 60, digits: 2 },
-    { key: 'highFreqTime_ms', label: '<i>t </i><sub>high</sub>', tooltip: 'High Freq Time (ms)', width: 60, digits: 2 },
+    { key: 'highFreq_ms', label: '<i>t </i><sub>high</sub>', tooltip: 'High Freq Time (ms)', width: 60, digits: 2 },
 
     { key: 'lowFreq_kHz', label: 'ƒ<sub>low</sub>', tooltip: 'Low Freq (kHz)', width: 60, digits: 2 },
     { key: 'lowFreq_ms', label: '<i>t </i><sub>low</sub>', tooltip: 'Low Freq Time (ms)', width: 60, digits: 2 },
     
     { key: 'peakFreq_kHz', label: 'ƒ<sub>peak</sub>', tooltip: 'Peak Freq (kHz)', width: 60, digits: 2 },
-    { key: 'peakFreqTime_ms', label: '<i>t </i><sub>peak</sub>', tooltip: 'Peak Freq Time (ms)', width: 60, digits: 2 },
+    { key: 'peakFreq_ms', label: '<i>t </i><sub>peak</sub>', tooltip: 'Peak Freq Time (ms)', width: 60, digits: 2 },
 
     { key: 'characteristicFreq_kHz', label: 'ƒ<sub>char</sub>', tooltip: 'Char Freq (kHz)', width: 60, digits: 2 },
     { key: 'characteristicFreq_ms', label: '<i>t </i><sub>char</sub>', tooltip: 'Char Freq Time (ms)', width: 60, digits: 2 },
@@ -126,10 +132,6 @@ export function initCallSummaryTable({
     { key: 'heelFreq_kHz', label: 'ƒ<sub>heel</sub>', tooltip: 'Heel Freq (kHz)', width: 60, digits: 2 },
     { key: 'heelFreq_ms', label: '<i>t </i><sub>heel</sub>', tooltip: 'Heel Freq Time (ms)', width: 60, digits: 2 },
     
-    { key: 'startFreq_kHz', label: 'ƒ<sub>start</sub>', tooltip: 'Start Freq (kHz)', width: 60, digits: 2 },
-    { key: 'endFreq_kHz', label: 'ƒ<sub>end</sub>', tooltip: 'End Freq (kHz)', width: 60, digits: 2 },
-    
-    { key: 'bandwidth_kHz', label: 'BW', tooltip: 'Bandwidth (kHz)', width: 60, digits: 2 },
     { key: 'peakPower_dB', label: 'dB<sub>peak</sub>', tooltip: 'Peak Power (dB)', width: 70, digits: 1 },
     { key: 'snr_dB', label: 'SNR', tooltip: 'SNR (dB)', width: 60, digits: 1 },
     { key: 'quality', label: 'Quality', tooltip: 'Signal Quality', width: 80 }
@@ -472,7 +474,6 @@ export function initCallSummaryTable({
             label: 'Clear all', 
             icon: 'fa-trash', 
             action: () => {
-                // [MODIFIED] 使用 messageBox 替代 confirm
                 showMessageBox({
                     title: 'Clear All',
                     message: 'Are you sure you want to clear ALL calls?',
@@ -496,7 +497,6 @@ export function initCallSummaryTable({
             icon: 'fa-eraser', 
             action: () => {
                 if (discardedIds.size === 0) {
-                    // [MODIFIED] 使用 messageBox 替代 alert
                     showMessageBox({
                         title: 'Notice',
                         message: 'No rows selected (checked).',
@@ -505,7 +505,6 @@ export function initCallSummaryTable({
                     return;
                 }
                 
-                // [MODIFIED] 使用 messageBox 替代 confirm
                 showMessageBox({
                     title: 'Remove Selected',
                     message: `Remove ${discardedIds.size} selected call(s)?`,
@@ -513,10 +512,7 @@ export function initCallSummaryTable({
                     cancelText: 'Cancel',
                     onConfirm: () => {
                         const indicesToRemove = Array.from(discardedIds);
-                        
-                        // [Critical] Clear IDs BEFORE callback to prevent race condition on redraw
                         discardedIds.clear();
-                        
                         if (typeof onDeleteCalls === 'function') {
                             onDeleteCalls(indicesToRemove);
                         }
@@ -534,7 +530,6 @@ export function initCallSummaryTable({
                     return;
                 }
                 const filename = getExportFilename('.xlsx');
-                // 使用 displayCalls 確保導出的是當前表格顯示的內容 (包含排序與篩選後的結果)
                 exportBatCallsToXlsx(displayCalls, filename);
             } 
         },
@@ -576,11 +571,18 @@ export function initCallSummaryTable({
     menu.appendChild(body);
     document.body.appendChild(menu);
 
-    const closeMenu = () => {
-      menu.remove();
-      document.removeEventListener('click', closeMenu);
+    const closeMenu = (ev) => {
+      if (!menu.contains(ev.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+        document.removeEventListener('contextmenu', closeMenu);
+      }
     };
-    setTimeout(() => document.addEventListener('click', closeMenu), 0);
+
+    setTimeout(() => {
+      document.addEventListener('click', closeMenu);
+      document.addEventListener('contextmenu', closeMenu); // Add Right Click listener
+    }, 0);
   }
 
   // --- Context Menu (Column Visibility) ---
@@ -592,7 +594,6 @@ export function initCallSummaryTable({
     const menu = document.createElement('div');
     menu.id = 'col-ctx-menu';
     menu.className = 'col-ctx-menu';
-    // 改為自動寬度，以容納三欄
     menu.style.minWidth = 'auto'; 
     menu.style.whiteSpace = 'nowrap';
     menu.style.left = `${e.clientX}px`;
@@ -608,42 +609,68 @@ export function initCallSummaryTable({
     const contentContainer = document.createElement('div');
     contentContainer.style.display = 'flex';
     contentContainer.style.flexDirection = 'row';
-    contentContainer.style.gap = '20px'; // 欄間距
+    contentContainer.style.gap = '20px';
     contentContainer.style.padding = '10px 15px';
 
-    // 定義三欄的結構、對應的 Column Key 以及顯示名稱 (參考您的圖片)
     const groups = [
       {
+        // Column 1: General / Show All
         header: 'Show All',
-        actionType: 'all', // 按下此標題會顯示全部
-        keys: ['id', 'duration_ms', 'bandwidth_kHz', 'peakPower_dB', 'snr_dB', 'quality'],
-        labels: ['ID', 'Duration', 'Bandwidth', 'PeakdB', 'SNR', 'Quality']
+        actionType: 'all',
+        keys: ['id', 'duration_ms', 'bandwidth_kHz', 'peakPower_dB', 'snr_dB', 'quality', 'startTime_s', 'endTime_s'],
+        labels: ['ID', 'Duration', 'Bandwidth', 'PeakdB', 'SNR', 'Quality', 'Signal Start', 'Signal End']
       },
       {
+        // Column 2: Freq Only (Removed Bandwidth from visual list)
         header: 'Freq Only',
-        actionType: 'freq', // 按下此標題只顯示 Freq
-        keys: ['startFreq_kHz', 'endFreq_kHz', 'highFreq_kHz', 'lowFreq_kHz', 'peakFreq_kHz', 'characteristicFreq_kHz', 'kneeFreq_kHz', 'heelFreq_kHz'],
-        labels: ['Start Freq', 'End Freq', 'High Freq', 'Low Freq', 'Peak Freq', 'Char Freq', 'Knee Freq', 'Heel Freq']
+        actionType: 'freq',
+        keys: [
+            'startFreq_kHz', 'endFreq_kHz', 'highFreq_kHz', 'lowFreq_kHz', 
+            'peakFreq_kHz', 'characteristicFreq_kHz', 'kneeFreq_kHz', 'heelFreq_kHz'
+        ],
+        labels: [
+            'Start Freq', 'End Freq', 'High Freq', 'Low Freq', 
+            'Peak Freq', 'Char Freq', 'Knee Freq', 'Heel Freq'
+        ]
       },
       {
+        // Column 3: Time Only (Removed Duration from visual list)
         header: 'Time Only',
-        actionType: 'time', // 按下此標題只顯示 Time
-        keys: ['startTime_s', 'endTime_s', 'highFreqTime_ms', 'lowFreq_ms', 'peakFreqTime_ms', 'characteristicFreq_ms', 'kneeFreq_ms', 'heelFreq_ms'],
-        labels: ['Start Time', 'End Time', 'High Time', 'Low Time', 'Peak Time', 'Char Time', 'Knee Time', 'Heel Time']
+        actionType: 'time',
+        keys: [
+            'startFreq_ms', 'endFreq_ms',
+            'highFreq_ms', 'lowFreq_ms', 'peakFreq_ms', 
+            'characteristicFreq_ms', 'kneeFreq_ms', 'heelFreq_ms'
+        ],
+        labels: [
+            'Start Time', 'End Time',
+            'High Time', 'Low Time', 'Peak Time', 
+            'Char Time', 'Knee Time', 'Heel Time'
+        ]
       }
     ];
 
-    // 用於快速查詢的 Set
-    const freqKeysSet = new Set(groups[1].keys);
-    const timeKeysSet = new Set(groups[2].keys);
-    const checkboxMap = {}; // 儲存 checkbox 引用以便刷新狀態
+    // [MODIFIED] 定義 Logic Sets
+    // 雖然 UI 上移除了，但在邏輯上 (按下 Header 時)，我們仍希望 Freq 包含 Bandwidth，Time 包含 Duration
+    
+    // Set for 'Freq Only' preset logic: Group 2 keys + Bandwidth
+    const freqKeysSet = new Set([
+        ...groups[1].keys, 
+        'bandwidth_kHz'
+    ]);
 
-    // 篩選邏輯
+    // Set for 'Time Only' preset logic: Group 3 keys + Duration
+    const timeKeysSet = new Set([
+        ...groups[2].keys, 
+        'duration_ms'
+    ]);
+    
+    const checkboxMap = {}; 
+
     const applyPreset = (filterType) => {
       columns.forEach(col => {
         if (col.key === '__discard') return;
         
-        // ID 始終保持可見 (除非您希望 Freq Only 時連 ID 都隱藏，可移除此判斷)
         if (col.key === 'id') {
           col.visible = true;
           return;
@@ -661,14 +688,12 @@ export function initCallSummaryTable({
       refreshAllCheckboxes();
     };
 
-    // 建立三欄 UI
     groups.forEach(group => {
       const colDiv = document.createElement('div');
       colDiv.style.display = 'flex';
       colDiv.style.flexDirection = 'column';
       colDiv.style.minWidth = '90px';
 
-      // 欄標題 (也是按鈕)
       const groupHeader = document.createElement('div');
       groupHeader.innerText = group.header;
       groupHeader.style.fontWeight = 'bold';
@@ -680,7 +705,6 @@ export function initCallSummaryTable({
       groupHeader.style.color = 'var(--text-primary)';
       groupHeader.style.borderBottom = '2px solid var(--border-color)';
 
-      // Header Hover 效果
       groupHeader.onmouseover = () => {
         groupHeader.style.color = 'var(--paravalue-color)';
         groupHeader.style.borderColor = 'var(--paravalue-color)';
@@ -690,7 +714,6 @@ export function initCallSummaryTable({
         groupHeader.style.borderColor = 'var(--border-color)';
       };
       
-      // Header Click 事件
       groupHeader.onclick = (ev) => {
         ev.stopPropagation();
         applyPreset(group.actionType);
@@ -698,10 +721,9 @@ export function initCallSummaryTable({
 
       colDiv.appendChild(groupHeader);
 
-      // 建立該欄的 Checkbox 清單
       group.keys.forEach((key, idx) => {
         const colDef = columns.find(c => c.key === key);
-        if (!colDef) return;
+        if (!colDef) return; 
 
         const row = document.createElement('div');
         row.style.display = 'flex';
@@ -715,27 +737,31 @@ export function initCallSummaryTable({
         cb.style.marginRight = '8px';
         cb.style.cursor = 'pointer';
         
-        checkboxMap[key] = cb; // 存起來以便之後刷新
+        if (!checkboxMap[key]) {
+            checkboxMap[key] = [];
+        }
+        checkboxMap[key].push(cb);
 
         cb.onclick = (ev) => {
           ev.stopPropagation();
           colDef.visible = cb.checked;
           renderTable();
+          refreshAllCheckboxes(); 
         };
 
         const lbl = document.createElement('span');
-        lbl.innerText = group.labels[idx]; // 使用自定義名稱
+        lbl.innerText = group.labels[idx];
         lbl.style.fontSize = '12px';
-        lbl.style.color = 'var(--text-primary)'; // 支援 Dark/Light mode
+        lbl.style.color = 'var(--text-primary)';
 
         row.appendChild(cb);
         row.appendChild(lbl);
         
-        // 點擊整行也能切換
         row.onclick = () => {
            cb.checked = !cb.checked;
            colDef.visible = cb.checked;
            renderTable();
+           refreshAllCheckboxes();
         };
 
         colDiv.appendChild(row);
@@ -747,31 +773,33 @@ export function initCallSummaryTable({
     menu.appendChild(contentContainer);
     document.body.appendChild(menu);
     
-    // 位置修正：如果選單超出右邊界，往左移
     const rect = menu.getBoundingClientRect();
     if (rect.right > window.innerWidth) {
         menu.style.left = `${window.innerWidth - rect.width - 10}px`;
     }
 
-    // 刷新所有 Checkbox 狀態的 Helper
     function refreshAllCheckboxes() {
        Object.keys(checkboxMap).forEach(key => {
           const colDef = columns.find(c => c.key === key);
           if (colDef && checkboxMap[key]) {
-             checkboxMap[key].checked = colDef.visible;
+             checkboxMap[key].forEach(cb => {
+                 cb.checked = colDef.visible;
+             });
           }
        });
     }
 
-    // 點擊外部關閉
     const closeMenu = (ev) => {
        if (!menu.contains(ev.target)) {
           menu.remove();
           document.removeEventListener('click', closeMenu);
+          document.removeEventListener('contextmenu', closeMenu);
        }
     };
-    // 稍微延遲以避免立即觸發
-    setTimeout(() => document.addEventListener('click', closeMenu), 0);
+    setTimeout(() => {
+        document.addEventListener('click', closeMenu);
+        document.addEventListener('contextmenu', closeMenu);
+    }, 0);
   }
 
   function renderTable() {
@@ -802,22 +830,18 @@ export function initCallSummaryTable({
       const thContent = document.createElement('div');
       thContent.className = 'th-content';
       
-      // [修改] 1. 建立 Label Container
       const labelContainer = document.createElement('div');
       labelContainer.className = 'th-label-container';
       
-      // [NEW] 針對 __discard 欄位特殊處理
       if (col.key === '__discard') {
           const menuIcon = document.createElement('i');
           menuIcon.className = 'fas fa-bars';
           menuIcon.style.cursor = 'pointer';
           menuIcon.style.opacity = '0.7';
           
-          // Hover effect setup (optional via inline or css)
           menuIcon.onmouseover = () => menuIcon.style.opacity = '1';
           menuIcon.onmouseout = () => menuIcon.style.opacity = '0.7';
 
-          // 點擊觸發 Action Menu
           menuIcon.onclick = (e) => {
               e.stopPropagation();
               showActionMenu(e);
@@ -825,13 +849,11 @@ export function initCallSummaryTable({
           
           labelContainer.appendChild(menuIcon);
       } else {
-          // 一般欄位顯示文字
           const textSpan = document.createElement('span');
           textSpan.className = 'th-text';
           textSpan.innerHTML = col.label;
           labelContainer.appendChild(textSpan);
           
-          // 點擊文字觸發排序
           if (!col.noSort) {
             labelContainer.onclick = () => handleSort(col.key);
           }
@@ -839,7 +861,6 @@ export function initCallSummaryTable({
       
       thContent.appendChild(labelContainer);
 
-      // [修改] 2. Sort Icon (一般欄位才顯示)
       if (sortState.key === col.key && sortState.direction !== 'none') {
         const sortIcon = document.createElement('i');
         sortIcon.className = 'sort-icon fa-solid';
@@ -854,7 +875,6 @@ export function initCallSummaryTable({
         thContent.appendChild(sortIcon);
       }
 
-      // [保持不變] Filter Icon
       if (!col.noFilter) {
           const filterIcon = document.createElement('i');
           const isActive = filterState[col.key] !== undefined;
@@ -867,12 +887,10 @@ export function initCallSummaryTable({
           thContent.appendChild(filterIcon);
       }
       
-      // [NEW] 右鍵選單邏輯：__discard 不顯示 Field selection
       if (col.key === '__discard') {
           thContent.oncontextmenu = (e) => {
               e.preventDefault();
               e.stopPropagation();
-              // 可以在這裡決定是否右鍵也能開 Action Menu，目前設為不做任何事(屏蔽)
           };
       } else {
           thContent.oncontextmenu = (e) => showContextMenu(e);
@@ -1157,9 +1175,11 @@ export function initCallSummaryTable({
             if (!menu.contains(e.target) && !targetTh.contains(e.target)) {
                 menu.remove();
                 document.removeEventListener('click', closeHandler);
+                document.removeEventListener('contextmenu', closeHandler);
             }
         };
         document.addEventListener('click', closeHandler);
+        document.addEventListener('contextmenu', closeHandler);
     }, 100);
   }
 
