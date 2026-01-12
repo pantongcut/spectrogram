@@ -643,9 +643,23 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
         }
     } else if (judgeDurationMs < 100) {
         // 情況 B: 手動畫框，執行異步計算
-        calculateBatCallParams(selObj).catch(err => {
+        calculateBatCallParams(selObj)
+          .then((result) => {
+             // 1. 處理 Tooltip 顯示/隱藏 (上一輪的修改)
+             if (!result && selObj.tooltip) {
+                selObj.tooltip.style.display = 'none';
+             }
+             else if (result && selObj.tooltip && selObj.tooltip.style.display === 'none' && selObj.tooltip.dataset.userClosed !== 'true') {
+                selObj.tooltip.style.display = 'block';
+             }
+             
+             // [新增] 2. 根據計算結果更新按鈕顯示狀態
+             updateSelectionButtons(selObj);
+          })
+          .catch(err => {
             console.error('計算詳細參數失敗:', err);
-        });
+          });
+        // [修改結束]
     }
 
     // [重要] 呼叫一次 updateSelections 來設定正確的 % 位置
@@ -765,6 +779,21 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
     enableDrag(tooltip);
     requestAnimationFrame(() => repositionTooltip(sel, left, top, width));
     return tooltip;
+  }
+
+  function updateSelectionButtons(sel) {
+    if (!sel.btnGroup) return;
+    
+    const hasValidSignal = !!sel.data.batCall;
+    
+    const toggleBtn = sel.btnGroup.querySelector('.selection-toggle-tooltip-btn');
+    const analysisBtn = sel.btnGroup.querySelector('.selection-call-analysis-btn');
+    
+    if (toggleBtn) toggleBtn.style.display = hasValidSignal ? '' : 'none';
+    if (analysisBtn) analysisBtn.style.display = hasValidSignal ? '' : 'none';
+
+    // [新增] 按鈕數量改變後，立即重新計算位置與距離
+    repositionBtnGroup(sel);
   }
 
 function createBtnGroup(sel, isShortSelection = false) {
@@ -904,18 +933,26 @@ function createBtnGroup(sel, isShortSelection = false) {
     sel.closeBtn = closeBtn;
 
     repositionBtnGroup(sel);
+    updateSelectionButtons(sel);
   }
 
   function repositionBtnGroup(sel) {
     if (!sel.btnGroup) return;
     const group = sel.btnGroup;
+    
+    const hasValidSignal = !!sel.data.batCall;
+    const offset = hasValidSignal ? '-35px' : '-15px'; 
+
     group.style.left = '';
-    group.style.right = '-35px';
+    group.style.right = offset;
+    
     const groupRect = group.getBoundingClientRect();
     const containerRect = container.getBoundingClientRect();
+    
+    // 邊界檢查：如果右邊超出容器，改放到左邊
     if (groupRect.right > containerRect.right) {
       group.style.right = 'auto';
-      group.style.left = '-35px';
+      group.style.left = offset;
     }
   }
 
@@ -1068,9 +1105,20 @@ function createBtnGroup(sel, isShortSelection = false) {
         // 路徑二：只有當 Popup 沒打開 (popupHandled === false) 時，才執行背景計算
         if (judgeDurationMs < 100 && !popupHandled) { 
           if (sel.data.batCall) delete sel.data.batCall;
-          calculateBatCallParams(sel).catch(err => {
-            console.error('Resize 後計算參數失敗:', err);
-          });
+          calculateBatCallParams(sel)
+            .then((result) => {
+               if (!result && sel.tooltip) {
+                  sel.tooltip.style.display = 'none';
+               }
+               else if (result && sel.tooltip && sel.tooltip.style.display === 'none' && sel.tooltip.dataset.userClosed !== 'true') {
+                  sel.tooltip.style.display = 'block';
+               }
+
+               updateSelectionButtons(sel);
+            })
+            .catch(err => {
+              console.error('Resize 後計算參數失敗:', err);
+            });
         } else {
           // 如果 Popup 已經接手處理，或是時間太長不計算，我們只更新 UI 顯示（避免舊數據殘留）
           // 注意：如果 popupHandled = true，這裡暫時不刪除 batCall，
@@ -1387,7 +1435,7 @@ function createBtnGroup(sel, isShortSelection = false) {
 
     selection._callAnalysisMenuItem = menuItem;
 
-    if (hasOpenPopup(selection)) {
+    if (hasOpenPopup(selection) || !selection.data.batCall) {
       disableCallAnalysisMenuItem(selection);
     }
 
