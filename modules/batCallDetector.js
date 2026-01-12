@@ -3239,35 +3239,149 @@ export class BatCallDetector {
 
 
     // ============================================================
-    // STEP 3: Finalize Low & End Frequencies (Apply Step 1 Result)
+    // STEP 3: Finalize Low & End Frequencies (Decouple with Forward Tracing)
     // ============================================================
+    
+    // 1. 設定 Low Frequency (保持不變)
     this.config.lowFreqThreshold_dB = usedThresholdLow;
     call.lowFreqThreshold_dB_used = usedThresholdLow;
     call.lowFreq_kHz = safeLowFreq_kHz;
-    call.endFreq_kHz = safeEndFreq_kHz;
+    
+    // 2. 初始化 End Freq 為 Low Freq (Fallback)
+    let finalEndFreq_kHz = safeLowFreq_kHz;
+    let finalEndFrameIdx = resultLow.lowFreqFrameIdx !== null ? resultLow.lowFreqFrameIdx : peakFrameIdx;
 
-    // Update Low Freq Time/Frame based on resultLow
-    if (resultLow.lowFreqFrameIdx !== null) {
-      call.lowFreqFrameIdx = resultLow.lowFreqFrameIdx;
-      call.endFrameIdx_forLowFreq = resultLow.lowFreqFrameIdx;
-      if (resultLow.lowFreqFrameIdx < timeFrames.length) {
-        call.endFreqTime_s = timeFrames[resultLow.lowFreqFrameIdx];
-        call.lowFreq_ms = (call.endFreqTime_s - timeFrames[0]) * 1000;
-        call.endFreq_ms = call.lowFreq_ms;
-
-        // Update End Time Boundary
-        call.endTime_s = timeFrames[Math.min(resultLow.lowFreqFrameIdx + 1, timeFrames.length - 1)];
-      }
+    // ============================================================
+    // [NEW] End Frequency Forward Tracing
+    // ============================================================
+    
+    // A. 確定追蹤起點 (Anchor Point)
+    const anchorFrameIdx = resultLow.lowFreqFrameIdx;
+    
+    // 計算 Anchor Bin Index (因為 resultLow 可能只給了 Hz)
+    let anchorBinIdx = -1;
+    if (safeLowFreq_kHz !== null) {
+        anchorBinIdx = Math.floor((safeLowFreq_kHz * 1000) / freqResolution);
+        // 安全邊界檢查
+        anchorBinIdx = Math.max(0, Math.min(freqBins.length - 1, anchorBinIdx));
     }
 
-    // Duration Update
+    // B. 設定判定閾值 & 預檢查
+    let performEndFreqTracing = true;
+    const endFreqThreshold_dB = peakPower_dB + usedThresholdLow;
+
+    if (anchorFrameIdx !== null && anchorBinIdx !== -1 && anchorFrameIdx < spectrogram.length) {
+        const anchorPower = spectrogram[anchorFrameIdx][anchorBinIdx];
+        
+        // Simple check: weak anchor?
+        if (anchorPower < (peakPower_dB - 45) || anchorPower < -80) {
+            performEndFreqTracing = false;
+            // console.log("End Freq Tracing Skipped: Anchor too weak");
+        }
+    } else {
+        performEndFreqTracing = false;
+    }
+
+    // C. 順向追蹤迴圈 (Forward Trace Loop)
+    if (performEndFreqTracing && anchorFrameIdx !== null) {
+        let currentTrackBinIdx = anchorBinIdx;
+        
+        // 參數設定
+        const maxJumpHz = 2000;
+        const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
+        const numBins = freqBins.length;
+
+        // 從 anchorFrameIdx + 1 開始，往後掃描直到 spectrogram 結束
+        for (let f = anchorFrameIdx + 1; f < spectrogram.length; f++) {
+            const framePower = spectrogram[f];
+            
+            // 局部搜索窗口 (Local Search Window)
+            const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
+            const searchMaxBin = Math.min(numBins - 1, currentTrackBinIdx + maxJumpBins);
+
+            let bestBin = -1;
+            let bestPower = -Infinity;
+
+            // 尋找局部最強點
+            for (let b = searchMinBin; b <= searchMaxBin; b++) {
+                if (framePower[b] > bestPower) {
+                    bestPower = framePower[b];
+                    bestBin = b;
+                }
+            }
+
+            // 能量判定
+            if (bestPower > endFreqThreshold_dB) {
+                // 信號存在！
+                currentTrackBinIdx = bestBin;
+                
+                // D. 更新暫定 End Freq (鎖定最後一個有效點)
+                finalEndFrameIdx = f;
+                
+                // 執行線性插值 (Linear Interpolation)
+                let validEndFreq_Hz = freqBins[bestBin];
+                
+                if (bestBin > 0 && bestBin < numBins - 1) {
+                    const prevP = framePower[bestBin - 1];
+                    const nextP = framePower[bestBin + 1];
+                    // 確保是 Peak 形狀
+                    if (bestPower > prevP && bestPower > nextP) {
+                         const ratio = (bestPower - endFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
+                         // 注意：線性插值方向
+                         // 簡單估算：偏向較強的那一側，或者使用標準拋物線/線性修正
+                         // 這裡沿用 Start Freq 的邏輯
+                         const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
+                         // 如果 prevP < nextP，代表右邊比較高，頻率應該往右修 (+)，反之往左修 (-)
+                         const direction = (prevP < nextP) ? 1 : -1;
+                         validEndFreq_Hz = freqBins[bestBin] + (ratio * freqDiff * direction * 0.5); 
+                         // *0.5 是保守係數，避免過度插值
+                    }
+                }
+                
+                finalEndFreq_kHz = validEndFreq_Hz / 1000;
+
+            } else {
+                // 信號斷裂！中斷迴圈
+                break;
+            }
+        }
+    }
+
+    // 3. 寫入 End Freq 結果
+    call.endFreq_kHz = finalEndFreq_kHz;
+    call.endFrameIdx_forLowFreq = finalEndFrameIdx;
+    
+    // 更新時間
+    if (finalEndFrameIdx < timeFrames.length) {
+        call.endFreqTime_s = timeFrames[finalEndFrameIdx];
+        
+        // 更新 End Time Boundary (這會影響 Duration 計算)
+        call.endTime_s = timeFrames[Math.min(finalEndFrameIdx + 1, timeFrames.length - 1)];
+        
+        // 計算相對時間 ms
+        const firstFrameTime_s = timeFrames[0];
+        call.endFreq_ms = (call.endFreqTime_s - firstFrameTime_s) * 1000;
+        
+        // 更新 Low Freq Time (通常 Low Freq Time 與 End Freq Time 相近，或是保留在 Anchor 點)
+        // Low Freq Time 可以保持在 resultLow 找到的位置
+        if (resultLow.lowFreqFrameIdx < timeFrames.length) {
+             call.lowFreq_ms = (timeFrames[resultLow.lowFreqFrameIdx] - timeFrames[0]) * 1000;
+        }
+    }
+
+    // Update Duration based on new End Freq Time
     if (call.startFreqTime_s !== null && call.endFreqTime_s !== null) {
       call.duration_ms = (call.endFreqTime_s - call.startFreqTime_s) * 1000;
     }
 
-    // Optimization: Compare Low with Start
+    // Optimization: Compare Low with Start (保持原樣)
     if (call.startFreq_kHz !== null && call.startFreq_kHz < call.lowFreq_kHz) {
       call.lowFreq_kHz = call.startFreq_kHz;
+    }
+    
+    // Compare Low with End (確保 Low Freq 真的是最低的)
+    if (call.endFreq_kHz !== null && call.endFreq_kHz < call.lowFreq_kHz) {
+        call.lowFreq_kHz = call.endFreq_kHz;
     }
 
 
