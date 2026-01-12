@@ -701,6 +701,7 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
     
     // Initial State: Show dashes
     const dispStart = '-';
+    const dispEnd = '-';
     const dispFhigh = '-';
     const dispFlow = '-';
     const dispBandwidth = '-';
@@ -711,6 +712,9 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
         <tr>
           <td class="label">Freq.Start:</td>
           <td class="value"><span class="fstart">${dispStart}</span> kHz</td>
+        </tr>
+        <tr> <td class="label">Freq.End:</td>
+          <td class="value"><span class="fend">${dispEnd}</span> kHz</td>
         </tr>
         <tr>
           <td class="label">Freq.High:</td>
@@ -749,12 +753,15 @@ function createTooltip(left, top, width, height, Fhigh, Flow, Bandwidth, Duratio
     `;
     tooltip.addEventListener('mouseenter', () => { isOverTooltip = true; suppressHover = true; hideAll(); });
     tooltip.addEventListener('mouseleave', () => { isOverTooltip = false; suppressHover = false; });
+    
     tooltip.querySelector('.tooltip-close-btn').addEventListener('click', (e) => {
-      e.stopPropagation();            // 防止事件冒泡
-      tooltip.style.display = 'none'; // 僅隱藏 Tooltip，保留 Selection 區域
-      isOverTooltip = false;          // 重置滑鼠狀態
-      suppressHover = false;          // 恢復 Hover 線條顯示
+      e.stopPropagation();
+      tooltip.style.display = 'none';
+      tooltip.dataset.userClosed = 'true'; // [New] 標記為使用者手動關閉
+      isOverTooltip = false;
+      suppressHover = false;
     });
+    
     enableDrag(tooltip);
     requestAnimationFrame(() => repositionTooltip(sel, left, top, width));
     return tooltip;
@@ -795,8 +802,10 @@ function createBtnGroup(sel, isShortSelection = false) {
           // 切換顯示狀態
           if (sel.tooltip.style.display === 'none') {
             sel.tooltip.style.display = 'block';
+            sel.tooltip.dataset.userClosed = 'false'; // [New] 重置手動關閉標記
           } else {
             sel.tooltip.style.display = 'none';
+            sel.tooltip.dataset.userClosed = 'true'; // [New] 視為手動關閉
           }
         }
       });
@@ -1089,6 +1098,7 @@ function createBtnGroup(sel, isShortSelection = false) {
     
     // Default values
     let dispStart = '-'; 
+    let dispEnd = '-';
     let dispFhigh = '-';
     let dispFlow = '-';
     let dispBandwidth = '-';
@@ -1104,7 +1114,8 @@ function createBtnGroup(sel, isShortSelection = false) {
     if (data.batCall) {
       const call = data.batCall;
       
-      if (call.startFreq_kHz != null) dispStart = (call.startFreq_kHz * freqMul).toFixed(2); // NEW
+      if (call.startFreq_kHz != null) dispStart = (call.startFreq_kHz * freqMul).toFixed(2);
+      if (call.endFreq_kHz != null) dispEnd = (call.endFreq_kHz * freqMul).toFixed(2);
       if (call.highFreq_kHz != null) dispFhigh = (call.highFreq_kHz * freqMul).toFixed(2);
       if (call.lowFreq_kHz != null) dispFlow = (call.lowFreq_kHz * freqMul).toFixed(2);
       if (call.peakFreq_kHz != null) dispPeak = (call.peakFreq_kHz * freqMul).toFixed(2);
@@ -1121,13 +1132,8 @@ function createBtnGroup(sel, isShortSelection = false) {
 
     // Update label under the selection box
     if (sel.durationLabel) {
-      // Prefer precise call duration if available, otherwise geometric duration
       const geometricDurationMs = (data.endTime - data.startTime) * 1000;
       let displayMs = geometricDurationMs;
-      
-      // Uncomment to use detected duration on label instead of geometric
-      // if (data.batCall && data.batCall.duration_ms) displayMs = data.batCall.duration_ms;
-      
       const displayLabelDuration = timeExp ? (displayMs / 10) : displayMs;
       sel.durationLabel.textContent = `${displayLabelDuration.toFixed(1)} ms`;
     }
@@ -1137,6 +1143,7 @@ function createBtnGroup(sel, isShortSelection = false) {
     const q = (selector) => tooltip.querySelector(selector);
     
     if (q('.fstart')) q('.fstart').textContent = dispStart;
+    if (q('.fend')) q('.fend').textContent = dispEnd;
     if (q('.fhigh')) q('.fhigh').textContent = dispFhigh;
     if (q('.flow')) q('.flow').textContent = dispFlow;
     if (q('.fpeak')) q('.fpeak').textContent = dispPeak;

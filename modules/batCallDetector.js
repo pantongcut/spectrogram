@@ -2689,7 +2689,8 @@ export class BatCallDetector {
         endFreq_Hz: endFreq_Hz,
         endFreq_kHz: endFreq_Hz !== null ? endFreq_Hz / 1000 : null,
         endFrameIdx: activeEndFrameIdx,
-        foundBin: foundBin
+        foundBin: foundBin,
+        lowFreqBinIdx: foundBin ? foundBinIdx : -1
       });
 
       // [MODIFIED 2025] Loop tail: Update frequency search range (Top-Down Ceiling Lock)
@@ -2839,6 +2840,7 @@ export class BatCallDetector {
       endFreq_Hz: returnEndFreq_Hz,
       endFreq_kHz: returnEndFreq_kHz,
       lowFreqFrameIdx: optimalMeasurement ? optimalMeasurement.endFrameIdx : validPeakFrameIdx,
+      lowFreqBinIdx: optimalMeasurement ? optimalMeasurement.lowFreqBinIdx : -1,
       warning: hasWarning
     };
   }
@@ -3239,7 +3241,7 @@ export class BatCallDetector {
 
 
     // ============================================================
-    // STEP 3: Finalize Low & End Frequencies (Decouple with Forward Tracing)
+    // STEP 3: Finalize Low & End Frequencies (獨立 End Freq 計算)
     // ============================================================
     
     // 1. 設定 Low Frequency (保持不變)
@@ -3248,39 +3250,47 @@ export class BatCallDetector {
     call.lowFreq_kHz = safeLowFreq_kHz;
     
     // 2. 初始化 End Freq 為 Low Freq (Fallback)
+    // 預設情況下，End Freq 等於 Low Freq (如果不需要 Tracing)
     let finalEndFreq_kHz = safeLowFreq_kHz;
     let finalEndFrameIdx = resultLow.lowFreqFrameIdx !== null ? resultLow.lowFreqFrameIdx : peakFrameIdx;
 
     // ============================================================
-    // [NEW] End Frequency Forward Tracing
+    // [NEW] End Frequency Forward Tracing (With Console Debug)
     // ============================================================
     
     // A. 確定追蹤起點 (Anchor Point)
-    const anchorFrameIdx = resultLow.lowFreqFrameIdx;
+    const anchorFrameIdx = resultLow.lowFreqFrameIdx; // safeLowFreqFrameIdx
     
-    // 計算 Anchor Bin Index (因為 resultLow 可能只給了 Hz)
+    // [FIX] 直接使用 resultLow 提供的 Bin Index，避免反算誤差導致落入噪音區
     let anchorBinIdx = -1;
-    if (safeLowFreq_kHz !== null) {
+    if (resultLow.lowFreqBinIdx !== undefined && resultLow.lowFreqBinIdx !== -1) {
+        anchorBinIdx = resultLow.lowFreqBinIdx;
+    } else if (safeLowFreq_kHz !== null) {
+        // Fallback: 只有在沒有 BinIdx 時才用反算 (舊邏輯)
         anchorBinIdx = Math.floor((safeLowFreq_kHz * 1000) / freqResolution);
-        // 安全邊界檢查
         anchorBinIdx = Math.max(0, Math.min(freqBins.length - 1, anchorBinIdx));
     }
 
     // B. 設定判定閾值 & 預檢查
     let performEndFreqTracing = true;
     const endFreqThreshold_dB = peakPower_dB + usedThresholdLow;
+    let skipReason = ""; // 用於 Log
 
     if (anchorFrameIdx !== null && anchorBinIdx !== -1 && anchorFrameIdx < spectrogram.length) {
         const anchorPower = spectrogram[anchorFrameIdx][anchorBinIdx];
         
         // Simple check: weak anchor?
-        if (anchorPower < (peakPower_dB - 45) || anchorPower < -80) {
+        if (anchorPower < (peakPower_dB - 50) || anchorPower < -100) {
             performEndFreqTracing = false;
-            // console.log("End Freq Tracing Skipped: Anchor too weak");
+            skipReason = `Anchor Weak (${anchorPower.toFixed(1)}dB < Threshold)`;
         }
     } else {
         performEndFreqTracing = false;
+        skipReason = "Invalid Anchor Frame/Bin";
     }
+
+    // [DEBUG] 準備 Summary Table
+    const endFreqSummary = [];
 
     // C. 順向追蹤迴圈 (Forward Trace Loop)
     if (performEndFreqTracing && anchorFrameIdx !== null) {
@@ -3291,9 +3301,20 @@ export class BatCallDetector {
         const maxJumpBins = Math.ceil(maxJumpHz / freqResolution);
         const numBins = freqBins.length;
 
-        // 從 anchorFrameIdx + 1 開始，往後掃描直到 spectrogram 結束
+        // 記錄起點 (Anchor)
+        endFreqSummary.push({
+            'Frame': anchorFrameIdx,
+            'Time (ms)': ((timeFrames[anchorFrameIdx] - timeFrames[0]) * 1000).toFixed(2),
+            'Freq (kHz)': safeLowFreq_kHz.toFixed(2),
+            'Power (dB)': spectrogram[anchorFrameIdx][anchorBinIdx].toFixed(2),
+            'Thr (dB)': endFreqThreshold_dB.toFixed(2),
+            'Judgment': 'ANCHOR (Start)'
+        });
+
+        // 從 safeLowFreqFrameIdx + 1 開始，往後掃描直到 spectrogram 結束
         for (let f = anchorFrameIdx + 1; f < spectrogram.length; f++) {
             const framePower = spectrogram[f];
+            const currentTimeMs = (timeFrames[f] - timeFrames[0]) * 1000;
             
             // 局部搜索窗口 (Local Search Window)
             const searchMinBin = Math.max(0, currentTrackBinIdx - maxJumpBins);
@@ -3310,10 +3331,21 @@ export class BatCallDetector {
                 }
             }
 
+            // 準備 Log Row
+            let logRow = {
+                'Frame': f,
+                'Time (ms)': currentTimeMs.toFixed(2),
+                'Freq (kHz)': (freqBins[bestBin] / 1000).toFixed(2),
+                'Power (dB)': bestPower.toFixed(2),
+                'Thr (dB)': endFreqThreshold_dB.toFixed(2),
+                'Judgment': 'Pending'
+            };
+
             // 能量判定
             if (bestPower > endFreqThreshold_dB) {
                 // 信號存在！
                 currentTrackBinIdx = bestBin;
+                logRow['Judgment'] = 'Trace OK';
                 
                 // D. 更新暫定 End Freq (鎖定最後一個有效點)
                 finalEndFrameIdx = f;
@@ -3327,29 +3359,39 @@ export class BatCallDetector {
                     // 確保是 Peak 形狀
                     if (bestPower > prevP && bestPower > nextP) {
                          const ratio = (bestPower - endFreqThreshold_dB) / (bestPower - Math.min(prevP, nextP));
-                         // 注意：線性插值方向
-                         // 簡單估算：偏向較強的那一側，或者使用標準拋物線/線性修正
-                         // 這裡沿用 Start Freq 的邏輯
                          const freqDiff = freqBins[bestBin + 1] - freqBins[bestBin];
-                         // 如果 prevP < nextP，代表右邊比較高，頻率應該往右修 (+)，反之往左修 (-)
                          const direction = (prevP < nextP) ? 1 : -1;
                          validEndFreq_Hz = freqBins[bestBin] + (ratio * freqDiff * direction * 0.5); 
-                         // *0.5 是保守係數，避免過度插值
                     }
                 }
                 
                 finalEndFreq_kHz = validEndFreq_Hz / 1000;
+                logRow['Freq (kHz)'] = finalEndFreq_kHz.toFixed(2); // 更新插值後的頻率
+
+                endFreqSummary.push(logRow);
 
             } else {
                 // 信號斷裂！中斷迴圈
+                logRow['Judgment'] = 'STOP (< Thr)';
+                endFreqSummary.push(logRow);
                 break;
             }
         }
+    } else {
+        // 如果被 Skip，記錄原因
+        console.log(`%c[End Freq] Tracing Skipped: ${skipReason}`, "color: orange; font-weight: bold;");
+    }
+
+    // [DEBUG] 輸出 Table
+    if (endFreqSummary.length > 0) {
+        console.groupCollapsed(`[End Freq] Trace Summary (Result: ${finalEndFreq_kHz.toFixed(2)}kHz @ Frame ${finalEndFrameIdx})`);
+        console.table(endFreqSummary);
+        console.groupEnd();
     }
 
     // 3. 寫入 End Freq 結果
     call.endFreq_kHz = finalEndFreq_kHz;
-    call.endFrameIdx_forLowFreq = finalEndFrameIdx;
+    call.endFrameIdx_forLowFreq = finalEndFrameIdx; // 這裡我們讓 End Frame 指向新的 Trace 結果
     
     // 更新時間
     if (finalEndFrameIdx < timeFrames.length) {
@@ -3363,7 +3405,7 @@ export class BatCallDetector {
         call.endFreq_ms = (call.endFreqTime_s - firstFrameTime_s) * 1000;
         
         // 更新 Low Freq Time (通常 Low Freq Time 與 End Freq Time 相近，或是保留在 Anchor 點)
-        // Low Freq Time 可以保持在 resultLow 找到的位置
+        // [OPTION] 用戶要求 End Freq 獨立。Low Freq Time 可以保持在 resultLow 找到的位置。
         if (resultLow.lowFreqFrameIdx < timeFrames.length) {
              call.lowFreq_ms = (timeFrames[resultLow.lowFreqFrameIdx] - timeFrames[0]) * 1000;
         }
@@ -3383,7 +3425,6 @@ export class BatCallDetector {
     if (call.endFreq_kHz !== null && call.endFreq_kHz < call.lowFreq_kHz) {
         call.lowFreq_kHz = call.endFreq_kHz;
     }
-
 
     // ============================================================
     // STEP 4: Characteristic Frequency
@@ -3708,11 +3749,15 @@ export class BatCallDetector {
 
     // ============================================================
     // STEP 7: Time Normalization (Start Freq = 0.00ms)
+    // [FIXED] 確保 End Freq 與 Low Freq 使用各自獨立的 Frame 進行計算
     // ============================================================
     if (call.startFreqFrameIdx !== null && call.startFreqFrameIdx < timeFrames.length) {
       const t0_s = timeFrames[call.startFreqFrameIdx];
+      
+      // 定義歸一化函數：將絕對時間轉換為相對於 Start Freq 的 ms
       const normalizeTime = (frameIdx) => {
         if (frameIdx === null || frameIdx === undefined) return null;
+        if (frameIdx >= timeFrames.length) return null;
         const t_target = timeFrames[frameIdx];
         return (t_target - t0_s) * 1000;
       };
@@ -3721,11 +3766,22 @@ export class BatCallDetector {
 
       if (peakFrameIdx !== null) call.peakFreq_ms = normalizeTime(peakFrameIdx);
       if (call.highFreqFrameIdx !== null) call.highFreq_ms = normalizeTime(call.highFreqFrameIdx);
+      
+      // [FIX] Update End Freq Time (使用 Tracing 後的 Frame: call.endFrameIdx_forLowFreq)
       if (call.endFrameIdx_forLowFreq !== null) {
-        const relTime = normalizeTime(call.endFrameIdx_forLowFreq);
-        call.endFreq_ms = relTime;
-        call.lowFreq_ms = relTime;
+        call.endFreq_ms = normalizeTime(call.endFrameIdx_forLowFreq);
       }
+      
+      // [FIX] Update Low Freq Time (使用 Step 1 找到的 Anchor Frame: resultLow.lowFreqFrameIdx)
+      // 注意：必須確保 resultLow 在此作用域內可用
+      if (resultLow && resultLow.lowFreqFrameIdx !== null) {
+        call.lowFreq_ms = normalizeTime(resultLow.lowFreqFrameIdx);
+      } else if (call.endFrameIdx_forLowFreq !== null) {
+         // Fallback: 如果 resultLow 丟失，才使用 End Frame (舊邏輯)
+         call.lowFreq_ms = normalizeTime(call.endFrameIdx_forLowFreq);
+      }
+
+      // Knee & Heel Normalization
       if (call.kneeFrameIdx !== null) {
         call.kneeFreq_ms = normalizeTime(call.kneeFrameIdx);
         call.kneeTime_ms = call.kneeFreq_ms;
@@ -3733,6 +3789,8 @@ export class BatCallDetector {
       if (call.heelFrameIdx !== null) {
         call.heelFreq_ms = normalizeTime(call.heelFrameIdx);
       }
+      
+      // Recalculate Duration based on normalized times
       if (call.endFreq_ms !== null) {
         call.duration_ms = call.endFreq_ms - call.startFreq_ms;
       }
@@ -3740,8 +3798,6 @@ export class BatCallDetector {
 
     // ============================================================
     // [FIX] Sync Call Start/End Times with Frequency Boundaries
-    // 修正：將 Call 的 Start/End Time 同步為頻率測量的精確邊界
-    // 這樣可以確保 Export Table 中的 (End - Start) 準確等於 Duration
     // ============================================================
     if (call.startFreqTime_s !== null) {
       call.startTime_s = call.startFreqTime_s;
