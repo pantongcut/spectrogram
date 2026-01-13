@@ -1481,7 +1481,8 @@ function createBtnGroup(sel, isShortSelection = false) {
       selection: selection.data,
       wavesurfer: ws,
       currentSettings,
-      wasmEngine: analysisWasmEngine
+      wasmEngine: analysisWasmEngine,
+      existingBatCall: selection.data.batCall
     });
 
     if (popupObj) {

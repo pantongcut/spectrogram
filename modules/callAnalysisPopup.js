@@ -35,7 +35,8 @@ export function showCallAnalysisPopup({
   selection,
   wavesurfer,
   currentSettings = {},
-  wasmEngine = null
+  wasmEngine = null,
+  existingBatCall = null
 }) {
   if (!wavesurfer || !selection) return null;
 
@@ -142,6 +143,8 @@ export function showCallAnalysisPopup({
 
   // 用於存儲最後計算的峰值頻率
   let lastPeakFreq = null;
+
+  let pendingBatCall = existingBatCall;
   
   // 初始化 Bat Call Detector（用於檢測 Bat Call 參數）
   // 如果提供了 wasmEngine，將使用 WASM 加速版本；否則使用 JavaScript Goertzel
@@ -210,7 +213,11 @@ export function showCallAnalysisPopup({
     );
     
     // 分離的 Bat Call 檢測（獨立使用 batCallConfig）
-    await updateBatCallAnalysis(peakFreq);
+    await updateBatCallAnalysis(peakFreq, pendingBatCall);
+
+    // [IMPORTANT] 首次使用後，清空 pendingBatCall
+    // 這樣如果使用者在彈窗中調整參數 (例如 Threshold)，就會觸發正常的重新計算
+    pendingBatCall = null;
 
     // 存儲最後計算的峰值
     lastPeakFreq = peakFreq;
@@ -240,10 +247,40 @@ export function showCallAnalysisPopup({
     );
   };
 
-  // 根據 peakFreq 計算最佳的高通濾波器頻率（Auto Mode 使用）
-  // 獨立的 Bat Call 檢測分析函數（只更新參數顯示，不重新計算 Power Spectrum）
-  const updateBatCallAnalysis = async (peakFreq) => {
+  // 獨立的 Bat Call 檢測分析函數
+  const updateBatCallAnalysis = async (peakFreq, directCallData = null) => {
     try {
+      // ============================================================
+      // [NEW] 優先使用現有的 Call Data (Auto-Detection Result)
+      // ============================================================
+      if (directCallData) {
+          console.log("[CallAnalysis] Using existing auto-detected data.");
+          
+          // 1. 直接更新 UI 顯示
+          popup.__latestDetectedCall = directCallData;
+          updateParametersDisplay(popup, directCallData);
+          
+          // 2. 同步 UI 控制項的值以匹配該 Call 的設定 (Optional but recommended)
+          // 這樣使用者知道當初是用什麼參數測出來的
+          if (batCallThresholdInput) {
+             // 嘗試還原 Threshold (如果物件中有記住的話，目前 BatCall 物件似乎沒存 Threshold)
+             // 如果沒存，就保持 UI 預設值，不強行覆蓋
+          }
+          
+          // 3. 處理 Highpass Filter UI 顯示
+          // 如果 Auto Detection 用了 Filter，這裡最好也能反映
+          let highpassFilterFreqInput = popup.querySelector('#highpassFilterFreq_kHz');
+          if (highpassFilterFreqInput && directCallData.highpassFilterFreq_kHz) {
+              // 這裡假設我們沒法從 BatCall 反推是不是 Auto，但可以顯示數值
+              // 暫時保持原樣，避免複雜化
+          }
+
+          return; // [CRITICAL] 直接結束，不執行下面的重新偵測
+      }
+
+      // ============================================================
+      // 下面是原本的即時計算邏輯 (當使用者調整參數時執行)
+      // ============================================================
       let highpassFilterFreqInput = popup.querySelector('#highpassFilterFreq_kHz');
       if (highpassFilterFreqInput) {
         const currentValue = highpassFilterFreqInput.value.trim();
@@ -409,9 +446,6 @@ export function showCallAnalysisPopup({
       updateParametersDisplay(popup, null, peakFreq);
     }
   };
-
-  // 初始繪製
-  redrawSpectrum();
 
   // 添加事件監聽器（overlap input）
   overlapInput.addEventListener('change', redrawSpectrum);
@@ -670,6 +704,9 @@ export function showCallAnalysisPopup({
     });
     addNumberInputKeyboardSupport(highpassFilterOrderInputForListeners);
   }
+
+  // 初始繪製
+  redrawSpectrum();
 
   // 返回 popup 對象和更新函數
   return {

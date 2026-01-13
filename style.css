@@ -781,7 +781,7 @@ input[type="range"]#peakThresholdSlider {
   column-gap: 12px;
   row-gap: 5px;
   padding: 8px 12px;
-  width: 320px;
+  width: 560px;
   background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
