@@ -37,7 +37,7 @@ import { initSidebar } from './modules/sidebar.js';
 import { initTagControl } from './modules/tagControl.js';
 import { initDropdown } from './modules/dropdown.js';
 import { showMessageBox } from './modules/messageBox.js';
-import { initAutoIdPanel } from './modules/autoIdPanel.js';
+// Auto Id Panel import Removed
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
 import { initPeakControl, isPeakModeActive, getPeakThreshold } from './modules/peakControl.js';
 import { initAutoDetectionControl } from './modules/autoDetectionControl.js';
@@ -116,7 +116,7 @@ let currentAudioBufferLength = 0;
 let savedAudioBufferLengthBeforeExpand = null;
 let overlapWarningShown = false;
 let freqHoverControl = null;
-let autoIdControl = null;
+// Auto ID Control variable Removed
 let freqMenuControl = null;
 let demoFetchController = null;
 const sampleRateBtn = document.getElementById('sampleRateInput');
@@ -137,7 +137,7 @@ const isMobileDevice = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 if (isMobileDevice) {
   [
     'toggleTagModeBtn',
-    'autoIdBtn',
+    // 'autoIdBtn' removed from list
     'exportBtn',
     'mapBtn',
     'spectrogram-settings',
@@ -247,7 +247,7 @@ if (timeExpBtn) {
             zoomControl.applyZoom();
             renderAxes();
             freqHoverControl?.refreshHover();
-            autoIdControl?.updateMarkers();
+            // autoIdControl updateMarkers Removed
             updateSpectrogramSettingsText();
           },
           undefined,  // fftSamples (use default)
@@ -362,9 +362,7 @@ document.addEventListener('file-loaded', () => {
   playPauseBtn.disabled = false;
   hideStopButton();
   updateProgressLine(0);
-    if (document.body.classList.contains('autoid-open')) {
-        freqHoverControl?.setPersistentLinesEnabled(false);
-    }
+  // autoid-open check removed
 });
 
 playPauseBtn.addEventListener('click', () => {
@@ -479,7 +477,7 @@ overlay.style.pointerEvents = 'none';
   freqHoverControl?.hideHover();
   freqHoverControl?.setPersistentLinesEnabled(true);
   freqHoverControl?.refreshHover();
-  autoIdControl?.updateMarkers();
+  // autoIdControl updateMarkers Removed
 }
 
 showDropOverlay();
@@ -527,7 +525,7 @@ onBeforeLoad: () => {
       loadingOverlay.style.display = 'none';
     }
     freqHoverControl?.refreshHover();
-    autoIdControl?.updateMarkers();
+    // autoIdControl updateMarkers Removed
     updateSpectrogramSettingsText();
   },
 onSampleRateDetected: autoSetSampleRate
@@ -547,7 +545,7 @@ sidebarElem.addEventListener('sidebar-toggle', () => {
       containerWidth = container.clientWidth;
       renderAxes();
       freqHoverControl?.refreshHover();
-      autoIdControl?.updateMarkers();
+      // autoIdControl updateMarkers Removed
     }
   }, 310);
 });
@@ -564,7 +562,7 @@ sidebarElem.addEventListener('sidebar-resizing', () => {
   renderAxes();
   
   freqHoverControl?.refreshHover();
-  autoIdControl?.updateMarkers();
+  // autoIdControl updateMarkers Removed
 });
 
 // [New] 監聽 Sidebar 拖動結束
@@ -698,7 +696,7 @@ async function applySampleRate(rate, reloadFile = true, shouldRender = true) {
         }
         renderAxes();
         freqHoverControl?.refreshHover();
-        autoIdControl?.updateMarkers();
+        // autoIdControl updateMarkers Removed
         updateSpectrogramSettingsText();
         restoreImageEnhancement(); // ✅ Restore Brightness/Contrast/Gain
       },
@@ -780,7 +778,7 @@ const renderAxes = () => {
       });
     } else {
       freqHoverControl.setFrequencyRange(currentFreqMin, currentFreqMax);
-      autoIdControl?.updateMarkers();
+      // autoIdControl updateMarkers Removed
     }
     updateProgressLine(getWavesurfer().getCurrentTime());
   });
@@ -796,7 +794,7 @@ const zoomControl = initZoomControls(
   () => { freqHoverControl?.hideHover(); },
   () => {
     freqHoverControl?.refreshHover();
-    autoIdControl?.updateMarkers();
+    // autoIdControl updateMarkers Removed
     updateSpectrogramSettingsText();
   },
   () => selectionExpandMode,
@@ -812,7 +810,7 @@ const zoomControl = initZoomControls(
   }
 );
 
-// [NEW 2025] Event Listener: Auto-create Selection Boxes from detected bat calls
+// [New 2025] Event Listener: Auto-create Selection Boxes from detected bat calls
 // When wsManager.setPeakMode() dispatches 'bat-calls-detected' event,
 // this listener calls frequencyHover.addAutoSelections() to create interactive UI elements
 document.addEventListener('bat-calls-detected', (e) => {
@@ -842,7 +840,7 @@ viewer.addEventListener('scroll', () => {
   const ws = getWavesurfer();
   if (!ws) return;
   updateProgressLine(ws.getCurrentTime());
-  autoIdControl?.updateMarkers();
+  // autoIdControl updateMarkers Removed
 });
 
 progressLineElem.addEventListener('mousedown', (e) => {
@@ -896,7 +894,7 @@ viewer.addEventListener('expand-selection', async (e) => {
       freqHoverControl?.hideHover();
       freqHoverControl?.clearSelections();
       updateExpandBackBtn();
-      autoIdControl?.reset();
+      // autoIdControl reset Removed
       viewer.dispatchEvent(new CustomEvent('force-hover-enable'));
       freqHoverControl?.refreshHover();
     }
@@ -933,7 +931,7 @@ viewer.addEventListener('fit-window-selection', async (e) => {
       freqHoverControl?.hideHover();
       freqHoverControl?.clearSelections();
       updateExpandBackBtn();
-      autoIdControl?.reset();
+      // autoIdControl reset Removed
       // ✅ 移除此處的 updateSpectrogramSettingsText()，讓 decode 事件處理器負責
       // updateSpectrogramSettingsText();
     }
@@ -1017,7 +1015,7 @@ freqHoverControl?.clearSelections();
       loadingOverlay.style.display = 'none';
     }
     freqHoverControl?.refreshHover();
-    autoIdControl?.updateMarkers();
+    // autoIdControl updateMarkers Removed
     updateSpectrogramSettingsText();
   },
 onSampleRateDetected: autoSetSampleRate
@@ -1047,7 +1045,7 @@ getWavesurfer().on('ready', () => {
     requestAnimationFrame(() => {
       renderAxes();
       freqHoverControl?.refreshHover();
-      autoIdControl?.updateMarkers();
+      // autoIdControl updateMarkers Removed
       updateSpectrogramSettingsText();
     });
   });
@@ -1101,7 +1099,7 @@ getWavesurfer().on('decode', () => {
 
             renderAxes();
             freqHoverControl?.refreshHover();
-            autoIdControl?.updateMarkers();
+            // autoIdControl updateMarkers Removed
             updateSpectrogramSettingsText();
             restoreImageEnhancement();
         },
@@ -1340,7 +1338,7 @@ function handleFftSize(size) {
       }
       renderAxes();
       freqHoverControl?.refreshHover();
-      autoIdControl?.updateMarkers();
+      // autoIdControl updateMarkers Removed
       updateSpectrogramSettingsText();
       restoreImageEnhancement(); // Restore brightness/contrast/gain settings
     },
@@ -1369,7 +1367,7 @@ function handleWindowType(type) {
       }
       renderAxes();
       freqHoverControl?.refreshHover();
-      autoIdControl?.updateMarkers();
+      // autoIdControl updateMarkers Removed
       updateSpectrogramSettingsText();
       restoreImageEnhancement(); // Restore brightness/contrast/gain settings
     },
@@ -1392,7 +1390,7 @@ function handleOverlapChange() {
     getOverlapPercent(),
     () => {
       freqHoverControl?.refreshHover();
-      autoIdControl?.updateMarkers();
+      // autoIdControl updateMarkers Removed
       duration = getWavesurfer().getDuration();
       if (getWavesurfer().getDecodedData()) {
           zoomControl.applyZoom();
@@ -1423,7 +1421,7 @@ function updateFrequencyRange(freqMin, freqMax) {
     getOverlapPercent(),
     () => {
       freqHoverControl?.refreshHover();
-      autoIdControl?.updateMarkers();
+      // autoIdControl updateMarkers Removed
       duration = getWavesurfer().getDuration();
       if (getWavesurfer().getDecodedData()) {
           zoomControl.applyZoom();
@@ -1431,7 +1429,7 @@ function updateFrequencyRange(freqMin, freqMax) {
       renderAxes();
       if (freqHoverControl) {
         freqHoverControl.setFrequencyRange(currentFreqMin, currentFreqMax);
-        autoIdControl?.updateMarkers();
+        // autoIdControl updateMarkers Removed
       }
       updateSpectrogramSettingsText();
       restoreImageEnhancement(); // Restore brightness/contrast/gain settings
@@ -1600,7 +1598,7 @@ initPeakControl({
         zoomControl.applyZoom();
         renderAxes();
         freqHoverControl?.refreshHover();
-        autoIdControl?.updateMarkers();
+        // autoIdControl updateMarkers Removed
         updateSpectrogramSettingsText();
         restoreImageEnhancement(); // Restore brightness/contrast/gain settings
       },
@@ -1624,7 +1622,7 @@ initPeakControl({
         zoomControl.applyZoom();
         renderAxes();
         freqHoverControl?.refreshHover();
-        autoIdControl?.updateMarkers();
+        // autoIdControl updateMarkers Removed
         updateSpectrogramSettingsText();
         restoreImageEnhancement(); // Restore brightness/contrast/gain settings
       },
@@ -1640,13 +1638,8 @@ initPeakControl({
 // [NEW 2025] 初始化 Auto Detection Control
 initAutoDetectionControl();
 
-autoIdControl = initAutoIdPanel({
-  spectrogramHeight,
-  getDuration,
-  getFreqRange: () => ({ min: currentFreqMin, max: currentFreqMax }),
-  hideHover: () => freqHoverControl?.hideHover(),
-  refreshHover: () => freqHoverControl?.refreshHover()
-});
+// Auto ID Initialization Removed
+
 freqMenuControl = initFreqContextMenu({
   viewerId: 'viewer-container',
   wrapperId: 'viewer-wrapper',
@@ -1654,15 +1647,11 @@ freqMenuControl = initFreqContextMenu({
   spectrogramHeight,
   getDuration,
   getFreqRange: () => ({ min: currentFreqMin, max: currentFreqMax }),
-  autoId: autoIdControl
+  // autoId param Removed
 });
-document.addEventListener('autoid-open', () => {
-  freqHoverControl?.setPersistentLinesEnabled(false);
-});
-document.addEventListener('autoid-close', () => {
-  freqHoverControl?.setPersistentLinesEnabled(true);
-  freqMenuControl?.hide();
-});
+
+// autoid-open/close event listeners Removed
+
 document.addEventListener('hide-spectrogram-hover', () => {
   freqHoverControl?.hideHover();
 });
@@ -1682,10 +1671,7 @@ case 'p':
 e.preventDefault();
 playPauseBtn.click();
 break;
-case 'i':
-e.preventDefault();
-document.getElementById('autoIdBtn')?.click();
-break;
+// Case 'i' for AutoID removed
 }
 });
 document.addEventListener('map-file-selected', (e) => {
@@ -1738,7 +1724,7 @@ expandBackBtn.addEventListener('click', async () => {
   updateFrequencyRange(prevMin, prevMax);
 
   updateExpandBackBtn();
-  autoIdControl?.reset();
+  // autoIdControl reset Removed
   updateSpectrogramSettingsText();
 });
 
@@ -1774,7 +1760,7 @@ document.addEventListener("file-loaded", async () => {
   expandHistory = [];
   currentExpandBlob = null;
   updateExpandBackBtn();
-  autoIdControl?.reset();
+  // autoIdControl reset Removed
 
   if (currentFile) {
     const wsDecodedData = getWavesurfer()?.getDecodedData();
@@ -1820,7 +1806,7 @@ window.addEventListener('resize', () => {
     }
     
     if (freqHoverControl) freqHoverControl.refreshHover();
-    if (autoIdControl) autoIdControl.updateMarkers();
+    // autoIdControl updateMarkers Removed
     
     updateSpectrogramSettingsText();
   }, 30); 
