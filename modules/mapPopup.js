@@ -1850,6 +1850,18 @@ export function initMapPopup({
       document.body.appendChild(btn);
 
       const items = [{ label: 'Remove', value: 'remove' }];
+      
+      // 1. Define cleanup FIRST (without calling close recursively)
+      const cleanup = () => {
+        // REMOVED: if (dropdown && typeof dropdown.close === 'function') dropdown.close(); 
+        // Reason: This caused the infinite recursion.
+        
+        try {
+          if (dropdown && dropdown.menu && dropdown.menu.parentNode) dropdown.menu.parentNode.removeChild(dropdown.menu);
+        } catch (e) { }
+        try { if (btn && btn.parentNode) btn.parentNode.removeChild(btn); } catch (e) { }
+      };
+
       const dropdown = new Dropdown(btn, items, {
         onChange: (val) => {
           try {
@@ -1860,7 +1872,13 @@ export function initMapPopup({
               updateMarkerPointerEvents();
             }
           } finally {
-            cleanup();
+            // 2. Call close() here to trigger the wrapper (which calls cleanup)
+            // If the Dropdown class auto-closes on change, this might be redundant but safe with the fix above.
+            if (dropdown && typeof dropdown.close === 'function') {
+                dropdown.close(); 
+            } else {
+                cleanup();
+            }
           }
         }
       });
@@ -1871,23 +1889,12 @@ export function initMapPopup({
         if (first) first.style.color = 'red';
       } catch (e) { }
 
-      // 當選單關閉時做清理（移除臨時按鈕與選單 DOM）
-      const cleanup = () => {
-        try {
-          if (dropdown && typeof dropdown.close === 'function') dropdown.close();
-        } catch (e) { }
-        try {
-          if (dropdown && dropdown.menu && dropdown.menu.parentNode) dropdown.menu.parentNode.removeChild(dropdown.menu);
-        } catch (e) { }
-        try { if (btn && btn.parentNode) btn.parentNode.removeChild(btn); } catch (e) { }
-      };
-
-      // 包裝 close 以確保一旦關閉就清理
+      // 3. The wrapper handles calling the original close AND cleanup
       try {
         const origClose = dropdown.close.bind(dropdown);
         dropdown.close = function () {
-          origClose();
-          cleanup();
+          origClose(); // Close logical state
+          cleanup();   // Remove DOM elements
         };
       } catch (e) { }
 

@@ -17,19 +17,25 @@ export function showMessageBox({
   customButtons = [] // array of { text, callback }
 } = {}) {
   const popup = document.createElement('div');
-  popup.className = 'map-popup modal-popup';
+  // [修改] 將 map-popup 改為 general-popup
+  popup.className = 'general-popup modal-popup';
   popup.style.width = `${width}px`;
 
   const dragBar = document.createElement('div');
-  dragBar.className = 'popup-drag-bar';
+  // [修改] 將 popup-drag-bar 改為 general-popup-header
+  dragBar.className = 'general-popup-header';
+  
   if (title) {
     const titleSpan = document.createElement('span');
-    titleSpan.className = 'popup-title';
+    // [修改] 將 popup-title 改為 general-popup-title
+    titleSpan.className = 'general-popup-title';
     titleSpan.textContent = title;
     dragBar.appendChild(titleSpan);
   }
+  
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'popup-close-btn';
+  // [修改] 將 popup-close-btn 改為 general-popup-close
+  closeBtn.className = 'general-popup-close';
   closeBtn.title = 'Close';
   closeBtn.innerHTML = '&times;';
   dragBar.appendChild(closeBtn);
