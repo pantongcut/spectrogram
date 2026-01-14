@@ -1789,13 +1789,6 @@ input.tag-button.editing {
   display: none;
 }
 
-#map {
-  width: 100%;
-  height: calc(100% - 31px);
-  border-radius: 0 0 8px 8px;
-  position: relative;
-}
-
 /* === Message Box === */
 .general-popup {
   position: absolute; /* modal-popup class 會將其覆蓋為 fixed 並置中 */

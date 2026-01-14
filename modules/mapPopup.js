@@ -24,7 +24,16 @@ export function initMapPopup({
   const minBtn = popup.querySelector('.popup-min-btn');
   const maxBtn = popup.querySelector('.popup-max-btn');
   const loadedHabitatsCache = {};
+
   if (!btn || !popup || !mapDiv) return;
+  popup.style.overflow = 'hidden';
+  mapDiv.style.outline = 'none';
+  popup.addEventListener('keydown', (e) => {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
+      e.preventDefault();
+    }
+  });
+
   mapDiv.style.cursor = 'default';
 
   const edgeThreshold = 5;
@@ -484,7 +493,9 @@ export function initMapPopup({
   });
 
   function createMap(lat, lon) {
-    map = L.map(mapDiv).setView([lat, lon], 13);
+    map = L.map(mapDiv, { 
+      keyboard: false 
+    }).setView([lat, lon], 13);
     
     // 確保訊息元素已被建立
     createFloatingMessage();
@@ -1984,6 +1995,8 @@ export function initMapPopup({
   function fitAllMarkers() {
     if (!map) return;
 
+    map.invalidateSize(true);
+
     // 收集所有可見的 markers 的座標
     const allCoords = [];
 
@@ -1999,7 +2012,7 @@ export function initMapPopup({
       allCoords.push([latlng.lat, latlng.lng]);
     });
 
-    // 3. 添加 survey point markers
+    // 3. 添加 survey point markers（如果 clustering manager 存在）
     if (clusterManager && clusterManager.currentVisibleMarkers) {
       clusterManager.currentVisibleMarkers.forEach(marker => {
         try {
@@ -2010,14 +2023,14 @@ export function initMapPopup({
     }
 
     // --- 新增: 4. 添加 KML Polylines 的座標 ---
-    if (kmlPolylines && kmlPolylines.length > 0) {
+    if (typeof kmlPolylines !== 'undefined' && kmlPolylines.length > 0) {
       kmlPolylines.forEach(line => {
         const latlngs = line.getLatLngs();
+        // Leaflet Polyline 可能是單層或多層陣列
         latlngs.forEach(latlng => {
-            // Leaflet 的 Polyline 可能是多維陣列 (MultiPolyline)，這裡做個簡單檢查
             if (latlng.lat && latlng.lng) {
                 allCoords.push([latlng.lat, latlng.lng]);
-            } else if (Array.isArray(latlng)) {
+            } else if (Array.isArray(latlng)) { // 處理 MultiPolyline
                 latlng.forEach(pt => {
                     if (pt.lat && pt.lng) allCoords.push([pt.lat, pt.lng]);
                 });
@@ -2027,7 +2040,7 @@ export function initMapPopup({
     }
     // ----------------------------------------
 
-    // 如果有座標，自動 fit bounds
+    // 如果有任何座標（Marker 或 KML），自動 fit bounds
     if (allCoords.length > 0) {
       try {
         map.fitBounds(allCoords, { padding: [50, 50], animate: true });
@@ -2035,7 +2048,7 @@ export function initMapPopup({
         console.error('[MapPopup] Error fitting bounds:', e);
       }
     } else {
-       // 如果完全沒有任何標記，也沒有 KML，則回到預設香港視角 (避免 World Map)
+       // 如果完全沒有任何內容，回到預設香港視角
        const HK_CENTER = [22.28552, 114.15769];
        map.setView(HK_CENTER, 13);
     }
@@ -2092,55 +2105,69 @@ export function initMapPopup({
 
   function updateMap() {
     const idx = getCurrentIndex();
+    
+    // --- 情境 A: 沒有選中任何檔案 (idx < 0) ---
     if (idx < 0) {
-      refreshMarkers();
       hideNoCoordMessage();
-      const list = getFileList();
-      const HK_BOUNDS = [[21.8, 113.8], [22.7, 114.5]]; // [southWestLat, southWestLng], [northEastLat, northEastLng]
-      const HK_CENTER = [22.28552, 114.15769]; // approximate center of Hong Kong
+      const HK_CENTER = [22.28552, 114.15769];
 
+      // 修正 1: 確保地圖已建立 (否則 refreshMarkers 無效)
       if (!map) {
         createMap(HK_CENTER[0], HK_CENTER[1]);
       }
-
-      if (!list || list.length === 0) {
-        try {
-          map.fitBounds(HK_BOUNDS);
-        } catch (e) {
-          map.setView(HK_CENTER, DEFAULT_ZOOM);
-        }
-      }
+      
+      // 修正 2: 地圖建立後再更新 Markers
+      refreshMarkers();
+      
+      // 修正 3: 自動縮放至所有內容 (含 KML)
+      fitAllMarkers();
 
       showDeviceLocation();
       return;
     }
+
     const meta = getFileMetadata(idx);
     const lat = parseFloat(meta.latitude);
     const lon = parseFloat(meta.longitude);
-    
+
+    // --- 情境 B: 有檔案但沒有座標 (NaN) ---
     if (isNaN(lat) || isNaN(lon)) {
+      // 修正 4: 即使沒座標，也要建立地圖以顯示其他內容
+      if (!map) {
+         const HK_CENTER = [22.28552, 114.15769];
+         createMap(HK_CENTER[0], HK_CENTER[1]);
+      }
+
       refreshMarkers();
       showNoCoordMessage();
       
-      // --- 新增: 雖然這個檔案沒座標，但嘗試縮放到其他存在的標記或 KML ---
-      if (map) {
-        fitAllMarkers();
-      }
-      // -------------------------------------------------------------
-      
+      // 修正 5: 嘗試縮放到 KML 或其他 Marker
+      setTimeout(() => {
+          fitAllMarkers();
+      }, 100);
       return;
     }
+
+    // --- 情境 C: 正常有座標檔案 ---
     hideNoCoordMessage();
 
     if (!map) {
       createMap(lat, lon);
+      refreshMarkers();
+      setTimeout(() => {
+          fitAllMarkers();
+      }, 100); // 延遲 100ms
+      return;
     } else {
+      // 如果地圖已經存在，則維持原有的行為（聚焦到當前選中的檔案）
       if (popup.style.display !== 'block') {
         map.setView([lat, lon], DEFAULT_ZOOM);
       } else {
         map.setView([lat, lon]);
       }
     }
+    
+    // 更新標記 (針對 map 已存在的情況)
     refreshMarkers();
   }
 
