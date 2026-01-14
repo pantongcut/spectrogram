@@ -175,7 +175,29 @@ export function initSidebar({ onFileSelected } = {}) {
     // 等待瀏覽器渲染完成後執行 scroll (預設行為)
     if (activeItem && doScroll) {
       requestAnimationFrame(() => {
-        activeItem.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        const container = fileListUl;
+        
+        // --- 修正開始 ---
+        // 1. 取得 item 相對於 offsetParent (可能是 body 或 sidebar) 的距離
+        const itemPageTop = activeItem.offsetTop;
+        
+        // 2. 取得 container 相對於同一個 offsetParent 的距離
+        const containerPageTop = container.offsetTop;
+        
+        // 3. 相減，得到 item 相對於 container 頂部的真實距離 (這才是我們要的數值)
+        const itemRelativeTop = itemPageTop - containerPageTop;
+
+        const itemHeight = activeItem.offsetHeight;
+        const containerHeight = container.clientHeight;
+        
+        // 4. 套用置中公式
+        const targetScrollTop = itemRelativeTop - (containerHeight / 2) + (itemHeight / 2);
+        // --- 修正結束 ---
+
+        container.scrollTo({
+          top: targetScrollTop,
+          behavior: 'smooth'
+        });
       });
     }
   }
