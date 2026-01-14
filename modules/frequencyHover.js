@@ -211,6 +211,10 @@ export function initFrequencyHover({
 
   const selectionTimeInfo = document.getElementById('selection-time-info');
 
+  if (selectionTimeInfo) {
+    selectionTimeInfo.style.display = 'none';
+  }
+
   function showSelectionTimeInfo(startMs, endMs) {
     const timeExp = getTimeExpansionMode();
     const s = Math.min(startMs, endMs);
