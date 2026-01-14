@@ -1599,6 +1599,30 @@ function createBtnGroup(sel, isShortSelection = false) {
     });
   }
 
+  function smoothScrollTo(element, target, duration) {
+    const start = element.scrollLeft;
+    const change = target - start;
+    const startTime = performance.now();
+
+    function animate(currentTime) {
+      const elapsed = currentTime - startTime;
+      
+      if (elapsed < duration) {
+        // 使用 Ease-in-out 緩動公式，讓動畫起步和結束較慢，中間較快
+        const t = elapsed / duration;
+        const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        
+        element.scrollLeft = start + (change * ease);
+        requestAnimationFrame(animate);
+      } else {
+        // 確保最後準確停在目標位置
+        element.scrollLeft = target;
+      }
+    }
+    
+    requestAnimationFrame(animate);
+  }
+
   function highlightSelection(index) {
     // 1. 移除舊的高亮
     selections.forEach(sel => {
@@ -1607,11 +1631,9 @@ function createBtnGroup(sel, isShortSelection = false) {
 
     if (index === null || index === undefined || index < 0) return;
 
-    // 2. 確保順序與 Table 一致
     const sortedSelections = selections.slice().sort((a, b) => a.data.startTime - b.data.startTime);
-
-    // 3. 添加高亮並安全滾動
     const targetSel = sortedSelections[index];
+
     if (targetSel && targetSel.rect) {
       targetSel.rect.classList.add('selection-box-highlighted');
       
@@ -1619,12 +1641,16 @@ function createBtnGroup(sel, isShortSelection = false) {
       const elementWidth = targetSel.rect.offsetWidth;
       const viewerWidth = viewer.clientWidth;
       
-      const targetScrollLeft = elementLeft + (elementWidth / 2) - (viewerWidth / 2);
+      // 計算目標位置
+      let targetScrollLeft = elementLeft + (elementWidth / 2) - (viewerWidth / 2);
       
-      viewer.scrollTo({
-        left: targetScrollLeft,
-        behavior: 'smooth'
-      });
+      // 邊界檢查：確保不會滾動到負數或超過最大寬度
+      const maxScroll = viewer.scrollWidth - viewer.clientWidth;
+      targetScrollLeft = Math.max(0, Math.min(targetScrollLeft, maxScroll));
+      
+      
+      // 使用 500ms 的動畫時間 (您可以依喜好調整數字)
+      smoothScrollTo(viewer, targetScrollLeft, 500);
     }
   }
 

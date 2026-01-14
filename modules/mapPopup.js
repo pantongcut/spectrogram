@@ -1591,9 +1591,31 @@ export function initMapPopup({
     if (!file) return;
     const text = await file.text();
     const lines = parseKml(text);
+
+    // --- FIX START: Ensure map exists before adding layers ---
+    if (!map) {
+      let centerLat = 22.28552; // Default HK Lat
+      let centerLon = 114.15769; // Default HK Lon
+
+      // Try to use the first point from the KML as the initialization center
+      let found = false;
+      for (const line of lines) {
+        if (line.length > 0) {
+          centerLat = line[0][0];
+          centerLon = line[0][1];
+          found = true;
+          break;
+        }
+      }
+      // Initialize the map
+      createMap(centerLat, centerLon);
+    }
+    // --- FIX END ---
+
     clearKmlRoute();
     const allCoords = [];
     lines.forEach(coords => {
+      // Now 'map' is guaranteed to exist, so .addTo(map) won't crash
       const line = L.polyline(coords, {
         color: 'deeppink',
         weight: 2,
@@ -1965,19 +1987,19 @@ export function initMapPopup({
     // 收集所有可見的 markers 的座標
     const allCoords = [];
 
-    // 添加主要 markers
+    // 1. 添加主要 markers
     markers.forEach(marker => {
       const latlng = marker.getLatLng();
       allCoords.push([latlng.lat, latlng.lng]);
     });
 
-    // 添加 text markers
+    // 2. 添加 text markers
     textMarkers.forEach(marker => {
       const latlng = marker.getLatLng();
       allCoords.push([latlng.lat, latlng.lng]);
     });
 
-    // 添加 survey point markers（如果 clustering manager 存在）
+    // 3. 添加 survey point markers
     if (clusterManager && clusterManager.currentVisibleMarkers) {
       clusterManager.currentVisibleMarkers.forEach(marker => {
         try {
@@ -1987,13 +2009,35 @@ export function initMapPopup({
       });
     }
 
-    // 如果有 markers，自動 fit bounds
+    // --- 新增: 4. 添加 KML Polylines 的座標 ---
+    if (kmlPolylines && kmlPolylines.length > 0) {
+      kmlPolylines.forEach(line => {
+        const latlngs = line.getLatLngs();
+        latlngs.forEach(latlng => {
+            // Leaflet 的 Polyline 可能是多維陣列 (MultiPolyline)，這裡做個簡單檢查
+            if (latlng.lat && latlng.lng) {
+                allCoords.push([latlng.lat, latlng.lng]);
+            } else if (Array.isArray(latlng)) {
+                latlng.forEach(pt => {
+                    if (pt.lat && pt.lng) allCoords.push([pt.lat, pt.lng]);
+                });
+            }
+        });
+      });
+    }
+    // ----------------------------------------
+
+    // 如果有座標，自動 fit bounds
     if (allCoords.length > 0) {
       try {
         map.fitBounds(allCoords, { padding: [50, 50], animate: true });
       } catch (e) {
         console.error('[MapPopup] Error fitting bounds:', e);
       }
+    } else {
+       // 如果完全沒有任何標記，也沒有 KML，則回到預設香港視角 (避免 World Map)
+       const HK_CENTER = [22.28552, 114.15769];
+       map.setView(HK_CENTER, 13);
     }
   }
 
@@ -2073,9 +2117,17 @@ export function initMapPopup({
     const meta = getFileMetadata(idx);
     const lat = parseFloat(meta.latitude);
     const lon = parseFloat(meta.longitude);
+    
     if (isNaN(lat) || isNaN(lon)) {
       refreshMarkers();
       showNoCoordMessage();
+      
+      // --- 新增: 雖然這個檔案沒座標，但嘗試縮放到其他存在的標記或 KML ---
+      if (map) {
+        fitAllMarkers();
+      }
+      // -------------------------------------------------------------
+      
       return;
     }
     hideNoCoordMessage();
