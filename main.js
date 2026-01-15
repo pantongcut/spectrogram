@@ -37,10 +37,10 @@ import { initSidebar } from './modules/sidebar.js';
 import { initTagControl } from './modules/tagControl.js';
 import { initDropdown } from './modules/dropdown.js';
 import { showMessageBox } from './modules/messageBox.js';
-// Auto Id Panel import Removed
 import { initFreqContextMenu } from './modules/freqContextMenu.js';
 import { initPeakControl, isPeakModeActive, getPeakThreshold } from './modules/peakControl.js';
 import { initAutoDetectionControl } from './modules/autoDetectionControl.js';
+import { defaultDetector } from './modules/batCallDetector.js';
 import { initCallSummaryTable } from './modules/callSummaryTable.js';
 import { getCurrentIndex, getFileList, toggleFileIcon, setFileList, clearFileList, getFileIconState, getFileNote, setFileNote, getFileMetadata, setFileMetadata, clearTrashFiles, getTrashFileCount, getCurrentFile, getTimeExpansionMode, setTimeExpansionMode, toggleTimeExpansionMode } from './modules/fileState.js';
 
@@ -160,6 +160,7 @@ if (isMobileDevice) {
     });
   });
 }
+
 function updateExpandBackBtn() {
   const count = expandHistory.length;
   expandBackBtn.style.display = count > 0 ? 'inline-flex' : 'none';
@@ -1637,6 +1638,21 @@ initPeakControl({
 
 // [NEW 2025] 初始化 Auto Detection Control
 initAutoDetectionControl();
+
+// [NEW 2025] Debug Mode 控制按鈕監聽器
+const debugBtn = document.getElementById('debugBtn');
+if (debugBtn) {
+  debugBtn.addEventListener('click', () => {
+    // 1. 切換按鈕樣式 (active class)
+    const isActive = debugBtn.classList.toggle('active');
+    
+    // 2. 設定 Detector 的 debug 模式
+    defaultDetector.setDebugMode(isActive);
+    
+    // 3. 在 Console 提示當前狀態
+    console.log(`Debug Mode: ${isActive ? 'ON ✓' : 'OFF ✗'}`);
+  });
+}
 
 // Auto ID Initialization Removed
 

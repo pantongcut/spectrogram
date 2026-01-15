@@ -738,7 +738,7 @@ input[type="range"]#peakThresholdSlider {
   column-gap: 12px;
   row-gap: 5px;
   padding: 8px 12px;
-  width: 560px;
+  width: 570px;
   background-color: var(--toolbar-bg);
   border-radius: 20px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -821,6 +821,30 @@ input[type="range"]#peakThresholdSlider {
 
 #auto-detect-tool-bar .secondary-btn i {
   font-size: 14px;
+}
+
+/* Debug Button Active State (除錯模式開啟) */
+#debugBtn.active {
+  background-color: #e67e22; /* 橘色，表示除錯模式開啟 */
+  color: white;
+  box-shadow: inset 0 0 5px rgba(0,0,0,0.3), 0 0 8px rgba(230,126,34,0.5);
+}
+
+#debugBtn.active:hover {
+  background-color: #d35400;
+  box-shadow: inset 0 0 5px rgba(0,0,0,0.3), 0 0 10px rgba(230,126,34,0.7);
+}
+
+/* Light Mode 下的 Debug Button Active 狀態 */
+body.light-mode #debugBtn.active {
+  background-color: #d35400;
+  color: white;
+  box-shadow: inset 0 0 5px rgba(0,0,0,0.2), 0 0 8px rgba(211,84,0,0.5);
+}
+
+body.light-mode #debugBtn.active:hover {
+  background-color: #c85f00;
+  box-shadow: inset 0 0 5px rgba(0,0,0,0.2), 0 0 10px rgba(211,84,0,0.7);
 }
 
 /* 當 tool-bar 和 auto-detect-tool-bar 都開啟時 */
