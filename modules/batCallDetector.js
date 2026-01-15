@@ -803,6 +803,12 @@ export class BatCallDetector {
           continue;
         }
 
+        // [NEW] Discard calls with duration <= 1ms (Do not create selection box)
+        if (call.duration_ms <= 1.0) {
+            if (this.debugMode) console.log(`[AutoDetect] Discarding short call: ${call.duration_ms.toFixed(2)}ms`);
+            continue;
+        }
+
         // Classify
         call.Flow = call.lowFreq_kHz * 1000;
         call.Fhigh = call.highFreq_kHz;
@@ -1197,7 +1203,7 @@ export class BatCallDetector {
 
       call.calculateDuration();
 
-      if (call.duration_ms < this.config.minCallDuration_ms) {
+      if (call.duration_ms <= 1.0 || call.duration_ms < this.config.minCallDuration_ms) {
         return null;
       }
 
@@ -2684,10 +2690,10 @@ export class BatCallDetector {
           logRow['Signal (dB)'] = currentLowFreqPower_dB.toFixed(2);
 
           // ----------------------------------------------------------------
-          // Hard Stop > 5kHz (Immediate Revert)
+          // Hard Stop > 8kHz (Immediate Revert)
           // ----------------------------------------------------------------
-          if (jumpDiff > 5.0) {
-            logRow['Judgment'] = 'Hard Stop > 5kHz (Large Jump)';
+          if (jumpDiff > 8.0) {
+            logRow['Judgment'] = 'Hard Stop > 8kHz (Large Jump)';
 
             hitNoiseFloor = true;
 

@@ -49,9 +49,9 @@ body.light-mode {
   --dragbar-bg: #ffffff;
   --dragbar-icon-color: #222222;
   --moon-icon-color: #ffffff;
-  --scrollbar-track: #ffffff;
-  --scrollbar-thumb: #ccc;
-  --scrollbar-thumb-hover: #999;
+  --scrollbar-track: #ffffff00;
+  --scrollbar-thumb: #a0a0a0;
+  --scrollbar-thumb-hover: #6f6f6f;
   --table-bg:#ffffff;
   --table-selected-bg: #fff3cd; 
   --table-selected-border: #ffc107;
@@ -90,6 +90,7 @@ html, body {
 ::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
   border-radius: 0px; /* 如果想要圓角軌道可改這裡 */
+  transition: background 0.3s;
 }
 
 /* 設定滑塊 (Thumb) 的樣式 */
@@ -100,12 +101,14 @@ html, body {
   /* 關鍵技巧：使用 border 來製造滑塊與軌道間的空隙，讓它看起來更像懸浮的 */
   border: 1px solid var(--scrollbar-track);
   background-clip: content-box;
+  transition: background-color 0.3s;
 }
 
 /* 設定滑塊 Hover 時的樣式 */
 ::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-thumb-hover);
   border: 1px solid var(--scrollbar-track); /* 保持邊框一致 */
+  transition: background-color 0.3s;
 }
 
 /* 處理角落 (當垂直與水平卷軸同時出現時的交界處) */
